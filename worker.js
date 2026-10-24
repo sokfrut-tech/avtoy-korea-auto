@@ -1,6 +1,73 @@
 export default {
  async fetch(request, env) {
   const url = new URL(request.url);
+
+  // Telegram bot webhook. Configure TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID and
+  // TELEGRAM_WEBHOOK_SECRET as Cloudflare Worker secrets/variables.
+  if (request.method === "POST" && url.pathname === "/telegram/webhook") {
+   const expectedSecret = env.TELEGRAM_WEBHOOK_SECRET;
+   const suppliedSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+   if (!expectedSecret || suppliedSecret !== expectedSecret) {
+    return new Response("Unauthorized", { status: 401 });
+   }
+   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
+    return new Response("Bot configuration missing", { status: 503 });
+   }
+   let update;
+   try { update = await request.json(); } catch {
+    return new Response("Bad Request", { status: 400 });
+   }
+   const msg = update.message;
+   if (!msg || !msg.chat || !msg.chat.id) return Response.json({ ok: true });
+   const chatId = String(msg.chat.id);
+   const text = String(msg.text || "").trim();
+   const adminId = String(env.TELEGRAM_CHAT_ID);
+   const api = async (method, payload) => {
+    const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+     method: "POST",
+     headers: { "content-type": "application/json" },
+     body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error("Telegram API request failed");
+    return response.json();
+   };
+   const send = (target, body) => api("sendMessage", {
+    chat_id: target, text: body, disable_web_page_preview: true
+   });
+   try {
+    if (text.startsWith("/reply") && chatId === adminId) {
+     const match = text.match(/^\/reply\s+(-?\d+)\s+([\s\S]+)$/);
+     if (!match) {
+      await send(chatId, "Формат ответа: /reply CHAT_ID текст сообщения");
+     } else {
+      await send(match[1], match[2]);
+      await send(chatId, "Ответ отправлен.");
+     }
+    } else if (text === "/start" || text.startsWith("/start ")) {
+     await send(chatId, "Здравствуйте! Это AVTOY KOREA 🚘\n\nПомогаем с подбором автомобилей из Кореи, Китая и ОАЭ.\n\nКоманды:\n/countries — страны покупки\n/catalog — как проходит подбор\n/contact — оставить заявку\n/help — помощь\n\nНапишите, какой автомобиль ищете, и мы передадим запрос менеджеру.");
+     if (chatId !== adminId) {
+      await send(adminId, "👋 Новый пользователь бота AVTOY KOREA\nИмя: " + String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано") + "\nChat ID: " + chatId);
+     }
+    } else if (text === "/help") {
+     await send(chatId, "Напишите марку и модель, бюджет и страну покупки. Чтобы обратиться к менеджеру, просто отправьте сообщение сюда. Команда для администратора: /reply CHAT_ID текст сообщения.");
+    } else if (text === "/countries") {
+     await send(chatId, "🌍 Подбираем автомобили из:\n🇰🇷 Южной Кореи\n🇨🇳 Китая\n🇦🇪 ОАЭ\n\nНапишите, какая страна вас интересует.");
+    } else if (text === "/catalog") {
+     await send(chatId, "🚘 Как проходит подбор AVTOY KOREA:\n1. Уточняем бюджет и пожелания.\n2. Ищем подходящие варианты.\n3. Обсуждаем проверку, покупку и доставку.\n\nГотового каталога объявлений пока нет — напишите желаемую марку, модель и бюджет, и менеджер поможет с подбором.");
+    } else if (text === "/contact") {
+     await send(chatId, "Оставьте сообщение прямо в этом чате или заполните форму на сайте: https://avtoy-korea-auto.sokfrut.workers.dev/\nКанал: https://t.me/avtoYkorea");
+    } else if (text && chatId !== adminId) {
+     const who = String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано");
+     await send(adminId, "📩 Сообщение боту AVTOY KOREA\nОт: " + who + "\nChat ID: " + chatId + "\n\n" + text.slice(0, 3500) + "\n\nОтветить: /reply " + chatId + " текст сообщения");
+     await send(chatId, "Спасибо! Ваше сообщение передано менеджеру. Мы ответим, как только сможем.");
+    } else if (text && chatId === adminId) {
+     await send(chatId, "Для ответа клиенту используйте: /reply CHAT_ID текст сообщения\nChat ID клиента указан в уведомлении.");
+    }
+   } catch {
+    return new Response("Telegram processing failed", { status: 502 });
+   }
+   return Response.json({ ok: true });
+  }
   if (request.method === "POST" && url.pathname === "/api/request") {
    let d;
    try { d = await request.json(); } catch { return Response.json({ok:false,error:"Некорректные данные"},{status:400}); }
