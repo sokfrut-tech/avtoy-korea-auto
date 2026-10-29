@@ -24,9 +24,28 @@ jobs:
         with:
           node-version: 22
 
-      - name: Deploy website and Telegram webhook
+      - name: Check Worker syntax
+        run: node --input-type=module --check < worker.js
+
+      - name: Verify Cloudflare deployment secrets
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CF_API_TOKEN" ]; then
+            echo "::error::Missing GitHub Actions secret CLOUDFLARE_API_TOKEN. Add it in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          if [ -z "$CF_ACCOUNT_ID" ]; then
+            echo "::error::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID. Add it in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "Cloudflare deployment secrets are present."
+
+      - name: Deploy website Worker
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
           command: deploy worker.js --name avtoy-korea-auto
