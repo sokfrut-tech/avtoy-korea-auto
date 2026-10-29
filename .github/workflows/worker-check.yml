@@ -1,0 +1,30 @@
+name: Cloudflare Worker checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker.js"
+      - "worker.test.mjs"
+      - ".github/workflows/worker-check.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "worker.js"
+      - "worker.test.mjs"
+      - ".github/workflows/worker-check.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check Worker syntax
+        run: node --input-type=module --check < worker.js
+      - name: Test private admin routing
+        run: node --experimental-default-type=module --test worker.test.mjs

@@ -1,8 +1,16 @@
 export default {
  async fetch(request, env) {
   const url = new URL(request.url);
+  // Admins must be private Telegram user IDs (positive numbers), comma- or space-separated.
+  // TELEGRAM_CHAT_ID remains as a legacy fallback for one private admin only.
+  const adminIds = [...new Set(
+   String(env.TELEGRAM_ADMIN_IDS || env.TELEGRAM_ADMIN_USER_ID || env.TELEGRAM_CHAT_ID || "")
+    .split(/[\s,]+/)
+    .map(id => id.trim())
+    .filter(id => /^\d+$/.test(id) && Number(id) > 0)
+  )];
 
-  // Telegram bot webhook. Configure TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID and
+  // Telegram bot webhook. Configure TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_IDS and
   // TELEGRAM_WEBHOOK_SECRET as Cloudflare Worker secrets/variables.
   if (request.method === "POST" && url.pathname === "/telegram/webhook") {
    const expectedSecret = env.TELEGRAM_WEBHOOK_SECRET;
@@ -10,7 +18,7 @@ export default {
    if (!expectedSecret || suppliedSecret !== expectedSecret) {
     return new Response("Unauthorized", { status: 401 });
    }
-   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
+   if (!env.TELEGRAM_BOT_TOKEN || adminIds.length === 0) {
     return new Response("Bot configuration missing", { status: 503 });
    }
    let update;
@@ -19,9 +27,10 @@ export default {
    }
    const msg = update.message;
    if (!msg || !msg.chat || !msg.chat.id) return Response.json({ ok: true });
+   // Ignore groups/channels completely: client and admin conversations stay private.
+   if (msg.chat.type !== "private") return Response.json({ ok: true });
    const chatId = String(msg.chat.id);
    const text = String(msg.text || "").trim();
-   const adminId = String(env.TELEGRAM_CHAT_ID);
    const api = async (method, payload) => {
     const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
      method: "POST",
@@ -35,7 +44,7 @@ export default {
     chat_id: target, text: body, disable_web_page_preview: true
    });
    try {
-    if (text.startsWith("/reply") && chatId === adminId) {
+    if (text.startsWith("/reply") && adminIds.includes(chatId)) {
      const match = text.match(/^\/reply\s+(-?\d+)\s+([\s\S]+)$/);
      if (!match) {
       await send(chatId, "Формат ответа: /reply CHAT_ID текст сообщения");
@@ -45,8 +54,9 @@ export default {
      }
     } else if (text === "/start" || text.startsWith("/start ")) {
      await send(chatId, "Здравствуйте! Это AVTOY KOREA 🚘\n\nПомогаем с подбором автомобилей из Кореи, Китая и ОАЭ.\n\nКоманды:\n/countries — страны покупки\n/catalog — как проходит подбор\n/contact — оставить заявку\n/help — помощь\n\nНапишите, какой автомобиль ищете, и мы передадим запрос менеджеру.");
-     if (chatId !== adminId) {
-      await send(adminId, "👋 Новый пользователь бота AVTOY KOREA\nИмя: " + String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано") + "\nChat ID: " + chatId);
+     if (!adminIds.includes(chatId)) {
+      const notice = "👋 Новый пользователь бота AVTOY KOREA\nИмя: " + String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано") + "\nChat ID: " + chatId;
+      await Promise.all(adminIds.map(id => send(id, notice)));
      }
     } else if (text === "/help") {
      await send(chatId, "Напишите марку и модель, бюджет и страну покупки. Чтобы обратиться к менеджеру, просто отправьте сообщение сюда. Команда для администратора: /reply CHAT_ID текст сообщения.");
@@ -56,11 +66,12 @@ export default {
      await send(chatId, "🚘 Как проходит подбор AVTOY KOREA:\n1. Уточняем бюджет и пожелания.\n2. Ищем подходящие варианты.\n3. Обсуждаем проверку, покупку и доставку.\n\nГотового каталога объявлений пока нет — напишите желаемую марку, модель и бюджет, и менеджер поможет с подбором.");
     } else if (text === "/contact") {
      await send(chatId, "Оставьте сообщение прямо в этом чате или заполните форму на сайте: https://avtoy-korea-auto.sokfrut.workers.dev/\nКанал: https://t.me/avtoYkorea");
-    } else if (text && chatId !== adminId) {
+    } else if (text && !adminIds.includes(chatId)) {
      const who = String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано");
-     await send(adminId, "📩 Сообщение боту AVTOY KOREA\nОт: " + who + "\nChat ID: " + chatId + "\n\n" + text.slice(0, 3500) + "\n\nОтветить: /reply " + chatId + " текст сообщения");
+     const notice = "📩 Сообщение боту AVTOY KOREA\nОт: " + who + "\nChat ID: " + chatId + "\n\n" + text.slice(0, 3500) + "\n\nОтветить: /reply " + chatId + " текст сообщения";
+     await Promise.all(adminIds.map(id => send(id, notice)));
      await send(chatId, "Спасибо! Ваше сообщение передано менеджеру. Мы ответим, как только сможем.");
-    } else if (text && chatId === adminId) {
+    } else if (text && adminIds.includes(chatId)) {
      await send(chatId, "Для ответа клиенту используйте: /reply CHAT_ID текст сообщения\nChat ID клиента указан в уведомлении.");
     }
    } catch {
@@ -75,9 +86,17 @@ export default {
    const f = {name:clean(d.name,100),contact:clean(d.contact,150),model:clean(d.model,150),budget:clean(d.budget,100),country:clean(d.country,80),year:clean(d.year,30),purpose:clean(d.purpose,100),details:clean(d.details,1000)};
    if (!f.name || !f.contact) return Response.json({ok:false,error:"Укажите имя и контакт для связи."},{status:400});
    const message = ["🚘 Новая заявка AVTOY KOREA","",`Имя: ${f.name}`,`Контакт: ${f.contact}`,`Марка / модель: ${f.model||"не указано"}`,`Бюджет: ${f.budget||"не указан"}`,`Страна: ${f.country||"не указана"}`,`Год от: ${f.year||"не указан"}`,`Тема обращения: ${f.purpose||"Подбор автомобиля"}`,`Пожелания: ${f.details||"нет"}`].join("\n");
-   if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
-    const r = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:env.TELEGRAM_CHAT_ID,text:message})});
-    if (!r.ok) return Response.json({ok:false,error:"Не удалось отправить заявку в Telegram."},{status:502});
+   if (env.TELEGRAM_BOT_TOKEN && adminIds.length) {
+    const deliveries = await Promise.all(adminIds.map(async chat_id => {
+     try {
+      const r = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id,text:message})});
+      const payload = await r.json().catch(() => null);
+      return r.ok && payload && payload.ok === true;
+     } catch {
+      return false;
+     }
+    }));
+    if (deliveries.some(ok => !ok)) return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
     return Response.json({ok:true});
    }
    return Response.json({ok:true,telegramText:message,setupNeeded:true});
