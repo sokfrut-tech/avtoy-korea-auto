@@ -98,6 +98,40 @@ async function handleReviewCallback(callback, env, adminIds) {
  return answer("Опубликовано на сайте");
 }
 
+// --- Автомобили из Telegram-канала: публикация только после одобрения ---
+async function handleCarPost(post, env, adminIds) {
+ const chat = post.chat || {};
+ if (String(chat.username || "").toLowerCase() !== "avtoyKorea".toLowerCase()) return;
+ const caption = String(post.caption || post.text || "").trim().slice(0, 3000);
+ const photos = Array.isArray(post.photo) ? post.photo : [];
+ const fileId = photos.length ? photos[photos.length - 1].file_id : null;
+ if (!caption && !fileId) return;
+ if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return; }
+ const id = "car_" + String(chat.id).replace(/-/g,"") + "_" + String(post.message_id);
+ const car = {id,caption,fileId,sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id,createdAt:new Date().toISOString()};
+ await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
+ const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}]]};
+ await Promise.all(adminIds.map(async adminId => {
+  if (fileId) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:fileId});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 Объявление из канала AVTOY KOREA\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
+ }));
+}
+
+async function handleCarCallback(callback, env, adminIds) {
+ const answer = (text, alert=false) => callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
+ const fromId = String((callback.from && callback.from.id) || "");
+ if (!adminIds.includes(fromId)) return answer("Нет доступа",true);
+ const match = String(callback.data || "").match(/^car(pub|rej):(car_-?\\d+_\\d+)$/);
+ if (!match || !env.REVIEWS) return answer("Объявление не найдено",true);
+ const action = match[1], id = match[2];
+ const raw = await env.REVIEWS.get("car_pending:" + id);
+ if (!raw) return answer("Объявление уже обработано или не найдено",true);
+ const car = JSON.parse(raw);
+ if (action === "rej") { await env.REVIEWS.delete("car_pending:" + id); return answer("Объявление отклонено"); }
+ await env.REVIEWS.put("car_approved:" + id,JSON.stringify({...car,publishedAt:new Date().toISOString()}));
+ await env.REVIEWS.delete("car_pending:" + id);
+ return answer("Автомобиль опубликован на сайте");
+}
 // --- Заявки с сайта: карточка администраторам, кнопка «Принять в работу», ответ клиенту в Telegram ---
 async function handleOrderCallback(callback, env, adminIds) {
  const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
@@ -154,10 +188,13 @@ export default {
     const cb = update.callback_query;
     try {
      if (String(cb.data || "").startsWith("ord:")) await handleOrderCallback(cb, env, adminIds);
+     else if (String(cb.data || "").startsWith("car")) await handleCarCallback(cb, env, adminIds);
      else await handleReviewCallback(cb, env, adminIds);
     } catch { return new Response("Telegram processing failed", { status: 502 }); }
     return Response.json({ ok: true });
    }
+   const channelPost = update.channel_post;
+   if (channelPost) { try { await handleCarPost(channelPost, env, adminIds); } catch { return new Response("Telegram car processing failed", {status:502}); } return Response.json({ok:true}); }
    const msg = update.message;
    if (!msg || !msg.chat || !msg.chat.id) return Response.json({ ok: true });
    // Groups/channels: only the one review group, only /review messages. Everything else is ignored.
@@ -264,6 +301,25 @@ export default {
     return Response.json({ok:true});
    }
    return Response.json({ok:true,telegramText:message,setupNeeded:true});
+  }
+  if (request.method === "GET" && url.pathname === "/api/cars") {
+   const cars = [];
+   if (env.REVIEWS) {
+    const list = await env.REVIEWS.list({prefix:"car_approved:"});
+    for (const key of list.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); cars.push({id:car.id,caption:car.caption,media:car.fileId ? "/api/car-media/" + car.id : null,sourceUrl:car.sourceUrl || "",publishedAt:car.publishedAt}); }
+   }
+   cars.sort((a,b)=>String(b.publishedAt||"").localeCompare(String(a.publishedAt||"")));
+   return Response.json({cars},{headers:{"cache-control":"no-store"}});
+  }
+  const carMediaMatch = url.pathname.match(/^\\/api\\/car-media\\/(car_-?\\d+_\\d+)$/);
+  if (request.method === "GET" && carMediaMatch) {
+   if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found",{status:404});
+   const raw = await env.REVIEWS.get("car_approved:" + carMediaMatch[1]); if (!raw) return new Response("Not found",{status:404});
+   const car = JSON.parse(raw); if (!car.fileId) return new Response("Not found",{status:404});
+   const info = await callTelegram(env,"getFile",{file_id:car.fileId}).catch(()=>null); const path = info && info.result && info.result.file_path;
+   if (!path) return new Response("Not found",{status:404});
+   const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path); if (!upstream.ok) return new Response("Bad Gateway",{status:502});
+   return new Response(upstream.body,{headers:{"content-type":"image/jpeg","cache-control":"public, max-age=3600","x-content-type-options":"nosniff"}});
   }
   if (request.method === "GET" && url.pathname === "/api/reviews") {
    const reviews = [];
@@ -481,11 +537,7 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
   <div class="eyebrow">Наши автомобили</div>
   <h2>Примеры выполненных заказов</h2>
   <p class="sub">Точная стоимость зависит от курса и условий. Уточняйте у администратора.</p>
-  <div class="cars">
-    <article class="card car-card"><div class="car-photo" role="img" aria-label="Audi Q3" style="background-image:url('https://images.unsplash.com/photo-1617469767053-d3b523a0b982?auto=format&fit=crop&w=900&q=82')"></div><div class="car-body"><h3>Audi Q3 35 TFSI</h3><div class="car-specs">2021 · 1.4 л · 150 л.с. · бензин<br>2WD · пробег 37 000 км · 5 мест</div><div class="car-foot"><div><div class="car-label">Пример расчёта · до Рязани</div><div class="car-price">2 800 000 ₽</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
-    <article class="card car-card"><div class="car-photo" role="img" aria-label="Kia Sportage" style="background-image:url('https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?auto=format&fit=crop&w=900&q=82')"></div><div class="car-body"><h3>Kia Sportage</h3><div class="car-specs">Подбор комплектации и года выпуска под ваш бюджет</div><div class="car-foot"><div><div class="car-label">Под заказ</div><div class="car-price">Рассчитать</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
-    <article class="card car-card"><div class="car-photo" role="img" aria-label="Hyundai Sonata" style="background-image:url('https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=900&q=82')"></div><div class="car-body"><h3>Hyundai Sonata</h3><div class="car-specs">Подбор комплектации и года выпуска под ваш бюджет</div><div class="car-foot"><div><div class="car-label">Под заказ</div><div class="car-price">Рассчитать</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
-  </div>
+  <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Объявления из Telegram появятся после проверки и одобрения администратором.</div></article></div>
 </section>
 <section class="wrap section" id="reviews" style="padding-top:20px">
   <h2>Отзывы наших клиентов</h2>
@@ -547,6 +599,20 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
     card.appendChild(who);card.appendChild(text);list.appendChild(card);
   });
 }).catch(function(){});
+// Каталог показывает только одобренные публикации из Telegram
+fetch('/api/cars',{cache:'no-store'}).then(r=>r.json()).then(data=>{
+ const list=document.getElementById('cars-list'); if(!list || !data.cars || !data.cars.length)return; list.textContent='';
+ data.cars.forEach(car=>{
+  const article=document.createElement('article'); article.className='card car-card';
+  if(car.media){const img=document.createElement('img');img.className='review-media';img.src=car.media;img.alt='Фотография автомобиля';img.loading='lazy';article.appendChild(img)}
+  const body=document.createElement('div');body.className='car-body';
+  const title=document.createElement('h3');title.textContent=(car.caption||'Автомобиль из объявления').split('\n')[0].slice(0,120);
+  const desc=document.createElement('div');desc.className='car-specs';desc.style.display='block';desc.style.whiteSpace='pre-line';desc.textContent=car.caption||'Описание не указано';
+  body.appendChild(title);body.appendChild(desc);
+  if(car.sourceUrl){const a=document.createElement('a');a.className='car-link';a.href=car.sourceUrl;a.target='_blank';a.rel='noopener';a.textContent='Исходная публикация →';body.appendChild(a)}
+  article.appendChild(body);list.appendChild(article);
+ });
+}).catch(()=>{});
 // Плавная смена фотографий в главном блоке
 (function(){
   var slides=document.querySelectorAll('.hero-slide');
