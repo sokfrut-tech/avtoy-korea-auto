@@ -103,3 +103,113 @@ test("legacy negative group ID is rejected instead of used as an admin destinati
     assert.equal(calls.length, 0);
   });
 });
+
+// --- Отзывы ---
+const REVIEW_GROUP = "-1001234567890";
+
+function memoryKV() {
+  const store = new Map();
+  return {
+    async put(k, v) { store.set(k, v); },
+    async get(k) { return store.has(k) ? store.get(k) : null; },
+    async delete(k) { store.delete(k); },
+    async list({ prefix }) { return { keys: [...store.keys()].filter(k => k.startsWith(prefix)).map(name => ({ name })) }; },
+  };
+}
+
+function webhookUpdate(update) {
+  return new Request("https://worker.test/telegram/webhook", {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-Telegram-Bot-Api-Secret-Token": "hook-secret" },
+    body: JSON.stringify(update),
+  });
+}
+
+function reviewEnv(kv) {
+  return { ...env, TELEGRAM_REVIEW_GROUP_ID: REVIEW_GROUP, REVIEWS: kv };
+}
+
+function groupReview(messageId, extra) {
+  return { message_id: messageId, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { first_name: "Ivan" }, ...extra };
+}
+
+function callback(fromId, data) {
+  return { callback_query: { id: "cb" + data, from: { id: fromId }, data } };
+}
+
+test("group messages are ignored when no review group is configured", async () => {
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(webhookUpdate({ message: groupReview(1, { caption: "/review Спасибо!", video: { file_id: "V" } }) }), env);
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 0);
+  });
+});
+
+test("only the configured review group is read, and only /review messages", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 2, chat: { id: -999, type: "supergroup" }, from: { first_name: "X" }, text: "/review Спасибо" } }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: groupReview(3, { text: "просто болтаем" }) }), reviewEnv(kv));
+    assert.equal(calls.length, 0);
+    assert.equal((await kv.list({ prefix: "pending:" })).keys.length, 0);
+  });
+});
+
+test("video review without thanks is shown to admins but cannot be published", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: groupReview(10, { caption: "/review Машина нормальная", video: { file_id: "VID10" } }) }), reviewEnv(kv));
+    const card = calls.find(c => c.method === "sendMessage" && String(c.payload.chat_id) === "111111111");
+    assert.ok(card, "admin receives the card");
+    assert.ok(card.payload.text.includes("Благодарность: ❌ нет"));
+
+    await worker.fetch(webhookUpdate(callback(111111111, "pub:" + REVIEW_GROUP + "_10")), reviewEnv(kv));
+    const denied = calls.filter(c => c.method === "answerCallbackQuery").pop();
+    assert.ok(denied.payload.text.includes("нет благодарности"));
+    assert.equal(denied.payload.show_alert, true);
+    assert.equal((await kv.list({ prefix: "approved:" })).keys.length, 0);
+  });
+});
+
+test("video review with thanks is published and appears on the site API", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate({ message: groupReview(11, { caption: "/review Спасибо большое за помощь!", video: { file_id: "VID11" } }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "pub:" + REVIEW_GROUP + "_11")), reviewEnv(kv));
+    const response = await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv));
+    const body = await response.json();
+    assert.equal(body.reviews.length, 1);
+    assert.equal(body.reviews[0].name, "Ivan");
+    assert.equal(body.reviews[0].kind, "video");
+    assert.equal(body.reviews[0].media, "/api/review-media/" + REVIEW_GROUP + "_11");
+    assert.ok(!JSON.stringify(body).includes("test-token"), "bot token never reaches the site");
+  });
+});
+
+test("text review needs a car photo; with photo it is published and name can be hidden", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate({ message: groupReview(20, { text: "/review Всё быстро" }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(222222222, "anon:" + REVIEW_GROUP + "_20")), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "pub:" + REVIEW_GROUP + "_20")), reviewEnv(kv));
+    assert.equal((await kv.list({ prefix: "approved:" })).keys.length, 0, "no photo, not published");
+
+    await worker.fetch(webhookUpdate({ message: groupReview(21, { caption: "/review Всё быстро", photo: [{ file_id: "S" }, { file_id: "BIG" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "anon:" + REVIEW_GROUP + "_21")), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "pub:" + REVIEW_GROUP + "_21")), reviewEnv(kv));
+    const body = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
+    assert.equal(body.reviews.length, 1);
+    assert.equal(body.reviews[0].name, "Клиент");
+  });
+});
+
+test("callbacks from non-admins are refused", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: groupReview(30, { caption: "/review Спасибо!", video: { file_id: "V30" } }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(999999999, "pub:" + REVIEW_GROUP + "_30")), reviewEnv(kv));
+    const last = calls.filter(c => c.method === "answerCallbackQuery").pop();
+    assert.equal(last.payload.text, "Нет доступа");
+    assert.equal((await kv.list({ prefix: "approved:" })).keys.length, 0);
+  });
+});
