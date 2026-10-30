@@ -331,7 +331,14 @@ h2{font-size:clamp(28px,4vw,48px);line-height:1.08;letter-spacing:-.04em;margin:
 .hero h1 span{color:#85868c}
 .intro{max-width:520px;font-size:clamp(17px,2vw,20px);color:#b2b4bc;line-height:1.6;margin:0}
 .actions{display:flex;gap:14px;flex-wrap:wrap;margin-top:34px}
-.photo{aspect-ratio:1.12/1;border:1px solid #33363d;border-radius:28px;background:var(--panel);display:flex;align-items:flex-end;padding:26px;box-sizing:border-box;font-size:12px;letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+.photo{position:relative;aspect-ratio:1.35/1;min-height:360px;border:1px solid #33363d;border-radius:28px;overflow:hidden;background:#0b111b;box-shadow:0 24px 70px #0008}
+.hero-slide{position:absolute;inset:0;background-size:cover;background-position:center;opacity:0;transition:opacity 1s ease}
+.hero-slide.active{opacity:1}
+.hero-slide:after{content:"";position:absolute;inset:45% 0 0;background:linear-gradient(transparent,#050a12d9)}
+.hero-caption{position:absolute;z-index:2;left:24px;right:24px;bottom:22px;color:#fff;font-weight:800;font-size:18px;text-shadow:0 2px 12px #000}
+.hero-dots{position:absolute;z-index:3;right:24px;bottom:28px;display:flex;gap:8px}
+.hero-dot{width:8px;height:8px;border-radius:50%;background:#ffffff70}
+.hero-dot.active{background:var(--red);transform:scale(1.25)}
 .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:26px;box-sizing:border-box}
 .card .num{color:var(--red);font-weight:900;font-size:28px}
@@ -343,7 +350,8 @@ h2{font-size:clamp(28px,4vw,48px);line-height:1.08;letter-spacing:-.04em;margin:
 .reviews{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
 .cars{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
 .car-card{padding:0;overflow:hidden}
-.car-photo{height:200px;background:#0b0c0f;display:flex;align-items:flex-end;padding:14px;box-sizing:border-box;font-size:11px;letter-spacing:.14em;color:var(--muted)}
+.car-photo{height:200px;background:#0b0c0f center/cover no-repeat;position:relative}
+.car-photo:after{content:"";position:absolute;inset:45% 0 0;background:linear-gradient(transparent,#050a12b8)}
 .car-body{padding:22px}
 .car-body h3{margin:0 0 12px;font-size:20px}
 .car-specs{color:#c7c9d0;font-size:14px;line-height:1.9}
@@ -439,7 +447,13 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
       <a class="btn btn-dark telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">✈ Написать в Telegram</a>
     </div>
   </div>
-  <div class="photo">Фото автомобиля</div>
+  <div class="photo" aria-label="Галерея автомобилей">
+    <div class="hero-slide active" style="background-image:url('https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1400&q=85')"></div>
+    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1400&q=85')"></div>
+    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=1400&q=85')"></div>
+    <div class="hero-caption">Автомобили из Кореи, Китая и ОАЭ</div>
+    <div class="hero-dots" aria-hidden="true"><span class="hero-dot active"></span><span class="hero-dot"></span><span class="hero-dot"></span></div>
+  </div>
 </section>
 
 <section class="wrap section" id="order" style="padding-top:40px">
@@ -468,9 +482,9 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
   <h2>Примеры выполненных заказов</h2>
   <p class="sub">Точная стоимость зависит от курса и условий. Уточняйте у администратора.</p>
   <div class="cars">
-    <article class="card car-card"><div class="car-photo">Фото автомобиля</div><div class="car-body"><h3>Audi Q3 35 TFSI Progressive Dynamic</h3><div class="car-specs">2021 · 1.4 л · 150 л.с. · бензин<br>2WD · пробег 37 000 км · 5 мест</div><div class="car-foot"><div><div class="car-label">Под ключ до Рязани</div><div class="car-price">2 800 000 ₽</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
-    <article class="card car-card"><div class="car-photo">Фото автомобиля</div><div class="car-body"><h3>[Марка и модель]</h3><div class="car-specs">[год · двигатель · мощность]<br>[пробег · привод · мест]</div><div class="car-foot"><div><div class="car-label">Под ключ до [город]</div><div class="car-price">[цена]</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
-    <article class="card car-card"><div class="car-photo">Фото автомобиля</div><div class="car-body"><h3>[Марка и модель]</h3><div class="car-specs">[год · двигатель · мощность]<br>[пробег · привод · мест]</div><div class="car-foot"><div><div class="car-label">Под ключ до [город]</div><div class="car-price">[цена]</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
+    <article class="card car-card"><div class="car-photo" role="img" aria-label="Audi Q3" style="background-image:url('https://images.unsplash.com/photo-1617469767053-d3b523a0b982?auto=format&fit=crop&w=900&q=82')"></div><div class="car-body"><h3>Audi Q3 35 TFSI</h3><div class="car-specs">2021 · 1.4 л · 150 л.с. · бензин<br>2WD · пробег 37 000 км · 5 мест</div><div class="car-foot"><div><div class="car-label">Пример расчёта · до Рязани</div><div class="car-price">2 800 000 ₽</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
+    <article class="card car-card"><div class="car-photo" role="img" aria-label="Kia Sportage" style="background-image:url('https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?auto=format&fit=crop&w=900&q=82')"></div><div class="car-body"><h3>Kia Sportage</h3><div class="car-specs">Подбор комплектации и года выпуска под ваш бюджет</div><div class="car-foot"><div><div class="car-label">Под заказ</div><div class="car-price">Рассчитать</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
+    <article class="card car-card"><div class="car-photo" role="img" aria-label="Hyundai Sonata" style="background-image:url('https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=900&q=82')"></div><div class="car-body"><h3>Hyundai Sonata</h3><div class="car-specs">Подбор комплектации и года выпуска под ваш бюджет</div><div class="car-foot"><div><div class="car-label">Под заказ</div><div class="car-price">Рассчитать</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
   </div>
 </section>
 <section class="wrap section" id="reviews" style="padding-top:20px">
@@ -533,6 +547,18 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
     card.appendChild(who);card.appendChild(text);list.appendChild(card);
   });
 }).catch(function(){});
+// Плавная смена фотографий в главном блоке
+(function(){
+  var slides=document.querySelectorAll('.hero-slide');
+  var dots=document.querySelectorAll('.hero-dot');
+  if(slides.length<2)return;
+  var index=0;
+  window.setInterval(function(){
+    slides[index].classList.remove('active');dots[index].classList.remove('active');
+    index=(index+1)%slides.length;
+    slides[index].classList.add('active');dots[index].classList.add('active');
+  },5000);
+})();
 </script>
 </body>
 </html>`;
