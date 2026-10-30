@@ -342,6 +342,16 @@ h2{font-size:clamp(28px,4vw,48px);line-height:1.08;letter-spacing:-.04em;margin:
 .get-title{font-size:20px;font-weight:800}
 .get ul{margin:0;padding-left:20px;color:#c7c9d0;font-size:15px;line-height:1.9;display:grid;grid-template-columns:1fr 1fr;column-gap:32px}
 .reviews{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.cars{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.car-card{padding:0;overflow:hidden}
+.car-photo{height:200px;background:#0b0c0f;display:flex;align-items:flex-end;padding:14px;box-sizing:border-box;font-size:11px;letter-spacing:.14em;color:var(--muted)}
+.car-body{padding:22px}
+.car-body h3{margin:0 0 12px;font-size:20px}
+.car-specs{color:#c7c9d0;font-size:14px;line-height:1.9}
+.car-foot{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}
+.car-label{font-size:12px;color:var(--muted)}
+.car-price{font-size:20px;font-weight:900}
+.car-link{color:var(--red);font-weight:800;font-size:14px}
 .review-media{width:100%;height:200px;border-radius:14px;background:#0b0c0f;display:block;object-fit:cover}
 .review-name{margin-top:16px;color:var(--red);font-weight:800;font-size:13px}
 .review-text{margin:6px 0 0;color:#c7c9d0;font-size:15px;line-height:1.6}
@@ -384,6 +394,14 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
   .get{grid-template-columns:1fr;padding:18px;border-radius:18px;gap:14px;margin-top:10px}
   .get-title{font-size:16px}
   .get ul{grid-template-columns:1fr;font-size:14px;line-height:1.7}
+  .cars{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:12px;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+  .cars::-webkit-scrollbar{display:none}
+  .cars>article{flex:0 0 80%;scroll-snap-align:start}
+  .car-photo{height:140px}
+  .car-body{padding:14px}
+  .car-body h3{font-size:15px}
+  .car-specs{font-size:12px}
+  .car-price{font-size:17px}
   .reviews{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:12px;padding-bottom:6px;-webkit-overflow-scrolling:touch}
   .reviews::-webkit-scrollbar{display:none}
   .reviews>article{flex:0 0 78%;scroll-snap-align:start;padding:14px}
@@ -443,6 +461,16 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
   </div>
 </section>
 
+<section class="wrap section" id="cars" style="padding-top:20px">
+  <div class="eyebrow">Наши автомобили</div>
+  <h2>Примеры выполненных заказов</h2>
+  <p class="sub">Точная стоимость зависит от курса и условий. Уточняйте у администратора.</p>
+  <div class="cars">
+    <article class="card car-card"><div class="car-photo">Фото автомобиля</div><div class="car-body"><h3>Audi Q3 35 TFSI Progressive Dynamic</h3><div class="car-specs">2021 · 1.4 л · 150 л.с. · бензин<br>2WD · пробег 37 000 км · 5 мест</div><div class="car-foot"><div><div class="car-label">Под ключ до Рязани</div><div class="car-price">2 800 000 ₽</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
+    <article class="card car-card"><div class="car-photo">Фото автомобиля</div><div class="car-body"><h3>[Марка и модель]</h3><div class="car-specs">[год · двигатель · мощность]<br>[пробег · привод · мест]</div><div class="car-foot"><div><div class="car-label">Под ключ до [город]</div><div class="car-price">[цена]</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
+    <article class="card car-card"><div class="car-photo">Фото автомобиля</div><div class="car-body"><h3>[Марка и модель]</h3><div class="car-specs">[год · двигатель · мощность]<br>[пробег · привод · мест]</div><div class="car-foot"><div><div class="car-label">Под ключ до [город]</div><div class="car-price">[цена]</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
+  </div>
+</section>
 <section class="wrap section" id="reviews" style="padding-top:20px">
   <h2>Отзывы наших клиентов</h2>
   <p class="sub">Публикуем отзывы только с согласия клиентов.</p>
