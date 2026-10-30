@@ -393,19 +393,22 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
   .card p{font-size:12px;line-height:1.5}
   .get{grid-template-columns:1fr;padding:18px;border-radius:18px;gap:14px;margin-top:10px}
   .get-title{font-size:16px}
-  .get ul{grid-template-columns:1fr;font-size:14px;line-height:1.7}
-  .cars{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:12px;padding-bottom:6px;-webkit-overflow-scrolling:touch}
-  .cars::-webkit-scrollbar{display:none}
-  .cars>article{flex:0 0 80%;scroll-snap-align:start}
-  .car-photo{height:140px}
-  .car-body{padding:14px}
-  .car-body h3{font-size:15px}
-  .car-specs{font-size:12px}
-  .car-price{font-size:17px}
-  .reviews{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:12px;padding-bottom:6px;-webkit-overflow-scrolling:touch}
-  .reviews::-webkit-scrollbar{display:none}
-  .reviews>article{flex:0 0 78%;scroll-snap-align:start;padding:14px}
-  .review-media{height:150px}
+  .get ul{grid-template-columns:1fr 1fr;gap:8px;padding:0;list-style:none;font-size:13px;line-height:1.4}
+  .get li{background:#0b0c0f;border:1px solid var(--line);border-radius:12px;padding:12px}
+  .cars{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .car-photo{height:100px;padding:10px;font-size:9px;letter-spacing:.1em}
+  .car-body{padding:12px}
+  .car-body h3{font-size:13px;margin:0 0 6px;line-height:1.3}
+  .car-specs{display:none}
+  .car-foot{margin-top:10px;padding-top:10px;flex-direction:column;align-items:flex-start;gap:6px}
+  .car-label{font-size:10px}
+  .car-price{font-size:15px}
+  .car-link{font-size:12px}
+  .reviews{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .reviews>article{padding:10px;border-radius:16px}
+  .review-media{height:110px;border-radius:10px}
+  .review-name{font-size:11px;margin-top:8px}
+  .review-text{font-size:12px;line-height:1.45;margin-top:4px}
   h2{font-size:26px;margin:12px 0 10px}
   .sub{font-size:14px;margin-bottom:20px}
   .form-card{grid-template-columns:1fr;padding:20px;border-radius:22px;gap:20px}
