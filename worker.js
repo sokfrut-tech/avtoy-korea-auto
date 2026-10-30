@@ -294,31 +294,218 @@ export default {
    return new Response(upstream.body, { headers: { "content-type": review.kind === "video" ? "video/mp4" : "image/jpeg", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" } });
   }
   if(url.pathname==="/favicon.ico") return new Response(null,{status:204});
-  const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08090b"><meta name="description" content="Подбор автомобилей из Кореи, Китая и ОАЭ"><title>AVTOY KOREA — автомобили под заказ</title>
+  const html = `<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#08090b">
+<meta name="description" content="Подбор автомобилей из Кореи, Китая и ОАЭ под ваш бюджет">
+<title>AVTOY KOREA: автомобили под заказ</title>
 <style>
-:root{color-scheme:dark;--bg:#08090b;--panel:#121419;--text:#f7f7f8;--muted:#a3a5ad;--red:#ff4b35;--line:#292c33;--max:1160px}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:90px}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;line-height:1.55}a{color:inherit;text-decoration:none}button,input,textarea,select{font:inherit}.wrap{width:min(var(--max),calc(100% - 40px));margin:auto}.topbar{position:sticky;top:0;z-index:10;background:#08090beF;backdrop-filter:blur(18px);border-bottom:1px solid #ffffff12}.nav{min-height:82px;display:flex;align-items:center;justify-content:space-between;gap:18px}.brand{font-weight:900;letter-spacing:.16em;font-size:19px;line-height:1.1}.brand em{color:var(--red);font-style:normal}.brand small{display:block;margin-top:7px;color:#a6a8af;font-size:10px;letter-spacing:.27em}.pill,.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:15px;padding:14px 20px;font-weight:750;border:1px solid var(--line);cursor:pointer;transition:transform .18s}.pill{border-radius:999px;padding:12px 18px}.btn:hover,.pill:hover{transform:translateY(-2px)}.btn-red{background:var(--red);border-color:var(--red);color:#fff;box-shadow:0 10px 35px #ff4b3520}.btn-dark{background:#0d0e11;color:#fff}.hero{padding:70px 0 48px;overflow:hidden}.hero-grid{display:grid;grid-template-columns:1fr 1.05fr;align-items:center;gap:42px}.eyebrow{font-size:12px;font-weight:850;letter-spacing:.28em;color:var(--red);text-transform:uppercase}.hero h1{font-size:clamp(46px,6.6vw,82px);line-height:.99;letter-spacing:-.065em;margin:22px 0 24px;font-weight:900}.hero h1 span{display:block;color:#85868c}.intro{max-width:520px;font-size:clamp(17px,2vw,21px);color:#b2b4bc;line-height:1.7}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}.actions .btn{min-height:58px}.flags{display:flex;gap:8px;margin-bottom:18px}.flag{width:35px;height:35px;border-radius:50%;display:grid;place-items:center;background:#fff;font-size:18px;box-shadow:0 5px 18px #0005}.car-frame{position:relative;overflow:hidden;aspect-ratio:1.12/1;border:1px solid #33363d;border-radius:30px;background:radial-gradient(ellipse at 70% 35%,#56251e,transparent 43%),linear-gradient(135deg,#191b20,#090a0c 65%);box-shadow:0 35px 100px #0008}.car-frame img{width:100%;height:100%;object-fit:cover;display:block;opacity:.92}.car-frame:after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,#08090b 0%,transparent 48%);pointer-events:none}.visual-label{position:absolute;bottom:22px;left:24px;right:24px;display:flex;justify-content:space-between;gap:10px;z-index:1;font-size:11px;letter-spacing:.2em;color:#eee;text-transform:uppercase}.trust{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:24px 0;margin:0 0 90px}.trust-grid{display:grid;grid-template-columns:repeat(3,1fr);text-align:center}.trust strong{display:block;font-size:24px;line-height:1.2}.trust span{display:block;color:var(--muted);font-size:13px;margin-top:5px}.section{padding:0 0 95px}.section-head{max-width:700px;margin-bottom:30px}.section h2{font-size:clamp(30px,4vw,48px);line-height:1.08;letter-spacing:-.045em;margin:13px 0}.sub{color:var(--muted);font-size:16px}.features{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.feature{background:linear-gradient(145deg,#14161b,#0e0f12);border:1px solid var(--line);border-radius:20px;padding:25px;min-height:190px}.num{color:var(--red);font-weight:900;font-size:12px;letter-spacing:.14em}.ico{width:46px;height:46px;display:grid;place-items:center;border:1px solid #71352e;background:#241411;border-radius:14px;margin:18px 0 12px;color:#ff765f;font-size:24px}.feature h3{font-size:20px;margin:0 0 8px}.feature p,.why-item p,.step p{color:var(--muted);font-size:14px;margin:0}.why{display:grid;grid-template-columns:.8fr 1.2fr;gap:38px;align-items:start}.why-list{display:grid;gap:12px}.why-item{display:grid;grid-template-columns:52px 1fr;gap:16px;padding:22px;background:var(--panel);border:1px solid var(--line);border-radius:18px}.why-item .ico{margin:0}.why-item h3{margin:0 0 6px;font-size:18px}.form-card{display:grid;grid-template-columns:.8fr 1.2fr;gap:36px;background:linear-gradient(140deg,#17191e,#0d0e11);border:1px solid #30333a;border-radius:28px;padding:clamp(22px,4vw,42px)}.form-card h2{font-size:clamp(30px,4vw,44px)}.form-intro,.hint{color:var(--muted)}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field{display:flex;flex-direction:column;gap:7px}.field.full{grid-column:1/-1}.field label{font-size:12px;color:#c2c3c9}.field input,.field textarea,.field select{width:100%;background:#0b0c0f;border:1px solid #30333a;border-radius:12px;color:#fff;padding:14px;outline:none;min-width:0}.field input:focus,.field textarea:focus,.field select:focus{border-color:var(--red);box-shadow:0 0 0 3px #ff4b351a}.field textarea{min-height:110px;resize:vertical}.form-foot{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:15px}.hint{font-size:11px}.status{font-size:14px;margin-top:12px;min-height:24px}.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.step{border:1px solid var(--line);border-radius:18px;padding:23px;background:var(--panel)}.step b{color:var(--red);font-size:12px;letter-spacing:.14em}.step h3{margin:12px 0 8px}footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-size:13px}.footer-row{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}.telegram:hover{color:var(--red)}.review-media{width:100%;border-radius:14px;margin-top:12px;display:block;background:#0b0c0f}.review-meta{color:var(--muted);font-size:13px;margin-top:10px}
-@media(max-width:780px){.wrap{width:calc(100% - 28px)}.nav{min-height:70px}.brand{font-size:15px}.brand small{font-size:8px}.pill{padding:10px 12px;font-size:12px}.hero{padding:42px 0 32px}.hero-grid{grid-template-columns:1fr;gap:28px}.hero h1{font-size:clamp(46px,13vw,72px);margin:18px 0}.intro{font-size:17px}.car-frame{aspect-ratio:1.05/1;border-radius:24px}.trust{margin-bottom:68px;padding:20px 0}.trust strong{font-size:20px}.trust span{font-size:11px}.section{padding-bottom:68px}.features,.why,.form-card,.steps{grid-template-columns:1fr}.feature{min-height:0;padding:20px}.feature .ico{margin:12px 0}.why{gap:20px}.why-item{padding:18px}.form-card{gap:18px;padding:22px;border-radius:22px}.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.visual-label{left:16px;right:16px;bottom:16px;font-size:9px}.actions{display:grid;grid-template-columns:1fr 1fr}.actions .btn{padding:13px 10px;font-size:14px}.actions .btn:first-child{grid-column:1/-1}.section h2{font-size:34px}}
+:root{color-scheme:dark;--bg:#08090b;--panel:#121419;--line:#292c33;--text:#f7f7f8;--muted:#a3a5ad;--red:#ff4b35;--max:1160px}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:90px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;line-height:1.55}
+a{color:inherit;text-decoration:none}
+button,input,textarea,select{font:inherit}
+.wrap{width:min(var(--max),calc(100% - 40px));margin:auto}
+.topbar{position:sticky;top:0;z-index:10;background:#08090bf0;backdrop-filter:blur(18px);border-bottom:1px solid #ffffff12}
+.nav{min-height:82px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.brand{font-weight:900;letter-spacing:.16em;font-size:19px;line-height:1.1}
+.brand em{color:var(--red);font-style:normal}
+.brand small{display:block;margin-top:7px;color:#a6a8af;font-size:10px;letter-spacing:.27em;font-weight:500}
+.nav-links{display:flex;gap:26px;align-items:center;font-size:15px;color:#c7c9d0}
+.nav-links a:hover{color:#fff}
+.pill{border-radius:999px;padding:12px 20px;background:var(--red);color:#fff;font-weight:700;font-size:15px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:16px;padding:17px 26px;font-weight:800;font-size:16px;border:1px solid var(--line);cursor:pointer;transition:transform .18s}
+.btn:hover{transform:translateY(-2px)}
+.btn-red{background:var(--red);border-color:var(--red);color:#fff;box-shadow:0 10px 35px #ff4b3520}
+.btn-dark{background:#0d0e11;color:#fff}
+.btn:disabled{opacity:.6;cursor:default;transform:none}
+.eyebrow{font-size:12px;font-weight:800;letter-spacing:.28em;color:var(--red);text-transform:uppercase}
+.section{padding:88px 0}
+h2{font-size:clamp(28px,4vw,48px);line-height:1.08;letter-spacing:-.04em;margin:14px 0 14px;font-weight:900}
+.sub{color:var(--muted);font-size:16px;margin:0 0 32px;max-width:720px}
+.hero{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:center;padding:80px 0 72px}
+.hero h1{font-size:clamp(44px,6.4vw,80px);line-height:.98;letter-spacing:-.05em;margin:22px 0 24px;font-weight:900}
+.hero h1 span{color:#85868c}
+.intro{max-width:520px;font-size:clamp(17px,2vw,20px);color:#b2b4bc;line-height:1.6;margin:0}
+.actions{display:flex;gap:14px;flex-wrap:wrap;margin-top:34px}
+.photo{aspect-ratio:1.12/1;border:1px solid #33363d;border-radius:28px;background:var(--panel);display:flex;align-items:flex-end;padding:26px;box-sizing:border-box;font-size:12px;letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:26px;box-sizing:border-box}
+.card .num{color:var(--red);font-weight:900;font-size:28px}
+.card h3{font-size:20px;margin:16px 0 10px}
+.card p{margin:0;color:var(--muted);font-size:15px;line-height:1.6}
+.get{margin-top:16px;display:grid;grid-template-columns:.7fr 1.3fr;gap:32px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:26px 30px;box-sizing:border-box}
+.get-title{font-size:20px;font-weight:800}
+.get ul{margin:0;padding-left:20px;color:#c7c9d0;font-size:15px;line-height:1.9;display:grid;grid-template-columns:1fr 1fr;column-gap:32px}
+.reviews{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.review-media{width:100%;height:200px;border-radius:14px;background:#0b0c0f;display:block;object-fit:cover}
+.review-name{margin-top:16px;color:var(--red);font-weight:800;font-size:13px}
+.review-text{margin:6px 0 0;color:#c7c9d0;font-size:15px;line-height:1.6}
+.dashed{border-style:dashed}
+.form-card{display:grid;grid-template-columns:.8fr 1.2fr;gap:48px;background:var(--panel);border:1px solid #30333a;border-radius:28px;padding:48px;box-sizing:border-box}
+.form-card h2{font-size:clamp(28px,4vw,42px)}
+.form-intro{color:var(--muted);font-size:16px;line-height:1.6;margin:0 0 14px}
+.hint{color:var(--muted);font-size:13px;margin:0}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.field{display:flex;flex-direction:column;gap:8px;font-size:13px;color:#c7c9d0}
+.field.full{grid-column:1/-1}
+.field input,.field textarea,.field select{width:100%;background:#0b0c0f;border:1px solid #30333a;border-radius:12px;color:#fff;padding:15px;outline:none;min-width:0;font-size:15px}
+.field input:focus,.field textarea:focus,.field select:focus{border-color:var(--red);box-shadow:0 0 0 3px #ff4b351a}
+.field textarea{min-height:90px;resize:vertical}
+.form-foot{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.form-foot .hint{font-size:12px}
+.status{font-size:14px;margin-top:12px;min-height:24px}
+.status a{color:var(--red);font-weight:700}
+footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-size:13px}
+.footer-row{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
+.telegram:hover{color:var(--red)}
+@media(max-width:780px){
+  .wrap{width:calc(100% - 32px)}
+  .nav{min-height:70px}
+  .brand{font-size:16px}
+  .brand small{font-size:8px}
+  .nav-links a:not(.pill){display:none}
+  .pill{padding:10px 14px;font-size:13px}
+  .section{padding:44px 0}
+  .hero{grid-template-columns:1fr;gap:24px;padding:28px 0 24px}
+  .hero h1{font-size:44px;margin:14px 0 14px}
+  .photo{aspect-ratio:16/9;padding:16px;border-radius:20px;font-size:11px}
+  .actions{display:grid;grid-template-columns:1fr;gap:10px;margin-top:22px}
+  .btn{padding:16px;font-size:15px}
+  .steps{grid-template-columns:1fr 1fr;gap:10px}
+  .card{padding:16px;border-radius:18px;min-height:150px}
+  .card .num{font-size:22px}
+  .card h3{font-size:15px;margin:10px 0 6px}
+  .card p{font-size:12px;line-height:1.5}
+  .get{grid-template-columns:1fr;padding:18px;border-radius:18px;gap:14px;margin-top:10px}
+  .get-title{font-size:16px}
+  .get ul{grid-template-columns:1fr;font-size:14px;line-height:1.7}
+  .reviews{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:12px;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+  .reviews::-webkit-scrollbar{display:none}
+  .reviews>article{flex:0 0 78%;scroll-snap-align:start;padding:14px}
+  .review-media{height:150px}
+  h2{font-size:26px;margin:12px 0 10px}
+  .sub{font-size:14px;margin-bottom:20px}
+  .form-card{grid-template-columns:1fr;padding:20px;border-radius:22px;gap:20px}
+  .form-grid{grid-template-columns:1fr}
+  .field.full{grid-column:auto}
+  .form-foot .btn{width:100%}
+}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
-</style></head><body>
-<header class="topbar"><div class="wrap nav"><a class="brand" href="#">AVTO<em>Y</em> KOREA<small>КОРЕЯ · КИТАЙ · ОАЭ</small></a><a class="pill" href="#request">Подобрать автомобиль ↗</a></div></header>
-<main><section class="hero"><div class="wrap hero-grid"><div><div class="flags" aria-label="Страны покупки"><span class="flag" title="Южная Корея">🇰🇷</span><span class="flag" title="Китай">🇨🇳</span><span class="flag" title="ОАЭ">🇦🇪</span></div><div class="eyebrow">Автомобили под заказ</div><h1>Автомобиль <span>под заказ</span></h1><p class="intro">Подберём автомобиль под ваш бюджет, проверим перед покупкой и организуем доставку из Кореи, Китая или ОАЭ.</p><div class="actions"><a class="btn btn-red" href="#request">Получить подбор →</a><a class="btn btn-dark telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">✈ Telegram</a></div></div><div class="car-frame"><img src="https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1400&q=85" alt="Современный автомобиль" fetchpriority="high"><div class="visual-label"><span>AVTOY KOREA</span><span>Корея / Китай / ОАЭ</span></div></div></div></section>
-<div class="wrap trust"><div class="trust-grid"><div><strong>3</strong><span>страны покупки</span></div><div><strong>24/7</strong><span>связь в Telegram</span></div><div><strong>Лично</strong><span>обсудим ваш запрос</span></div></div></div>
-<section class="section"><div class="wrap"><div class="section-head"><div class="eyebrow">Почему мы</div><h2>От поиска до доставки</h2><p class="sub">Сопровождаем процесс и помогаем принять взвешенное решение до покупки.</p></div><div class="features"><article class="feature"><div class="num">01 / ПОДБОР</div><div class="ico">⌕</div><h3>Подбор автомобиля</h3><p>Ищем варианты под бюджет, год выпуска, пробег и комплектацию.</p></article><article class="feature"><div class="num">02 / ПРОВЕРКА</div><div class="ico">✓</div><h3>Проверка перед покупкой</h3><p>Помогаем оценить состояние автомобиля и документы до решения.</p></article><article class="feature"><div class="num">03 / ДОСТАВКА</div><div class="ico">↗</div><h3>Организация доставки</h3><p>Координируем покупку и логистику из выбранной страны.</p></article></div></div></section>
-<section class="section"><div class="wrap why"><div class="section-head"><div class="eyebrow">Как это работает</div><h2>Понятный путь к вашему автомобилю</h2><p class="sub">Помогаем разобраться во всех этапах покупки за рубежом.</p></div><div class="why-list"><article class="why-item"><div class="ico">01</div><div><h3>Расскажите, что ищете</h3><p>Оставьте заявку с бюджетом, желаемой моделью и предпочтениями.</p></div></article><article class="why-item"><div class="ico">02</div><div><h3>Получите варианты</h3><p>Согласуем подходящие автомобили и обсудим проверку.</p></div></article><article class="why-item"><div class="ico">03</div><div><h3>Согласуйте покупку и доставку</h3><p>Обсудим условия до принятия решения.</p></div></article></div></div></section>
-<section class="section" id="request"><div class="wrap form-card"><div><div class="eyebrow">Бесплатный подбор</div><h2>Какой автомобиль вы ищете?</h2><p class="form-intro">Оставьте параметры автомобиля и удобный контакт. Мы свяжемся с вами, уточним детали и обсудим варианты сотрудничества.</p><p class="hint">Можно обратиться и по вопросам рекламы, партнёрства или размещения предложений.</p></div><div><form id="request-form"><div class="form-grid">
-<div class="field"><label for="name">Ваше имя *</label><input id="name" name="name" required maxlength="100" autocomplete="name" placeholder="Как к вам обращаться"></div><div class="field"><label for="contact">Telegram или телефон *</label><input id="contact" name="contact" required maxlength="150" autocomplete="tel" placeholder="@username или номер"></div>
-<div class="field"><label for="model">Марка / модель</label><input id="model" name="model" maxlength="150" placeholder="Например, Kia Sorento"></div><div class="field"><label for="budget">Бюджет</label><input id="budget" name="budget" maxlength="100" placeholder="Например, 3 000 000 ₽"></div>
-<div class="field"><label for="country">Страна покупки</label><select id="country" name="country"><option value="">Пока не решил(а)</option><option>Южная Корея</option><option>Китай</option><option>ОАЭ</option></select></div><div class="field"><label for="year">Год выпуска от</label><input id="year" name="year" maxlength="30" placeholder="Например, 2021"></div>
-<div class="field full"><label for="purpose">Тема обращения</label><select id="purpose" name="purpose"><option value="Подбор автомобиля">Подбор автомобиля</option><option value="Реклама и продвижение">Реклама и продвижение</option><option value="Партнёрство">Партнёрство</option><option value="Другое">Другое</option></select></div>
-<div class="field full"><label for="details">Пожелания</label><textarea id="details" name="details" maxlength="1000" placeholder="Комплектация, пробег, тип двигателя и другое"></textarea></div></div><div class="form-foot"><button class="btn btn-red" type="submit" id="submit-btn">Подготовить заявку →</button><span class="hint">Оставляя заявку, вы соглашаетесь на обратную связь по вашему обращению.</span></div><div class="status" id="status" role="status" aria-live="polite"></div></form></div></div></section>
-<section class="section"><div class="wrap"><div class="section-head"><div class="eyebrow">Прозрачный процесс</div><h2>Три простых шага</h2></div><div class="steps"><div class="step"><b>ШАГ 01</b><h3>Заявка</h3><p>Расскажите о бюджете и желаемом автомобиле.</p></div><div class="step"><b>ШАГ 02</b><h3>Обсуждение</h3><p>Уточним параметры и согласуем варианты.</p></div><div class="step"><b>ШАГ 03</b><h3>План покупки</h3><p>Обсудим проверку, условия и доставку.</p></div></div></div></section>
-<section class="section" id="reviews"><div class="wrap"><div class="section-head"><div class="eyebrow">Отзывы</div><h2>Что говорят клиенты</h2><p class="sub">Публикуем отзывы только с согласия клиентов.</p></div><div class="features" id="reviews-list"><p class="sub">Отзывы скоро появятся.</p></div></div></section></main>
-<footer><div class="wrap footer-row"><a class="brand" href="#">AVTO<em>Y</em> KOREA</a><span>Автомобили под заказ · Корея · Китай · ОАЭ</span><a class="telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">Telegram ↗</a></div></footer>
+</style>
+</head>
+<body>
+<header class="topbar"><div class="wrap nav">
+  <a class="brand" href="#">AVTO<em>Y</em> KOREA<small>КОРЕЯ · КИТАЙ · ОАЭ</small></a>
+  <nav class="nav-links">
+    <a href="#reviews">Отзывы</a>
+    <a href="#order">Как заказать</a>
+    <a class="pill" href="#request">Подобрать автомобиль</a>
+  </nav>
+</div></header>
+
+<main>
+<section class="wrap hero">
+  <div>
+    <div class="eyebrow">Автомобили под заказ</div>
+    <h1>Подберём<br><span>ваш автомобиль</span></h1>
+    <p class="intro">Подберём автомобиль под ваш бюджет, проверим перед покупкой и организуем доставку из Кореи, Китая или ОАЭ.</p>
+    <div class="actions">
+      <a class="btn btn-red" href="#request">Оставить заявку →</a>
+      <a class="btn btn-dark telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">✈ Написать в Telegram</a>
+    </div>
+  </div>
+  <div class="photo">Фото автомобиля</div>
+</section>
+
+<section class="wrap section" id="order" style="padding-top:40px">
+  <div class="eyebrow">Как заказать</div>
+  <h2>Четыре шага до вашего автомобиля</h2>
+  <p class="sub">Заполните короткую форму. Заявка сразу приходит администратору в Telegram, и он отвечает с предложениями.</p>
+  <div class="steps">
+    <article class="card"><div class="num">01</div><h3>Заполните форму</h3><p>Марка и модель, бюджет, страна покупки, год выпуска и пожелания.</p></article>
+    <article class="card"><div class="num">02</div><h3>Получите предложения</h3><p>Подбираем варианты под ваш бюджет и отвечаем вам в Telegram.</p></article>
+    <article class="card"><div class="num">03</div><h3>Проверьте перед покупкой</h3><p>Оцениваем состояние автомобиля и документы до решения о покупке.</p></article>
+    <article class="card"><div class="num">04</div><h3>Доставка и итог</h3><p>Стоимость доставки и итоговая цена обсуждаются с вами отдельно.</p></article>
+  </div>
+  <div class="get">
+    <div class="get-title">Что вы получите после заявки</div>
+    <ul>
+      <li>Предложения под ваш бюджет</li>
+      <li>Ориентировочную стоимость доставки</li>
+      <li>Расчёт по курсу юаня для автомобилей из Китая</li>
+      <li>Условия покупки и сроки доставки</li>
+    </ul>
+  </div>
+</section>
+
+<section class="wrap section" id="reviews" style="padding-top:20px">
+  <h2>Отзывы наших клиентов</h2>
+  <p class="sub">Публикуем отзывы только с согласия клиентов.</p>
+  <div class="reviews" id="reviews-list">
+    <article class="card dashed"><div class="review-name" style="margin-top:0">Скоро здесь появятся отзывы</div><p class="review-text">Клиенты, которые уже купили автомобиль через нас, смогут поделиться опытом.</p></article>
+  </div>
+</section>
+
+<section class="wrap section" id="request" style="padding-top:20px">
+  <div class="form-card">
+    <div>
+      <div class="eyebrow">Бесплатный подбор</div>
+      <h2>Какой автомобиль вы ищете?</h2>
+      <p class="form-intro">Оставьте параметры автомобиля и удобный контакт. Администратор свяжется с вами в Telegram.</p>
+      <p class="hint">Можно обратиться и по вопросам рекламы, партнёрства или размещения предложений.</p>
+    </div>
+    <div>
+      <form id="request-form">
+        <div class="form-grid">
+          <div class="field"><label for="name">Ваше имя *</label><input id="name" name="name" required maxlength="100" autocomplete="name" placeholder="Как к вам обращаться"></div>
+          <div class="field"><label for="contact">Telegram или телефон *</label><input id="contact" name="contact" required maxlength="150" autocomplete="tel" placeholder="@username или номер"></div>
+          <div class="field"><label for="model">Марка / модель</label><input id="model" name="model" maxlength="150" placeholder="Например, Kia Sorento"></div>
+          <div class="field"><label for="budget">Бюджет</label><input id="budget" name="budget" maxlength="100" placeholder="Например, 3 000 000 ₽"></div>
+          <div class="field"><label for="country">Страна покупки</label><select id="country" name="country"><option value="">Пока не решил(а)</option><option>Южная Корея</option><option>Китай</option><option>ОАЭ</option></select></div>
+          <div class="field"><label for="year">Год выпуска от</label><input id="year" name="year" maxlength="30" placeholder="Например, 2021"></div>
+          <div class="field full"><label for="purpose">Тема обращения</label><select id="purpose" name="purpose"><option value="Подбор автомобиля">Подбор автомобиля</option><option value="Реклама и продвижение">Реклама и продвижение</option><option value="Партнёрство">Партнёрство</option><option value="Другое">Другое</option></select></div>
+          <div class="field full"><label for="details">Пожелания</label><textarea id="details" name="details" maxlength="1000" placeholder="Комплектация, пробег, тип двигателя и другое"></textarea></div>
+        </div>
+        <div class="form-foot">
+          <button class="btn btn-red" type="submit" id="submit-btn">Отправить заявку →</button>
+          <span class="hint">Оставляя заявку, вы соглашаетесь на обратную связь по вашему обращению.</span>
+        </div>
+        <div class="status" id="status" role="status" aria-live="polite"></div>
+      </form>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer><div class="wrap footer-row">
+  <a class="brand" href="#">AVTO<em>Y</em> KOREA</a>
+  <span>Автомобили под заказ · Корея · Китай · ОАЭ</span>
+  <a class="telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">Telegram ↗</a>
+</div></footer>
+
 <script>
 const form=document.getElementById('request-form'),statusEl=document.getElementById('status');
-form.addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('submit-btn');b.disabled=true;statusEl.textContent='Готовим заявку…';try{const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))});const x=await r.json();if(!r.ok||!x.ok)throw Error(x.error||'Не удалось подготовить заявку.');if(x.setupNeeded){statusEl.textContent='Заявка подготовлена. Откроется Telegram: выберите чат менеджера и отправьте сообщение.';location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText)}else{statusEl.textContent='Заявка отправлена. Спасибо!';form.reset();if(x.botLink){var a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.className='telegram';a.textContent='Открыть Telegram, чтобы получать ответ здесь';statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a)}}}catch(err){statusEl.textContent=err.message||'Ошибка. Попробуйте ещё раз.'}finally{b.disabled=false}});
-fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){var list=document.getElementById('reviews-list');if(!data.reviews||!data.reviews.length)return;list.textContent='';data.reviews.forEach(function(rv){var card=document.createElement('article');card.className='feature';var who=document.createElement('div');who.className='num';who.textContent=rv.name;var text=document.createElement('p');text.textContent=rv.text||'';card.appendChild(who);card.appendChild(text);if(rv.media){var el=document.createElement(rv.kind==='video'?'video':'img');el.className='review-media';el.src=rv.media;if(rv.kind==='video'){el.controls=true;el.preload='metadata'}else{el.loading='lazy';el.alt='Фото автомобиля'}card.appendChild(el)}list.appendChild(card)})}).catch(function(){});
-</script></body></html>`;
+form.addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('submit-btn');b.disabled=true;statusEl.textContent='Отправляем заявку…';try{const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))});const x=await r.json();if(!r.ok||!x.ok)throw Error(x.error||'Не удалось отправить заявку.');if(x.setupNeeded){statusEl.textContent='Заявка подготовлена. Откроется Telegram: выберите чат менеджера и отправьте сообщение.';location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText)}else{statusEl.textContent='Заявка отправлена. Спасибо!';form.reset();if(x.botLink){var a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a)}}}catch(err){statusEl.textContent=err.message||'Ошибка. Попробуйте ещё раз.'}finally{b.disabled=false}});
+fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
+  var list=document.getElementById('reviews-list');
+  if(!data.reviews||!data.reviews.length)return;
+  list.textContent='';
+  data.reviews.forEach(function(rv){
+    var card=document.createElement('article');card.className='card';
+    if(rv.media){var el=document.createElement(rv.kind==='video'?'video':'img');el.className='review-media';el.src=rv.media;if(rv.kind==='video'){el.controls=true;el.preload='metadata'}else{el.loading='lazy';el.alt='Фото автомобиля'}card.appendChild(el)}
+    var who=document.createElement('div');who.className='review-name';who.textContent=rv.name;
+    var text=document.createElement('p');text.className='review-text';text.textContent=rv.text||'';
+    card.appendChild(who);card.appendChild(text);list.appendChild(card);
+  });
+}).catch(function(){});
+</script>
+</body>
+</html>`;
   return new Response(html,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"strict-origin-when-cross-origin"}});
  }
 };
