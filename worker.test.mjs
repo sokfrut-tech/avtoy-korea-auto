@@ -213,3 +213,67 @@ test("callbacks from non-admins are refused", async () => {
     assert.equal((await kv.list({ prefix: "approved:" })).keys.length, 0);
   });
 });
+
+// --- Заявки с сайта ---
+function siteRequest(body) {
+  return new Request("https://worker.test/api/request", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+const orderEnv = (kv) => ({ ...env, TELEGRAM_BOT_USERNAME: "@avtoy_test_bot", REVIEWS: kv });
+
+test("site order goes to every admin with an accept button and returns a bot link", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const res = await worker.fetch(siteRequest({ name: "Анна", contact: "@anna", model: "Kia Sorento", budget: "3 млн", country: "Южная Корея" }), orderEnv(kv));
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.match(body.orderId, /^[0-9a-f]{16}$/);
+    assert.equal(body.botLink, `https://t.me/avtoy_test_bot?start=order_${body.orderId}`);
+    const cards = calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup);
+    assert.equal(cards.length, 2);
+    assert.equal(cards[0].payload.reply_markup.inline_keyboard[0][0].callback_data, `ord:${body.orderId}`);
+  });
+});
+
+test("client opens the link, admin accepts, client gets the confirmation", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const res = await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv));
+    const { orderId } = await res.json();
+
+    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${orderId}` } }), orderEnv(kv));
+    assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("заявка получена")));
+
+    await worker.fetch(webhookUpdate(callback(111111111, `ord:${orderId}`)), orderEnv(kv));
+    assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("принята в работу")));
+    const order = JSON.parse(await kv.get(`order:${orderId}`));
+    assert.equal(order.status, "in_work");
+  });
+});
+
+test("accepting an order twice does not message the client twice", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const { orderId } = await (await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv))).json();
+    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${orderId}` } }), orderEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, `ord:${orderId}`)), orderEnv(kv));
+    await worker.fetch(webhookUpdate(callback(222222222, `ord:${orderId}`)), orderEnv(kv));
+    const confirmations = calls.filter(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("принята в работу"));
+    assert.equal(confirmations.length, 1);
+  });
+});
+
+test("accept button from a non-admin is refused", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const { orderId } = await (await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv))).json();
+    await worker.fetch(webhookUpdate(callback(999999999, `ord:${orderId}`)), orderEnv(kv));
+    const last = calls.filter(c => c.method === "answerCallbackQuery").pop();
+    assert.equal(last.payload.text, "Нет доступа");
+    assert.equal(JSON.parse(await kv.get(`order:${orderId}`)).status, "new");
+  });
+});

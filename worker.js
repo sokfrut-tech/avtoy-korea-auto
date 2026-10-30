@@ -99,6 +99,31 @@ async function handleReviewCallback(callback, env, adminIds) {
  return answer("Опубликовано на сайте");
 }
 
+// --- Заявки с сайта: карточка администраторам, кнопка «Принять в работу», ответ клиенту в Telegram ---
+async function handleOrderCallback(callback, env, adminIds) {
+ const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
+ const fromId = String((callback.from && callback.from.id) || "");
+ if (!adminIds.includes(fromId)) return answer("Нет доступа", true);
+ const match = String(callback.data || "").match(/^ord:([0-9a-f]{16})$/);
+ if (!match || !env.REVIEWS) return answer("Заявка не найдена", true);
+ const raw = await env.REVIEWS.get(`order:${match[1]}`);
+ if (!raw) return answer("Заявка не найдена", true);
+ const order = JSON.parse(raw);
+ if (order.status === "in_work") return answer("Заявка уже принята в работу");
+ order.status = "in_work";
+ order.acceptedBy = fromId;
+ order.acceptedAt = new Date().toISOString();
+ await env.REVIEWS.put(`order:${order.id}`, JSON.stringify(order));
+ if (callback.message) {
+  await callTelegram(env, "editMessageReplyMarkup", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => null);
+ }
+ if (order.chatId) {
+  await callTelegram(env, "sendMessage", { chat_id: order.chatId, text: "Ваша заявка принята в работу. С вами свяжутся в этом чате." });
+  return answer("Принято. Клиент получил сообщение.");
+ }
+ return answer("Принято. Клиент ещё не открыл бота по ссылке с сайта, поэтому сообщение не отправлено.", true);
+}
+
 export default {
  async fetch(request, env) {
   const url = new URL(request.url);
@@ -127,7 +152,11 @@ export default {
     return new Response("Bad Request", { status: 400 });
    }
    if (update.callback_query) {
-    try { await handleReviewCallback(update.callback_query, env, adminIds); } catch { return new Response("Telegram processing failed", { status: 502 }); }
+    const cb = update.callback_query;
+    try {
+     if (String(cb.data || "").startsWith("ord:")) await handleOrderCallback(cb, env, adminIds);
+     else await handleReviewCallback(cb, env, adminIds);
+    } catch { return new Response("Telegram processing failed", { status: 502 }); }
     return Response.json({ ok: true });
    }
    const msg = update.message;
@@ -159,6 +188,18 @@ export default {
      } else {
       await send(match[1], match[2]);
       await send(chatId, "Ответ отправлен.");
+     }
+    } else if (/^\/start order_[0-9a-f]{16}$/.test(text)) {
+     // Клиент открыл бота по ссылке с сайта: привязываем его чат к заявке.
+     const orderId = text.slice("/start order_".length);
+     const raw = env.REVIEWS ? await env.REVIEWS.get(`order:${orderId}`) : null;
+     if (!raw) {
+      await send(chatId, "Заявка не найдена. Оставьте её на сайте ещё раз.");
+     } else {
+      const order = JSON.parse(raw);
+      order.chatId = chatId;
+      await env.REVIEWS.put(`order:${orderId}`, JSON.stringify(order));
+      await send(chatId, "Спасибо! Ваша заявка получена. С вами свяжутся в этом чате.");
      }
     } else if (text === "/start" || text.startsWith("/start ")) {
      await send(chatId, "Здравствуйте! Это AVTOY KOREA 🚘\n\nПомогаем с подбором автомобилей из Кореи, Китая и ОАЭ.\n\nКоманды:\n/countries — страны покупки\n/catalog — как проходит подбор\n/contact — оставить заявку\n/help — помощь\n\nНапишите, какой автомобиль ищете, и мы передадим запрос менеджеру.");
@@ -194,6 +235,22 @@ export default {
    const f = {name:clean(d.name,100),contact:clean(d.contact,150),model:clean(d.model,150),budget:clean(d.budget,100),country:clean(d.country,80),year:clean(d.year,30),purpose:clean(d.purpose,100),details:clean(d.details,1000)};
    if (!f.name || !f.contact) return Response.json({ok:false,error:"Укажите имя и контакт для связи."},{status:400});
    const message = ["🚘 Новая заявка AVTOY KOREA","",`Имя: ${f.name}`,`Контакт: ${f.contact}`,`Марка / модель: ${f.model||"не указано"}`,`Бюджет: ${f.budget||"не указан"}`,`Страна: ${f.country||"не указана"}`,`Год от: ${f.year||"не указан"}`,`Тема обращения: ${f.purpose||"Подбор автомобиля"}`,`Пожелания: ${f.details||"нет"}`].join("\n");
+   if (env.TELEGRAM_BOT_TOKEN && adminIds.length && env.REVIEWS) {
+    const orderId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    await env.REVIEWS.put(`order:${orderId}`, JSON.stringify({ id: orderId, ...f, status: "new", chatId: null, createdAt: new Date().toISOString() }));
+    const keyboard = { inline_keyboard: [[{ text: "✅ Принять в работу", callback_data: `ord:${orderId}` }]] };
+    const deliveries = await Promise.all(adminIds.map(async chat_id => {
+     try {
+      const payload = await callTelegram(env, "sendMessage", { chat_id, text: message, reply_markup: keyboard });
+      return Boolean(payload && payload.ok === true);
+     } catch {
+      return false;
+     }
+    }));
+    if (deliveries.some(ok => !ok)) return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
+    const botUser = String(env.TELEGRAM_BOT_USERNAME || "").replace(/^@/, "");
+    return Response.json({ok:true, orderId, botLink: botUser ? `https://t.me/${botUser}?start=order_${orderId}` : null});
+   }
    if (env.TELEGRAM_BOT_TOKEN && adminIds.length) {
     const deliveries = await Promise.all(adminIds.map(async chat_id => {
      try {
@@ -259,7 +316,7 @@ export default {
 <footer><div class="wrap footer-row"><a class="brand" href="#">AVTO<em>Y</em> KOREA</a><span>Автомобили под заказ · Корея · Китай · ОАЭ</span><a class="telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">Telegram ↗</a></div></footer>
 <script>
 const form=document.getElementById('request-form'),statusEl=document.getElementById('status');
-form.addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('submit-btn');b.disabled=true;statusEl.textContent='Готовим заявку…';try{const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))});const x=await r.json();if(!r.ok||!x.ok)throw Error(x.error||'Не удалось подготовить заявку.');if(x.setupNeeded){statusEl.textContent='Заявка подготовлена. Откроется Telegram: выберите чат менеджера и отправьте сообщение.';location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText)}else{statusEl.textContent='Заявка отправлена. Спасибо!';form.reset()}}catch(err){statusEl.textContent=err.message||'Ошибка. Попробуйте ещё раз.'}finally{b.disabled=false}});
+form.addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('submit-btn');b.disabled=true;statusEl.textContent='Готовим заявку…';try{const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))});const x=await r.json();if(!r.ok||!x.ok)throw Error(x.error||'Не удалось подготовить заявку.');if(x.setupNeeded){statusEl.textContent='Заявка подготовлена. Откроется Telegram: выберите чат менеджера и отправьте сообщение.';location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText)}else{statusEl.textContent='Заявка отправлена. Спасибо!';form.reset();if(x.botLink){var a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.className='telegram';a.textContent='Открыть Telegram, чтобы получать ответ здесь';statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a)}}}catch(err){statusEl.textContent=err.message||'Ошибка. Попробуйте ещё раз.'}finally{b.disabled=false}});
 fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){var list=document.getElementById('reviews-list');if(!data.reviews||!data.reviews.length)return;list.textContent='';data.reviews.forEach(function(rv){var card=document.createElement('article');card.className='feature';var who=document.createElement('div');who.className='num';who.textContent=rv.name;var text=document.createElement('p');text.textContent=rv.text||'';card.appendChild(who);card.appendChild(text);if(rv.media){var el=document.createElement(rv.kind==='video'?'video':'img');el.className='review-media';el.src=rv.media;if(rv.kind==='video'){el.controls=true;el.preload='metadata'}else{el.loading='lazy';el.alt='Фото автомобиля'}card.appendChild(el)}list.appendChild(card)})}).catch(function(){});
 </script></body></html>`;
   return new Response(html,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"strict-origin-when-cross-origin"}});
