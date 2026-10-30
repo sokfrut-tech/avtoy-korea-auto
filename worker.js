@@ -448,9 +448,9 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
     </div>
   </div>
   <div class="photo" aria-label="Галерея автомобилей">
-    <div class="hero-slide active" style="background-image:url('https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1400&q=85')"></div>
-    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1400&q=85')"></div>
-    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=1400&q=85')"></div>
+    <div class="hero-slide active" style="background-image:url('https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?auto=format&fit=crop&w=1400&q=85')"></div>
+    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=1400&q=85')"></div>
+    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?auto=format&fit=crop&w=1400&q=85')"></div>
     <div class="hero-caption">Автомобили из Кореи, Китая и ОАЭ</div>
     <div class="hero-dots" aria-hidden="true"><span class="hero-dot active"></span><span class="hero-dot"></span><span class="hero-dot"></span></div>
   </div>
@@ -459,12 +459,12 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
 <section class="wrap section" id="order" style="padding-top:40px">
   <div class="eyebrow">Как заказать</div>
   <h2>Четыре шага до вашего автомобиля</h2>
-  <p class="sub">Заполните короткую форму. Заявка сразу приходит администратору в Telegram, и он отвечает с предложениями.</p>
+  <p class="sub">Оставьте заявку — подберём подходящие варианты и свяжемся с вами в Telegram.</p>
   <div class="steps">
     <article class="card"><div class="num">01</div><h3>Заполните форму</h3><p>Марка и модель, бюджет, страна покупки, год выпуска и пожелания.</p></article>
     <article class="card"><div class="num">02</div><h3>Получите предложения</h3><p>Подбираем варианты под ваш бюджет и отвечаем вам в Telegram.</p></article>
     <article class="card"><div class="num">03</div><h3>Проверьте перед покупкой</h3><p>Оцениваем состояние автомобиля и документы до решения о покупке.</p></article>
-    <article class="card"><div class="num">04</div><h3>Доставка и итог</h3><p>Стоимость доставки и итоговая цена обсуждаются с вами отдельно.</p></article>
+    <article class="card"><div class="num">04</div><h3>Доставка до вашего города</h3><p>Организуем доставку и подготовим подробный расчёт полной стоимости автомобиля.</p></article>
   </div>
   <div class="get">
     <div class="get-title">Что вы получите после заявки</div>
