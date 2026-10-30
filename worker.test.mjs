@@ -155,19 +155,16 @@ test("only the configured review group is read, and only /review messages", asyn
   });
 });
 
-test("video review without thanks is shown to admins but cannot be published", async () => {
+test("video review without thanks can be published after admin approval", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate({ message: groupReview(10, { caption: "/review Машина нормальная", video: { file_id: "VID10" } }) }), reviewEnv(kv));
     const card = calls.find(c => c.method === "sendMessage" && String(c.payload.chat_id) === "111111111");
     assert.ok(card, "admin receives the card");
-    assert.ok(card.payload.text.includes("Благодарность: ❌ нет"));
+    assert.ok(card.payload.text.includes("Видео"));
 
     await worker.fetch(webhookUpdate(callback(111111111, "pub:" + REVIEW_GROUP + "_10")), reviewEnv(kv));
-    const denied = calls.filter(c => c.method === "answerCallbackQuery").pop();
-    assert.ok(denied.payload.text.includes("нет благодарности"));
-    assert.equal(denied.payload.show_alert, true);
-    assert.equal((await kv.list({ prefix: "approved:" })).keys.length, 0);
+    assert.equal((await kv.list({ prefix: "approved:" })).keys.length, 1);
   });
 });
 

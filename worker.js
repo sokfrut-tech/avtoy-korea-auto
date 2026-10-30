@@ -11,9 +11,8 @@ async function callTelegram(env, method, payload) {
  return response.json();
 }
 
-// Правило публикации: видео — только с благодарностью в тексте; текстовый отзыв — только с фото автомобиля.
+// Правило публикации: текстовый отзыв — только с фото автомобиля; видео публикуется по решению администратора.
 function reviewRuleProblem(review) {
- if (review.kind === "video" && !review.hasThanks) return "нет благодарности в тексте видео-отзыва";
  if (review.kind === "text" && !review.hasPhoto) return "нет фото автомобиля";
  return null;
 }
@@ -21,7 +20,7 @@ function reviewRuleProblem(review) {
 function formatReviewCard(review) {
  const kindLabel = review.kind === "video" ? "видео" : "текст";
  const check = review.kind === "video"
-  ? `Благодарность: ${review.hasThanks ? "✅ есть" : "❌ нет"}`
+  ? "Видео"
   : `Фото автомобиля: ${review.hasPhoto ? "✅ есть" : "❌ не приложено"}`;
  return ["🚘 Новый отзыв: " + kindLabel, `От: ${review.anonymous ? "скрыто" : review.name}`, `Текст: «${review.text || "без текста"}»`, check].join("\n");
 }
