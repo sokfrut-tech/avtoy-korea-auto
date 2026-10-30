@@ -380,6 +380,7 @@ h2{font-size:clamp(28px,4vw,48px);line-height:1.08;letter-spacing:-.04em;margin:
 footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-size:13px}
 .footer-row{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
 .telegram:hover{color:var(--red)}
+.telegram-promo{display:grid;grid-template-columns:1.2fr .8fr;gap:28px;align-items:center;background:linear-gradient(135deg,#071421,#0b1b2b);border:1px solid #17344d;border-radius:26px;padding:30px;margin-top:24px}.telegram-promo h2{margin:8px 0 12px}.telegram-promo p{color:var(--muted);line-height:1.65;margin:0 0 18px}.telegram-promo-qr{width:min(100%,220px);justify-self:center;background:#fff;padding:12px;border-radius:18px}.telegram-promo-qr img{display:block;width:100%;height:auto}.telegram-promo-link{display:inline-flex;align-items:center;gap:10px;background:#229ed9;color:#fff;padding:13px 18px;border-radius:999px;font-weight:800}.telegram-promo-link:hover{filter:brightness(1.08)}@media(max-width:780px){.telegram-promo{grid-template-columns:1fr;text-align:center;padding:22px 18px;gap:18px}.telegram-promo-qr{width:190px;grid-row:1}.telegram-promo h2{font-size:26px}}
 @media(max-width:780px){
   .wrap{width:calc(100% - 32px)}
   .nav{min-height:70px}
@@ -492,6 +493,20 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
   <p class="sub">Публикуем отзывы только с согласия клиентов.</p>
   <div class="reviews" id="reviews-list">
     <article class="card dashed"><div class="review-name" style="margin-top:0">Скоро здесь появятся отзывы</div><p class="review-text">Клиенты, которые уже купили автомобиль через нас, смогут поделиться опытом.</p></article>
+  </div>
+</section>
+
+<section class="wrap section" id="telegram" style="padding-top:20px">
+  <div class="telegram-promo">
+    <div>
+      <div class="eyebrow">Мы в Telegram</div>
+      <h2>Присоединяйтесь к нашему Telegram</h2>
+      <p>Следите за новыми автомобилями, свежими предложениями и новостями. Напишите нам напрямую — будем на связи.</p>
+      <a class="telegram-promo-link" href="https://t.me/AVTOYKOREABOT" target="_blank" rel="noopener">✈ Открыть бота @AVTOYKOREABOT</a>
+    </div>
+    <a class="telegram-promo-qr" href="https://t.me/AVTOYKOREABOT" target="_blank" rel="noopener" aria-label="Открыть Telegram-бота по QR-коду">
+      <img src="/telegram-qr.png" alt="QR-код для перехода в Telegram-бот AVTOYKOREABOT">
+    </a>
   </div>
 </section>
 
