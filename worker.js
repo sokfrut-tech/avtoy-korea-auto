@@ -552,7 +552,7 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
     <div>
       <div class="eyebrow">Бесплатный подбор</div>
       <h2>Какой автомобиль вы ищете?</h2>
-      <p class="form-intro">Оставьте параметры автомобиля и удобный контакт. Администратор свяжется с вами в Telegram.</p>
+      <p class="form-intro">Оставьте параметры автомобиля и удобный контакт. Мы свяжемся с вами в Telegram.</p>
       <p class="hint">Можно обратиться и по вопросам рекламы, партнёрства или размещения предложений.</p>
     </div>
     <div>
