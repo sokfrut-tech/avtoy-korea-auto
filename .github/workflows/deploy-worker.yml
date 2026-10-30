@@ -48,4 +48,4 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: deploy worker.js --name avtoy-korea-auto
+          command: deploy worker.js --name avtoy-korea-auto --compatibility-date 2026-10-23
