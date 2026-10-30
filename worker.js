@@ -98,6 +98,40 @@ async function handleReviewCallback(callback, env, adminIds) {
  return answer("Опубликовано на сайте");
 }
 
+// --- Автомобили из Telegram-канала: публикация только после одобрения ---
+async function handleCarPost(post, env, adminIds) {
+ const chat = post.chat || {};
+ if (String(chat.username || "").toLowerCase() !== "avtoyKorea".toLowerCase()) return;
+ const caption = String(post.caption || post.text || "").trim().slice(0, 3000);
+ const photos = Array.isArray(post.photo) ? post.photo : [];
+ const fileId = photos.length ? photos[photos.length - 1].file_id : null;
+ if (!caption && !fileId) return;
+ if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return; }
+ const id = "car_" + String(chat.id).replace(/-/g,"") + "_" + String(post.message_id);
+ const car = {id,caption,fileId,sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id,createdAt:new Date().toISOString()};
+ await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
+ const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}]]};
+ await Promise.all(adminIds.map(async adminId => {
+  if (fileId) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:fileId});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 Объявление из канала AVTOY KOREA\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
+ }));
+}
+
+async function handleCarCallback(callback, env, adminIds) {
+ const answer = (text, alert=false) => callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
+ const fromId = String((callback.from && callback.from.id) || "");
+ if (!adminIds.includes(fromId)) return answer("Нет доступа",true);
+ const match = String(callback.data || "").match(/^car(pub|rej):(car_-?[0-9]+_[0-9]+)$/);
+ if (!match || !env.REVIEWS) return answer("Объявление не найдено",true);
+ const action = match[1], id = match[2];
+ const raw = await env.REVIEWS.get("car_pending:" + id);
+ if (!raw) return answer("Объявление уже обработано или не найдено",true);
+ const car = JSON.parse(raw);
+ if (action === "rej") { await env.REVIEWS.delete("car_pending:" + id); return answer("Объявление отклонено"); }
+ await env.REVIEWS.put("car_approved:" + id,JSON.stringify({...car,publishedAt:new Date().toISOString()}));
+ await env.REVIEWS.delete("car_pending:" + id);
+ return answer("Автомобиль опубликован на сайте");
+}
 // --- Заявки с сайта: карточка администраторам, кнопка «Принять в работу», ответ клиенту в Telegram ---
 async function handleOrderCallback(callback, env, adminIds) {
  const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
@@ -154,10 +188,13 @@ export default {
     const cb = update.callback_query;
     try {
      if (String(cb.data || "").startsWith("ord:")) await handleOrderCallback(cb, env, adminIds);
+     else if (String(cb.data || "").startsWith("car")) await handleCarCallback(cb, env, adminIds);
      else await handleReviewCallback(cb, env, adminIds);
     } catch { return new Response("Telegram processing failed", { status: 502 }); }
     return Response.json({ ok: true });
    }
+   const channelPost = update.channel_post;
+   if (channelPost) { try { await handleCarPost(channelPost, env, adminIds); } catch { return new Response("Telegram car processing failed", {status:502}); } return Response.json({ok:true}); }
    const msg = update.message;
    if (!msg || !msg.chat || !msg.chat.id) return Response.json({ ok: true });
    // Groups/channels: only the one review group, only /review messages. Everything else is ignored.
@@ -265,16 +302,44 @@ export default {
    }
    return Response.json({ok:true,telegramText:message,setupNeeded:true});
   }
+  if (request.method === "GET" && url.pathname === "/api/cars") {
+   const cars = [];
+   if (env.REVIEWS) {
+    let cursor;
+    do {
+     const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); cars.push({id:car.id,caption:car.caption,media:car.fileId ? "/api/car-media/" + car.id : null,sourceUrl:car.sourceUrl || "",publishedAt:car.publishedAt}); }
+     cursor = page.list_complete ? null : page.cursor;
+    } while (cursor);
+   }
+   cars.sort((a,b)=>String(b.publishedAt||"").localeCompare(String(a.publishedAt||"")));
+   return Response.json({cars},{headers:{"cache-control":"no-store"}});
+  }
+  const carMediaId = url.pathname.startsWith("/api/car-media/") ? url.pathname.slice("/api/car-media/".length) : "";
+  const carMediaMatch = /^car_-?[0-9]+_[0-9]+$/.test(carMediaId) ? [null, carMediaId] : null;
+  if (request.method === "GET" && carMediaMatch) {
+   if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found",{status:404});
+   const raw = await env.REVIEWS.get("car_approved:" + carMediaMatch[1]); if (!raw) return new Response("Not found",{status:404});
+   const car = JSON.parse(raw); if (!car.fileId) return new Response("Not found",{status:404});
+   const info = await callTelegram(env,"getFile",{file_id:car.fileId}).catch(()=>null); const path = info && info.result && info.result.file_path;
+   if (!path) return new Response("Not found",{status:404});
+   const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path); if (!upstream.ok) return new Response("Bad Gateway",{status:502});
+   return new Response(upstream.body,{headers:{"content-type":"image/jpeg","cache-control":"public, max-age=3600","x-content-type-options":"nosniff"}});
+  }
   if (request.method === "GET" && url.pathname === "/api/reviews") {
    const reviews = [];
    if (env.REVIEWS) {
-    const list = await env.REVIEWS.list({ prefix: "approved:" });
-    for (const key of list.keys) {
-     const raw = await env.REVIEWS.get(key.name);
-     if (!raw) continue;
-     const r = JSON.parse(raw);
-     reviews.push({ id: r.id, kind: r.kind, text: r.text, name: r.name || "Клиент", media: r.fileId ? `/api/review-media/${r.id}` : null });
-    }
+    let cursor;
+    do {
+     const page = await env.REVIEWS.list({prefix:"approved:", ...(cursor ? {cursor} : {})});
+     for (const key of page.keys) {
+      const raw = await env.REVIEWS.get(key.name);
+      if (!raw) continue;
+      const r = JSON.parse(raw);
+      reviews.push({id:r.id,kind:r.kind,text:r.text,name:r.name || "Клиент",media:r.fileId ? `/api/review-media/${r.id}` : null});
+     }
+     cursor = page.list_complete ? null : page.cursor;
+    } while (cursor);
    }
    return Response.json({ reviews }, { headers: { "cache-control": "no-store" } });
   }
@@ -303,7 +368,7 @@ export default {
 <title>AVTOY KOREA: автомобили под заказ</title>
 <style>
 :root{color-scheme:dark;--bg:#08090b;--panel:#121419;--line:#292c33;--text:#f7f7f8;--muted:#a3a5ad;--red:#ff4b35;--max:1160px}
-*{box-sizing:border-box}
+*{box-sizing:border-box;min-width:0}img,video,iframe{max-width:100%}body{overflow-x:hidden}
 html{scroll-behavior:smooth;scroll-padding-top:90px}
 body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;line-height:1.55}
 a{color:inherit;text-decoration:none}
@@ -380,9 +445,9 @@ h2{font-size:clamp(28px,4vw,48px);line-height:1.08;letter-spacing:-.04em;margin:
 footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-size:13px}
 .footer-row{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
 .telegram:hover{color:var(--red)}
-.telegram-promo{display:grid;grid-template-columns:1.2fr .8fr;gap:28px;align-items:center;background:linear-gradient(135deg,#071421,#0b1b2b);border:1px solid #17344d;border-radius:26px;padding:30px;margin-top:24px}.telegram-promo h2{margin:8px 0 12px}.telegram-promo p{color:var(--muted);line-height:1.65;margin:0 0 18px}.telegram-promo-qr{width:min(100%,220px);justify-self:center;background:#fff;padding:12px;border-radius:18px}.telegram-promo-qr img{display:block;width:100%;height:auto}.telegram-promo-link{display:inline-flex;align-items:center;gap:10px;background:#229ed9;color:#fff;padding:13px 18px;border-radius:999px;font-weight:800}.telegram-promo-link:hover{filter:brightness(1.08)}@media(max-width:780px){.telegram-promo{grid-template-columns:1fr;text-align:center;padding:22px 18px;gap:18px}.telegram-promo-qr{width:190px;grid-row:1}.telegram-promo h2{font-size:26px}}
+.telegram-promo{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:28px;align-items:center;background:linear-gradient(135deg,#071421,#0b1b2b);border:1px solid #17344d;border-radius:26px;padding:30px;margin-top:24px;overflow:hidden}.telegram-promo h2{margin:8px 0 12px}.telegram-promo p{color:var(--muted);line-height:1.65;margin:0 0 18px}.telegram-promo-qr{display:block;width:min(100%,220px);justify-self:center;background:#fff;padding:12px;border-radius:18px}.telegram-promo-qr img{display:block;width:100%;height:auto}.telegram-promo-link{display:inline-flex;align-items:center;background:#229ed9;color:#fff;padding:13px 18px;border-radius:999px;font-weight:800}@media(max-width:780px){.telegram-promo{grid-template-columns:minmax(0,1fr);text-align:center;padding:22px 18px;gap:18px}.telegram-promo-qr{width:190px;grid-row:1}}
 @media(max-width:780px){
-  .wrap{width:calc(100% - 32px)}
+  .wrap{width:calc(100% - 32px);max-width:100%}
   .nav{min-height:70px}
   .brand{font-size:16px}
   .brand small{font-size:8px}
@@ -449,9 +514,9 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
     </div>
   </div>
   <div class="photo" aria-label="Галерея автомобилей">
-    <div class="hero-slide active" style="background-image:url('https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?auto=format&fit=crop&w=1400&q=85')"></div>
-    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=1400&q=85')"></div>
-    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?auto=format&fit=crop&w=1400&q=85')"></div>
+    <div class="hero-slide active" style="background-image:url('https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1400&q=85')"></div>
+    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1400&q=85')"></div>
+    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=1400&q=85')"></div>
     <div class="hero-caption">Автомобили из Кореи, Китая и ОАЭ</div>
     <div class="hero-dots" aria-hidden="true"><span class="hero-dot active"></span><span class="hero-dot"></span><span class="hero-dot"></span></div>
   </div>
@@ -460,12 +525,12 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
 <section class="wrap section" id="order" style="padding-top:40px">
   <div class="eyebrow">Как заказать</div>
   <h2>Четыре шага до вашего автомобиля</h2>
-  <p class="sub">Оставьте заявку — подберём подходящие варианты и свяжемся с вами в Telegram.</p>
+  <p class="sub">Заполните короткую форму. Заявка сразу приходит администратору в Telegram, и он отвечает с предложениями.</p>
   <div class="steps">
     <article class="card"><div class="num">01</div><h3>Заполните форму</h3><p>Марка и модель, бюджет, страна покупки, год выпуска и пожелания.</p></article>
     <article class="card"><div class="num">02</div><h3>Получите предложения</h3><p>Подбираем варианты под ваш бюджет и отвечаем вам в Telegram.</p></article>
     <article class="card"><div class="num">03</div><h3>Проверьте перед покупкой</h3><p>Оцениваем состояние автомобиля и документы до решения о покупке.</p></article>
-    <article class="card"><div class="num">04</div><h3>Доставка до вашего города</h3><p>Организуем доставку и подготовим подробный расчёт полной стоимости автомобиля.</p></article>
+    <article class="card"><div class="num">04</div><h3>Доставка и итог</h3><p>Стоимость доставки и итоговая цена обсуждаются с вами отдельно.</p></article>
   </div>
   <div class="get">
     <div class="get-title">Что вы получите после заявки</div>
@@ -482,11 +547,7 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
   <div class="eyebrow">Наши автомобили</div>
   <h2>Примеры выполненных заказов</h2>
   <p class="sub">Точная стоимость зависит от курса и условий. Уточняйте у администратора.</p>
-  <div class="cars">
-    <article class="card car-card"><div class="car-photo" role="img" aria-label="Audi Q3" style="background-image:url('https://images.unsplash.com/photo-1617469767053-d3b523a0b982?auto=format&fit=crop&w=900&q=82')"></div><div class="car-body"><h3>Audi Q3 35 TFSI</h3><div class="car-specs">2021 · 1.4 л · 150 л.с. · бензин<br>2WD · пробег 37 000 км · 5 мест</div><div class="car-foot"><div><div class="car-label">Пример расчёта · до Рязани</div><div class="car-price">2 800 000 ₽</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
-    <article class="card car-card"><div class="car-photo" role="img" aria-label="Kia Sportage" style="background-image:url('https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?auto=format&fit=crop&w=900&q=82')"></div><div class="car-body"><h3>Kia Sportage</h3><div class="car-specs">Подбор комплектации и года выпуска под ваш бюджет</div><div class="car-foot"><div><div class="car-label">Под заказ</div><div class="car-price">Рассчитать</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
-    <article class="card car-card"><div class="car-photo" role="img" aria-label="Hyundai Sonata" style="background-image:url('https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=900&q=82')"></div><div class="car-body"><h3>Hyundai Sonata</h3><div class="car-specs">Подбор комплектации и года выпуска под ваш бюджет</div><div class="car-foot"><div><div class="car-label">Под заказ</div><div class="car-price">Рассчитать</div></div><a class="car-link" href="#request">Обсудить →</a></div></div></article>
-  </div>
+  <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Объявления из Telegram появятся после проверки и одобрения администратором.</div></article></div>
 </section>
 <section class="wrap section" id="reviews" style="padding-top:20px">
   <h2>Отзывы наших клиентов</h2>
@@ -498,18 +559,14 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
 
 <section class="wrap section" id="telegram" style="padding-top:20px">
   <div class="telegram-promo">
-    <div>
-      <div class="eyebrow">Мы в Telegram</div>
-      <h2>Присоединяйтесь к нашему Telegram</h2>
-      <p>Следите за новыми автомобилями, свежими предложениями и новостями. Напишите нам напрямую — будем на связи.</p>
-      <a class="telegram-promo-link" href="https://t.me/AVTOYKOREABOT" target="_blank" rel="noopener">✈ Открыть бота @AVTOYKOREABOT</a>
-    </div>
+    <div><div class="eyebrow">Мы в Telegram</div><h2>Присоединяйтесь к нашему Telegram</h2>
+    <p>Следите за новыми автомобилями, свежими предложениями и новостями. Напишите нам напрямую — будем на связи.</p>
+    <a class="telegram-promo-link" href="https://t.me/AVTOYKOREABOT" target="_blank" rel="noopener">Открыть бота @AVTOYKOREABOT</a></div>
     <a class="telegram-promo-qr" href="https://t.me/AVTOYKOREABOT" target="_blank" rel="noopener" aria-label="Открыть Telegram-бота по QR-коду">
-      <img src="/telegram-qr.png" alt="QR-код для перехода в Telegram-бот AVTOYKOREABOT">
+      <img src="data:image/png;base64,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" alt="QR-код для перехода в Telegram-бот AVTOYKOREABOT">
     </a>
   </div>
 </section>
-
 <section class="wrap section" id="request" style="padding-top:20px">
   <div class="form-card">
     <div>
@@ -562,6 +619,20 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
     card.appendChild(who);card.appendChild(text);list.appendChild(card);
   });
 }).catch(function(){});
+// Каталог показывает только одобренные публикации из Telegram
+fetch('/api/cars',{cache:'no-store'}).then(r=>r.json()).then(data=>{
+ const list=document.getElementById('cars-list'); if(!list || !data.cars || !data.cars.length)return; list.textContent='';
+ data.cars.forEach(car=>{
+  const article=document.createElement('article'); article.className='card car-card';
+  if(car.media){const img=document.createElement('img');img.className='review-media';img.src=car.media;img.alt='Фотография автомобиля';img.loading='lazy';article.appendChild(img)}
+  const body=document.createElement('div');body.className='car-body';
+  const title=document.createElement('h3');title.textContent=(car.caption||'Автомобиль из объявления').split('\n')[0].slice(0,120);
+  const desc=document.createElement('div');desc.className='car-specs';desc.style.display='block';desc.style.whiteSpace='pre-line';desc.textContent=car.caption||'Описание не указано';
+  body.appendChild(title);body.appendChild(desc);
+  if(car.sourceUrl){const a=document.createElement('a');a.className='car-link';a.href=car.sourceUrl;a.target='_blank';a.rel='noopener';a.textContent='Исходная публикация →';body.appendChild(a)}
+  article.appendChild(body);list.appendChild(article);
+ });
+}).catch(()=>{});
 // Плавная смена фотографий в главном блоке
 (function(){
   var slides=document.querySelectorAll('.hero-slide');
