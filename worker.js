@@ -157,7 +157,8 @@ function formatReviewCard(review) {
 async function handleAdminMediaUpload(msg, env, adminIds) {
  const adminId = String(msg.chat && msg.chat.id || "");
  if (!adminIds.includes(adminId) || msg.forward_origin) return false;
- const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
+ const photos = Array.isArray(msg.photo) && msg.photo.length ? msg.photo : [];
+ const photo = photos.length ? photos[photos.length - 1] : null;
  const video = msg.video || null;
  if (!photo && !video) return false;
  if (!env.REVIEWS) {
@@ -173,7 +174,7 @@ async function handleAdminMediaUpload(msg, env, adminIds) {
  }
  if (!state) {
   const caption = String(msg.caption || "").trim().slice(0,1000);
-  const review = {id,kind:video ? "video" : "text",text:caption,name:"Администратор загрузил",fileId:video ? video.file_id : photo.file_id,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(caption),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"Загрузка администратора"};
+  const review = {id,kind:video ? "video" : "text",text:caption,name:"Администратор загрузил",fileId:video ? video.file_id : photo.file_id,photos:photos.map(item=>({file_id:item.file_id})),hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(caption),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"Загрузка администратора"};
   state = {review,cardSent:false,status:"pending"};
   await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
   await env.REVIEWS.put(uploadKey,JSON.stringify(state),{expirationTtl:2592000});
