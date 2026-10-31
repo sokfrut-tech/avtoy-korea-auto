@@ -58,3 +58,23 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - The production `main` Worker requires the `X-Telegram-Bot-Api-Secret-Token` header to equal `TELEGRAM_WEBHOOK_SECRET` and returns 503 if bot configuration is missing.
 - The README documents manual Telegram webhook registration to `https://avtoy-korea-auto.sokfrut.workers.dev/telegram/webhook` with the matching `secret_token`. The Worker code does not self-register the webhook.
 - The production Worker and PR code require the persistent `REVIEWS` KV binding for order persistence. Its actual Cloudflare binding is not confirmed from repository CI.
+
+
+## Independent static audit — 2026-10-31 15:25 UTC
+- Current `main` SHA observed: `cfae5aaa4b3a00e3c11060467973cd224ccd0721`; PR #12 base SHA is the same. The PR metadata reports `mergeable=true`. A direct compare endpoint was unavailable, so an exact ahead/behind count has not been independently confirmed.
+- Production Cloudflare deployment workflow #17 completed successfully for main SHA `cfae5aaa4b3a00e3c11060467973cd224ccd0721`; the job confirmed GitHub Actions deployment secrets were present and the Wrangler deploy step succeeded. This does not confirm Cloudflare Worker runtime secrets, KV binding, Telegram webhook state, or end-to-end operation.
+- AppDeploy AVTOY app `avtoy-korea-e55k1k` separately reports `ready`; QA snapshot shows no frontend/network/backend errors. This is a different origin/runtime from the Cloudflare Worker and must not be used as proof of Worker/Telegram health. AppDeploy secret-name inventory shows the Telegram variable names exist there, but values are intentionally hidden and are not Cloudflare Worker secrets.
+- Direct HTTP GET verification of both public origins could not be completed from this execution environment (DNS/network resolution unavailable); this is an environment limitation, not evidence that the sites are down.
+- The Cloudflare Worker README documents a manually registered Telegram webhook at `/telegram/webhook`. No safe read-only webhook diagnostic route was found in the Worker source. Do not use a route that calls Telegram `setWebhook` or sends admin test messages without explicit approval.
+- Confirmed code-level reliability risk: `stageGroupMedia()` stores `import_pending` before notifying admins and silently returns on retry if that key exists; if notification fails, the item can remain staged without admin notification. `handleImportChoice()` deletes `import_pending` before the review conversion/notification completes, so a later failure can lose the retry path. Add stateful delivery/retry handling and failure-injection tests.
+- Confirmed feature gap: private admin photo/video uploads to the bot are not handled by the private-message path; media intake currently relies on the configured review group. Decide/implement a private admin upload + preview + publish/cancel flow if direct upload remains required.
+- Factory security lane currently only checks that source/test files exist; it is not a security/privacy audit. Functional suite includes 50 regression tests, but needs failure-injection coverage for review notification retry, import-choice failure, concurrent callbacks, and bind-token write/Telegram failure ordering.
+- Independent Claude review requested in PR conversation; no Claude response observed yet at this timestamp.
+
+## Outstanding release blockers
+1. Confirm Cloudflare runtime bindings/secrets (`REVIEWS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, `TELEGRAM_WEBHOOK_SECRET`) without revealing values.
+2. Safely verify Telegram webhook URL and secret configuration through Cloudflare/Telegram account access; do not mutate webhook during diagnosis.
+3. Perform live smoke tests for homepage, `/api/cars`, one controlled test order, private admin delivery, and `/start`; do not use real customer data.
+4. Fix and test review-media retry loss; decide whether direct private admin media upload is required and implement it if so.
+5. Replace the placeholder security job with meaningful privacy/security regression tests.
+6. Keep PR #12 open until these checks and the independent review are complete. No merge or new production deploy has been performed.
