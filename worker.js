@@ -1,3 +1,71 @@
+
+async function beginModerationEdit(callback, env, type, id, answer) {
+ const adminId = String((callback.from && callback.from.id) || "");
+ if (!env.REVIEWS) return answer("Хранилище не настроено", true);
+ const session = { type, id, createdAt: new Date().toISOString() };
+ await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 1800 });
+ const label = type === "car" ? "описание автомобиля" : "текст отзыва";
+ await callTelegram(env, "sendMessage", {
+  chat_id: adminId,
+  text: "✏️ РЕДАКТИРОВАНИЕ " + label.toUpperCase() + "\n\nОтветьте на это сообщение полным новым текстом. Текущая версия заменится только после получения вашего ответа. Исходник сохранится для администраторов.",
+  reply_markup: { force_reply: true, input_field_placeholder: "Введите исправленный текст" }
+ });
+ return answer("Жду исправленный текст в личном чате");
+}
+
+async function handleAdminModerationEditReply(msg, env, adminIds) {
+ const adminId = String(msg.chat && msg.chat.id || "");
+ if (!adminIds.includes(adminId) || !env.REVIEWS || !msg.reply_to_message) return false;
+ const prompt = String(msg.reply_to_message.text || "");
+ if (!prompt.startsWith("✏️ РЕДАКТИРОВАНИЕ ")) return false;
+ const rawSession = await env.REVIEWS.get("moderation_edit:" + adminId);
+ if (!rawSession) {
+  await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Сессия редактирования истекла. Откройте карточку и нажмите «Редактировать» ещё раз." });
+  return true;
+ }
+ const session = JSON.parse(rawSession);
+ const edited = cleanPublicationText(msg.text || msg.caption || "");
+ if (!edited) {
+  await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Текст пустой. Отправьте непустой вариант ответом на сообщение редактирования." });
+  return true;
+ }
+ const isCar = session.type === "car";
+ const key = (isCar ? "car_pending:" : "pending:") + session.id;
+ const raw = await env.REVIEWS.get(key);
+ if (!raw) {
+  await env.REVIEWS.delete("moderation_edit:" + adminId);
+  await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Материал уже обработан или не найден. Изменения не сохранены." });
+  return true;
+ }
+ const item = JSON.parse(raw);
+ if (isCar) {
+  item.originalCaption = item.originalCaption === undefined ? item.caption : item.originalCaption;
+  item.caption = edited.slice(0, 3000);
+  item.editedAt = new Date().toISOString();
+  item.editedBy = adminId;
+  await env.REVIEWS.put(key, JSON.stringify(item));
+  const keyboard = { inline_keyboard: [
+   [{ text: "✅ Опубликовать", callback_data: "carpub:" + session.id }, { text: "❌ Отклонить", callback_data: "carrej:" + session.id }],
+   [{ text: "✏️ Редактировать описание", callback_data: "caredit:" + session.id }]
+  ] };
+  await callTelegram(env, "sendMessage", { chat_id: adminId, text: "🚘 ОПИСАНИЕ АВТОМОБИЛЯ ОБНОВЛЕНО\n\n" + item.caption + "\n\nИсходный текст сохранён в хранилище.", reply_markup: keyboard });
+ } else {
+  item.originalText = item.originalText === undefined ? item.text : item.originalText;
+  item.text = edited.slice(0, 1000);
+  item.hasThanks = THANKS_PATTERN.test(item.text);
+  item.editedAt = new Date().toISOString();
+  item.editedBy = adminId;
+  await env.REVIEWS.put(key, JSON.stringify(item));
+  const keyboard = { inline_keyboard: [
+   [{ text: "✅ Опубликовать", callback_data: "pub:" + session.id }, { text: "❌ Не публиковать", callback_data: "rej:" + session.id }],
+   [{ text: "🙈 Скрыть имя", callback_data: "anon:" + session.id }, { text: "✏️ Редактировать текст", callback_data: "edit:" + session.id }]
+  ] };
+  await callTelegram(env, "sendMessage", { chat_id: adminId, text: formatReviewCard(item) + "\n\nТекст обновлён. Исходный текст сохранён в хранилище.", reply_markup: keyboard });
+ }
+ await env.REVIEWS.delete("moderation_edit:" + adminId);
+ return true;
+}
+
 // --- Отзывы: модерация администратором через кнопки в личке с ботом ---
 const THANKS_PATTERN = /спасибо|благодар/i;
 
@@ -107,7 +175,7 @@ async function handleReviewSubmission(msg, env, adminIds) {
  await env.REVIEWS.put(`pending:${id}`, JSON.stringify(review));
  const keyboard = { inline_keyboard: [
   [{ text: "✅ Опубликовать", callback_data: `pub:${id}` }, { text: "❌ Не публиковать", callback_data: `rej:${id}` }],
-  [{ text: "🙈 Скрыть имя", callback_data: `anon:${id}` }]
+  [{ text: "🙈 Скрыть имя", callback_data: `anon:${id}` }, { text: "✏️ Редактировать текст", callback_data: `edit:${id}` }]
  ] };
  await Promise.all(adminIds.map(async adminId => {
   if (review.fileId) {
@@ -121,12 +189,13 @@ async function handleReviewCallback(callback, env, adminIds) {
  const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
  const fromId = String((callback.from && callback.from.id) || "");
  if (!adminIds.includes(fromId)) return answer("Нет доступа", true);
- const match = String(callback.data || "").match(/^(pub|rej|anon):(-?\d+_\d+)$/);
+ const match = String(callback.data || "").match(/^(pub|rej|anon|edit):(-?\d+_\d+)$/);
  if (!match || !env.REVIEWS) return answer("Отзыв не найден", true);
  const [, action, id] = match;
  const raw = await env.REVIEWS.get(`pending:${id}`);
  if (!raw) return answer("Отзыв уже обработан или не найден", true);
  const review = JSON.parse(raw);
+ if (action === "edit") return beginModerationEdit(callback, env, "review", id, answer);
  if (action === "anon") {
   review.anonymous = true;
   await env.REVIEWS.put(`pending:${id}`, JSON.stringify(review));
@@ -186,7 +255,7 @@ async function handleCarPost(post, env, adminIds) {
  }
  const car = {id,caption,fileId,photos,mediaType:post.video ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id,createdAt:new Date().toISOString(),sourceDate:created};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
- const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}]]};
+ const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
   if (photos.length > 1) {
    const media = photos.slice(0,10).map((photo,index)=>({type:"photo",media:photo.file_id,...(index===0 && caption ? {caption:caption.slice(0,1024)} : {})}));
@@ -336,12 +405,13 @@ async function handleCarCallback(callback, env, adminIds) {
  const answer = (text, alert=false) => callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
  const fromId = String((callback.from && callback.from.id) || "");
  if (!adminIds.includes(fromId)) return answer("Нет доступа",true);
- const match = String(callback.data || "").match(/^car(pub|rej):(car_-?[0-9]+_[0-9]+)$/);
+ const match = String(callback.data || "").match(/^car(pub|rej|edit):(car_-?[0-9]+_[0-9]+)$/);
  if (!match || !env.REVIEWS) return answer("Объявление не найдено",true);
  const action = match[1], id = match[2];
  const raw = await env.REVIEWS.get("car_pending:" + id);
  if (!raw) return answer("Объявление уже обработано или не найдено",true);
  const car = JSON.parse(raw);
+ if (action === "edit") return beginModerationEdit(callback, env, "car", id, answer);
  if (action === "rej") { await env.REVIEWS.delete("car_pending:" + id); return answer("Объявление отклонено"); }
  await env.REVIEWS.put("car_approved:" + id,JSON.stringify({...car,publishedAt:new Date().toISOString()}));
  await env.REVIEWS.delete("car_pending:" + id);
@@ -490,6 +560,7 @@ export default {
    });
    try {
     if (await handleAdminMediaUpload(msg, env, adminIds)) return Response.json({ok:true});
+    if (await handleAdminModerationEditReply(msg, env, adminIds)) return Response.json({ok:true});
     // /myid returns only the sender's own numeric Telegram ID for safe admin configuration.
     if (/^\/myid(?:@\w+)?$/i.test(text)) {
      await send(chatId, "Ваш Telegram ID: " + chatId + "\nПередайте этот номер владельцу настройки TELEGRAM_ADMIN_IDS. Не отправляйте токен бота.");
