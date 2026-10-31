@@ -781,3 +781,50 @@ test("website form does not resend an old stored payload after the customer edit
   assert.equal(sent[1].body.contact, "+79001112233", "corrected contact must be sent, not the stale one");
   assert.notEqual(sent[1].key, sent[0].key, "edited form must get a new idempotency key");
 });
+
+
+test("webhook retry skips admins who already received a client message", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  const deliveries = [];
+  let failSecondAdmin = true;
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const payload = JSON.parse(init.body || "{}");
+      const recipient = String(payload.chat_id);
+      deliveries.push(recipient);
+      if (recipient === "222222222" && failSecondAdmin) return Response.json({ ok: false, description: "temporary failure" });
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const update = { update_id: 987654321, message: {
+      message_id: 77, chat: { id: 333333333, type: "private" },
+      from: { id: 333333333, first_name: "Client" }, text: "Нужна консультация"
+    }};
+    const first = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(first.status, 502);
+    assert.deepEqual(deliveries, ["111111111", "222222222"]);
+    failSecondAdmin = false;
+    const retry = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(retry.status, 200);
+    assert.deepEqual(deliveries, ["111111111", "222222222", "222222222"]);
+    assert.ok(await kv.get("webhook_delivery:987654321"));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("admin native Reply never sends a whitespace-only customer message", async () => {
+  const kv = memoryKV();
+  const order = { id: "0123456789abcdef", number: "1793456789012", contact: "+79990000000", chatId: "444444444", status: "new" };
+  await kv.put("order_no:" + order.number, JSON.stringify(order));
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(webhook({
+      chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "   ",
+      reply_to_message: { text: "🚘 Новая заявка №" + order.number }
+    }), orderEnv(kv));
+    assert.equal(response.status, 200);
+    assert.equal(calls.some(c => String(c.payload.chat_id) === "444444444"), false);
+    assert.ok(calls.some(c => String(c.payload.chat_id) === "111111111" && /Ответ пустой/.test(c.payload.text)));
+  });
+});
