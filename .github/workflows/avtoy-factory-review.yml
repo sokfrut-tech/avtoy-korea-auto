@@ -7,6 +7,8 @@ on:
       - 'worker.js'
       - 'worker.test.mjs'
       - 'README.md'
+      - 'AGENTS.md'
+      - 'docs/**'
       - '.github/workflows/**'
   push:
     branches: [feature/numbered-private-order-workflow]
@@ -14,6 +16,8 @@ on:
       - 'worker.js'
       - 'worker.test.mjs'
       - 'README.md'
+      - 'AGENTS.md'
+      - 'docs/**'
       - '.github/workflows/**'
   workflow_dispatch:
 
