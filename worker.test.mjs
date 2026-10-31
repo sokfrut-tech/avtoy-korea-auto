@@ -446,20 +446,35 @@ test("site order goes to every admin with an accept button and returns a bot lin
     const body = await res.json();
     assert.equal(body.ok, true);
     assert.match(body.orderId, /^[0-9a-f]{16}$/);
-    assert.equal(body.botLink, `https://t.me/avtoy_test_bot?start=order_${body.orderId}`);
+    assert.match(body.botLink, /^https:\/\/t\.me\/avtoy_test_bot\?start=order_[0-9a-f]{64}$/);
     const cards = calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup);
     assert.equal(cards.length, 2);
     assert.equal(cards[0].payload.reply_markup.inline_keyboard[0][0].callback_data, `ord:${body.orderNumber}`);
   });
 });
 
+test("Telegram binding token is one-time and cannot bind a second chat", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const created=await (await worker.fetch(siteRequest({name:"Анна",contact:"@anna"}),orderEnv(kv))).json();
+  const token=new URL(created.botLink).searchParams.get("start").slice("order_".length);
+  assert.match(token,/^[0-9a-f]{64}$/);
+  await worker.fetch(webhookUpdate({message:{chat:{id:444444444,type:"private"},text:"/start order_"+token}}),orderEnv(kv));
+  assert.equal(await kv.get("bind_token:"+token),null);
+  await worker.fetch(webhookUpdate({message:{chat:{id:555555555,type:"private"},text:"/start order_"+token}}),orderEnv(kv));
+  const order=JSON.parse(await kv.get("order:"+created.orderId));
+  assert.equal(String(order.chatId),"444444444");
+  assert.ok(calls.some(c=>String(c.payload.chat_id)==="555555555"&&c.payload.text.includes("недействительна")));
+ });
+});
 test("client opens the link, admin accepts, client gets the confirmation", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
     const res = await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv));
-    const { orderId } = await res.json();
+    const { orderId, botLink } = await res.json();
+    const bindToken = new URL(botLink).searchParams.get("start").slice("order_".length);
 
-    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${orderId}` } }), orderEnv(kv));
+    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${bindToken}` } }), orderEnv(kv));
     assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("заявка получена")));
 
     await worker.fetch(webhookUpdate(callback(111111111, `ord:${orderId}`)), orderEnv(kv));
@@ -472,8 +487,10 @@ test("client opens the link, admin accepts, client gets the confirmation", async
 test("accepting an order twice does not message the client twice", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
-    const { orderId } = await (await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv))).json();
-    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${orderId}` } }), orderEnv(kv));
+    const created = await (await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv))).json();
+    const { orderId } = created;
+    const bindToken = new URL(created.botLink).searchParams.get("start").slice("order_".length);
+    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${bindToken}` } }), orderEnv(kv));
     await worker.fetch(webhookUpdate(callback(111111111, `ord:${orderId}`)), orderEnv(kv));
     await worker.fetch(webhookUpdate(callback(222222222, `ord:${orderId}`)), orderEnv(kv));
     const confirmations = calls.filter(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("принята в работу"));
