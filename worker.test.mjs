@@ -1091,6 +1091,20 @@ test("failed order acceptance notification is retried on the next callback", asy
 });
 
 
+test("admin edit session ignores replies to unrelated messages", async () => {
+ const kv=memoryKV();
+ const id="-100123_900";
+ await kv.put("pending:"+id,JSON.stringify({id,kind:"video",text:"Исходный текст",name:"Клиент",fileId:"VIDEO",hasPhoto:false,anonymous:false}));
+ await withTelegramMock(async calls=>{
+  await worker.fetch(webhookUpdate(callback(111111111,"edit:"+id)),reviewEnv(kv));
+  const response=await worker.fetch(webhookUpdate({message:{message_id:901,chat:{id:111111111,type:"private"},from:{id:111111111},text:"Это обычный ответ",reply_to_message:{text:"Другое сообщение бота"}}}),reviewEnv(kv));
+  assert.equal(response.status,200);
+  const saved=JSON.parse(await kv.get("pending:"+id));
+  assert.equal(saved.text,"Исходный текст");
+  assert.ok(await kv.get("moderation_edit:111111111"),"edit session must remain active");
+ });
+});
+
 test("admin can edit a pending review before publishing; original text is retained", async () => {
  const kv = memoryKV();
  const id = "-100123_901";

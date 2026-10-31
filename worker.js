@@ -18,11 +18,10 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
  if (!adminIds.includes(adminId) || !env.REVIEWS || !msg.reply_to_message) return false;
  const rawSession = await env.REVIEWS.get("moderation_edit:" + adminId);
  if (!rawSession) return false;
- if (!rawSession) {
-  await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Сессия редактирования истекла. Откройте карточку и нажмите «Редактировать» ещё раз." });
-  return true;
- }
+ const promptText = String(msg.reply_to_message.text || msg.reply_to_message.caption || "");
+ if (!promptText.startsWith("✏️ РЕДАКТИРОВАНИЕ ")) return false;
  const session = JSON.parse(rawSession);
+ if (!session || !["review", "car"].includes(session.type) || !session.id) return false;
  const edited = cleanPublicationText(msg.text || msg.caption || "");
  if (!edited) {
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Текст пустой. Отправьте непустой вариант ответом на сообщение редактирования." });
