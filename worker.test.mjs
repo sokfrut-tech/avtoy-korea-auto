@@ -826,7 +826,7 @@ test("channel album imports one vehicle with all photos", async () => {
     const staged = JSON.parse(await kv.get("import_pending:-100555_77"));
     assert.equal(staged.post.caption, "Kia Sorento 2022");
     assert.deepEqual(staged.post.photo.map(p => p.file_id), ["PHOTO_1","PHOTO_2"]);
-    assert.equal(calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_77").length, 1);
+    assert.equal(calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_77").length, 2); // one notification per configured admin
     await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_77")), reviewEnv(kv));
     const cars = await kv.list({prefix:"car_pending:"});
     assert.equal(cars.keys.length, 1);
