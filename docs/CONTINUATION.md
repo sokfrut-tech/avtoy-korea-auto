@@ -110,3 +110,14 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - No live Worker deployment, merge, webhook change, or secret mutation performed. User approval is needed before publishing the branch to production.
 - Verification: Cloudflare Worker checks #109 succeeded (`41215441345`); Factory Review #44 succeeded (`41215441332`) with functional/regression, security/privacy and director/release-evidence jobs all green. Automated tests do not replace visual checks on real phone/tablet/desktop browsers.
 - Next: inspect workflow results, review CSS for regressions, then request explicit approval before production deployment. After deployment, ask user to refresh the site and inspect mobile layout.
+
+## Production release — 2026-10-31 15:36 UTC
+- User explicitly approved publishing the responsive tile-based site update.
+- PR #12 was squash-merged into `main`: https://github.com/sokfrut-tech/avtoy-korea-auto/pull/12
+- Merge commit: `00e1a00ab55cf20256706f90dbfd9991849610e2`.
+- `main/worker.js` now contains the responsive CSS update (content SHA `1028177c914b130e722f9440ce6336c22deaa271`).
+- Pre-merge validation on the exact PR head `34d4d5567cb8453b0187a52d0c8b443b92b20841`: Cloudflare Worker checks #111 succeeded; Factory Review #48 succeeded (functional/regression, security/privacy, and release-evidence jobs).
+- The repository deploy workflow is configured to deploy `worker.js` automatically on pushes to `main`, using GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. The merge should trigger that workflow; however, this environment's GitHub connector does not expose push-triggered workflow-run listing, so the actual deployment run/result is not yet independently confirmed here.
+- Live Worker URL open check through the available web fetch was inaccessible; this is not evidence of a site outage and does not prove the new version is live.
+- No Telegram webhook or secret values were changed. Live Telegram `/start`, website form submission, KV binding, and device/browser visual checks remain unverified.
+- Next: confirm the GitHub Actions deploy workflow completed successfully, then refresh the live site on phone and test tablet/desktop layouts; run a controlled Telegram smoke test only after the live deployment is confirmed.
