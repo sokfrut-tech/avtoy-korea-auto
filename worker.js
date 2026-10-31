@@ -2,15 +2,46 @@
 async function beginModerationEdit(callback, env, type, id, answer) {
  const adminId = String((callback.from && callback.from.id) || "");
  if (!env.REVIEWS) return answer("Хранилище не настроено", true);
+ const isCar = type === "car";
+ const key = (isCar ? "car_pending:" : "pending:") + id;
+ const raw = await env.REVIEWS.get(key);
+ if (!raw) return answer("Материал уже обработан или не найден", true);
+ const item = JSON.parse(raw);
+ const currentText = String(isCar ? item.caption || "" : item.text || "");
  const session = { type, id, createdAt: new Date().toISOString() };
  await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 1800 });
- const label = type === "car" ? "описание автомобиля" : "текст отзыва";
+ const label = isCar ? "описание автомобиля" : "текст отзыва";
+ const instructions = "Текущий текст ниже. Чтобы не переписывать всё, ответьте одной командой:\n" +
+  "• ЗАМЕНИТЬ: старый фрагмент => новый фрагмент\n" +
+  "• УДАЛИТЬ: ненужный фрагмент\n" +
+  "• ДОБАВИТЬ В КОНЕЦ: новый текст\n" +
+  "Или отправьте полный исправленный текст, если хотите заменить всё. Команда должна быть ответом на это сообщение.";
  await callTelegram(env, "sendMessage", {
   chat_id: adminId,
-  text: "✏️ РЕДАКТИРОВАНИЕ " + label.toUpperCase() + "\n\nОтветьте на это сообщение полным новым текстом. Текущая версия заменится только после получения вашего ответа. Исходник сохранится для администраторов.",
-  reply_markup: { force_reply: true, input_field_placeholder: "Введите исправленный текст" }
+  text: "✏️ РЕДАКТИРОВАНИЕ " + label.toUpperCase() + "\n\n" + instructions + "\n\nТЕКУЩИЙ ТЕКСТ:\n" + (currentText || "— пусто —").slice(0, 3000),
+  reply_markup: { force_reply: true, input_field_placeholder: "Команда правки или новый текст" }
  });
- return answer("Жду исправленный текст в личном чате");
+ return answer("Текущий текст показан. Можно изменить только нужный фрагмент");
+}
+
+function applyModerationTextEdit(currentText, instruction) {
+ const current = String(currentText || "");
+ const input = String(instruction || "").trim();
+ let match = input.match(/^ЗАМЕНИТЬ\s*:\s*([\s\S]+?)\s*=>\s*([\s\S]*)$/i);
+ if (match) {
+  if (!current.includes(match[1])) return { error: "Не нашёл указанный фрагмент. Текст не изменён; проверьте точное совпадение." };
+  return { text: current.replace(match[1], match[2]).trim() };
+ }
+ match = input.match(/^УДАЛИТЬ\s*:\s*([\s\S]+)$/i);
+ if (match) {
+  if (!current.includes(match[1])) return { error: "Не нашёл указанный фрагмент. Текст не изменён; проверьте точное совпадение." };
+  return { text: current.replace(match[1], "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim() };
+ }
+ match = input.match(/^ДОБАВИТЬ\s+В\s+КОНЕЦ\s*:\s*([\s\S]+)$/i);
+ if (match) return { text: [current, match[1].trim()].filter(Boolean).join("\n\n") };
+ match = input.match(/^ДОБАВИТЬ\s+В\s+НАЧАЛО\s*:\s*([\s\S]+)$/i);
+ if (match) return { text: [match[1].trim(), current].filter(Boolean).join("\n\n") };
+ return { text: input };
 }
 
 async function handleAdminModerationEditReply(msg, env, adminIds) {
@@ -23,9 +54,9 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
   return true;
  }
  const session = JSON.parse(rawSession);
- const edited = cleanPublicationText(msg.text || msg.caption || "");
- if (!edited) {
-  await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Текст пустой. Отправьте непустой вариант ответом на сообщение редактирования." });
+ const instruction = String(msg.text || msg.caption || "").trim();
+ if (!instruction) {
+  await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Правка пустая. Отправьте команду изменения или полный текст ответом на сообщение редактирования." });
   return true;
  }
  const isCar = session.type === "car";
@@ -37,6 +68,17 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
   return true;
  }
  const item = JSON.parse(raw);
+ const currentText = String(isCar ? item.caption || "" : item.text || "");
+ const editResult = applyModerationTextEdit(currentText, instruction);
+ if (editResult.error) {
+  await callTelegram(env, "sendMessage", { chat_id: adminId, text: editResult.error + "\n\nПопробуйте ещё раз ответом на сообщение редактирования." });
+  return true;
+ }
+ const edited = cleanPublicationText(editResult.text);
+ if (!edited) {
+  await callTelegram(env, "sendMessage", { chat_id: adminId, text: "После правки текст пустой. Материал не изменён." });
+  return true;
+ }
  if (isCar) {
   item.originalCaption = item.originalCaption === undefined ? item.caption : item.originalCaption;
   item.caption = edited.slice(0, 3000);
@@ -115,7 +157,8 @@ function formatReviewCard(review) {
 async function handleAdminMediaUpload(msg, env, adminIds) {
  const adminId = String(msg.chat && msg.chat.id || "");
  if (!adminIds.includes(adminId) || msg.forward_origin) return false;
- const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
+ const photos = Array.isArray(msg.photo) && msg.photo.length ? msg.photo : [];
+ const photo = photos.length ? photos[photos.length - 1] : null;
  const video = msg.video || null;
  if (!photo && !video) return false;
  if (!env.REVIEWS) {
@@ -131,7 +174,7 @@ async function handleAdminMediaUpload(msg, env, adminIds) {
  }
  if (!state) {
   const caption = String(msg.caption || "").trim().slice(0,1000);
-  const review = {id,kind:video ? "video" : "text",text:caption,name:"Администратор загрузил",fileId:video ? video.file_id : photo.file_id,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(caption),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"Загрузка администратора"};
+  const review = {id,kind:video ? "video" : "text",text:caption,name:"Администратор загрузил",fileId:video ? video.file_id : photo.file_id,photos:photos.map(item=>({file_id:item.file_id})),hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(caption),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"Загрузка администратора"};
   state = {review,cardSent:false,status:"pending"};
   await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
   await env.REVIEWS.put(uploadKey,JSON.stringify(state),{expirationTtl:2592000});
@@ -162,6 +205,7 @@ async function handleReviewSubmission(msg, env, adminIds) {
   text,
   name: String((msg.from && msg.from.first_name) || "Клиент").slice(0, 50),
   fileId: video || photo || null,
+  photos: photo ? [{file_id: photo}] : [],
   hasPhoto: Boolean(photo),
   hasThanks: THANKS_PATTERN.test(text),
   anonymous: false,
@@ -214,6 +258,7 @@ async function handleReviewCallback(callback, env, adminIds) {
   text: review.text,
   name: review.anonymous ? "" : review.name,
   fileId: review.fileId,
+  photos: Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []),
   publishedAt: new Date().toISOString()
  };
  await env.REVIEWS.put(`approved:${id}`, JSON.stringify(published));
@@ -270,8 +315,9 @@ async function handleImportedReview(post, env, adminIds) {
  const chat = post.chat || {};
  if ((String(chat.username || "").toLowerCase() !== "avtoykorea" && post.sourceType !== "group") || !env.REVIEWS) return;
  const text = cleanPublicationText(post.caption || post.text).slice(0, 1000);
- const photos = Array.isArray(post.photo) ? post.photo : [];
- const photo = photos.length ? photos[photos.length - 1].file_id : null;
+ const rawPhotos = Array.isArray(post.photos) ? post.photos : (Array.isArray(post.photo) ? post.photo : []);
+ const photoIds = [...new Set(rawPhotos.map(item => item && item.file_id ? item.file_id : item).filter(Boolean))];
+ const photo = photoIds[0] || null;
  const video = post.video && post.video.file_id ? post.video.file_id : null;
  if (!text && !photo && !video) {
   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"Отзыв не импортирован: в публикации нет текста, фото или видео."})));
@@ -281,23 +327,44 @@ async function handleImportedReview(post, env, adminIds) {
  if (await env.REVIEWS.get("approved:" + id)) return;
  const existingReview = await env.REVIEWS.get("pending:" + id);
  const review = existingReview ? JSON.parse(existingReview) : {
-  id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + post.message_id : "Сообщение из закрытой группы")
+  id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,photos:photoIds.map(file_id=>({file_id})),hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + post.message_id : "Сообщение из закрытой группы")
  };
- if (!existingReview) await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
- const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}]]};
+ if (existingReview) {
+  review.photos = Array.isArray(review.photos) ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []);
+  const known = new Set(review.photos.map(item=>item.file_id));
+  for (const fileId of photoIds) if (!known.has(fileId)) review.photos.push({file_id:fileId});
+  if (!review.fileId) review.fileId = photo;
+  review.hasPhoto = Boolean(review.photos.length || photo);
+  if (!review.text && text) review.text = text;
+  await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
+ } else await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
+ const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id},{text:"✏️ Редактировать текст",callback_data:"edit:" + id}]]};
  const deliveryKey = "review_delivery:" + id;
  const delivery = JSON.parse(await env.REVIEWS.get(deliveryKey) || "{}");
  delivery.admins = delivery.admins || {};
  for (const adminId of adminIds) {
-  const status = delivery.admins[String(adminId)] || {mediaSent:!review.fileId,cardSent:false};
-  if (review.fileId && !status.mediaSent) {
-   await callTelegram(env,review.kind === "video" ? "sendVideo" : "sendPhoto",{chat_id:adminId,[review.kind === "video" ? "video" : "photo"]:review.fileId});
+  const status = delivery.admins[String(adminId)] || {mediaSent:!review.fileId && !(review.photos && review.photos.length),cardSent:false};
+  if (!status.mediaSent) {
+   if (review.kind === "video" && review.fileId) {
+    await callTelegram(env,"sendVideo",{chat_id:adminId,video:review.fileId});
+   } else {
+    const ids = (Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId ? [{file_id:review.fileId}] : [])).map(item=>item.file_id).filter(Boolean);
+    for (let offset=0; offset<ids.length; offset+=10) {
+     const chunk = ids.slice(offset,offset+10);
+     if (chunk.length > 1) {
+      const media = chunk.map((file_id,index)=>({type:"photo",media:file_id,...(offset===0 && index===0 && text ? {caption:text.slice(0,1024)} : {})}));
+      await callTelegram(env,"sendMediaGroup",{chat_id:adminId,media});
+     } else if (chunk.length === 1) {
+      await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:chunk[0],...(offset===0 && text ? {caption:text.slice(0,1024)} : {})});
+     }
+    }
+   }
    status.mediaSent = true;
    delivery.admins[String(adminId)] = status;
    await env.REVIEWS.put(deliveryKey,JSON.stringify(delivery),{expirationTtl:2592000});
   }
   if (!status.cardSent) {
-   await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nИсточник: " + review.sourceUrl,reply_markup:keyboard});
+   await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nФотографий: " + (review.photos || []).length + "\nИсточник: " + review.sourceUrl,reply_markup:keyboard});
    status.cardSent = true;
    delivery.admins[String(adminId)] = status;
    await env.REVIEWS.put(deliveryKey,JSON.stringify(delivery),{expirationTtl:2592000});
@@ -356,7 +423,7 @@ async function stageChannelPost(post, env, adminIds) {
  }
  const duplicateCarId = "car_" + String(chat.id).replace(/-/g,"") + "_" + String(post.message_id);
  if (await env.REVIEWS.get(key) || await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id) || await env.REVIEWS.get("car_pending:" + duplicateCarId) || await env.REVIEWS.get("car_approved:" + duplicateCarId)) return;
- const stored = {...post,chat,message_id:Number(post.message_id),albumId};
+ const stored = {...post,chat,message_id:Number(post.message_id),albumId,photo:Array.isArray(post.photo)&&post.photo.length?[post.photo[post.photo.length-1]]:[]};
  await env.REVIEWS.put(key,JSON.stringify({...stored,post:stored,albumId}),{expirationTtl:2592000});
  if (albumPointer) await env.REVIEWS.put(albumPointer,id,{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
@@ -782,21 +849,28 @@ export default {
       const raw = await env.REVIEWS.get(key.name);
       if (!raw) continue;
       const r = JSON.parse(raw);
-      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media:r.fileId ? `/api/review-media/${r.id}` : null});
+      const photos = Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []);
+      const mediaItems = r.kind === "video" ? (r.fileId ? [`/api/review-media/${r.id}/0`] : []) : photos.map((_,index)=>`/api/review-media/${r.id}/${index}`);
+      const media = r.fileId ? `/api/review-media/${r.id}` : null;
+      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems});
      }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
    return Response.json({ reviews }, { headers: { "cache-control": "no-store" } });
   }
-  const mediaMatch = url.pathname.match(/^\/api\/review-media\/(-?\d+_\d+)$/);
+  const mediaMatch = url.pathname.match(/^\/api\/review-media\/(-?\d+_\d+)(?:\/(\d+))?$/);
   if (request.method === "GET" && mediaMatch) {
    // Файлы отдаются через Worker: токен бота в браузер не попадает.
    if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found", { status: 404 });
    const raw = await env.REVIEWS.get(`approved:${mediaMatch[1]}`);
    if (!raw) return new Response("Not found", { status: 404 });
    const review = JSON.parse(raw);
-   const info = await callTelegram(env, "getFile", { file_id: review.fileId }).catch(() => null);
+   const index = Number(mediaMatch[2] || 0);
+   const photos = Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []);
+   const fileId = review.kind === "video" ? (index === 0 ? review.fileId : null) : (photos[index] && photos[index].file_id);
+   if (!fileId) return new Response("Not found", { status: 404 });
+   const info = await callTelegram(env, "getFile", { file_id: fileId }).catch(() => null);
    const path = info && info.result && info.result.file_path;
    if (!path) return new Response("Not found", { status: 404 });
    const upstream = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${path}`);
@@ -1264,7 +1338,8 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
   list.textContent='';dots.textContent='';
   data.reviews.forEach(function(rv,index){
     var card=document.createElement('article');card.className='card';
-    if(rv.media){if(rv.kind==='video'){var label=document.createElement('div');label.className='review-video-label';label.textContent='Видеоотзыв клиента';card.appendChild(label)}var el=document.createElement(rv.kind==='video'?'video':'img');el.className='review-media';el.src=rv.media;if(rv.kind==='video'){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видеоотзыв клиента')}else{el.loading='lazy';el.alt='Фото автомобиля клиента'}card.appendChild(el)}
+    var mediaItems=Array.isArray(rv.mediaItems)&&rv.mediaItems.length?rv.mediaItems:(rv.media?[rv.media]:[]);
+    mediaItems.forEach(function(mediaUrl,mediaIndex){if(rv.kind==='video'){var label=document.createElement('div');label.className='review-video-label';label.textContent='Видеоотзыв клиента';if(mediaIndex===0)card.appendChild(label);var el=document.createElement('video');el.className='review-media';el.src=mediaUrl;el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видеоотзыв клиента');card.appendChild(el)}else{var el=document.createElement('img');el.className='review-media';el.src=mediaUrl;el.loading='lazy';el.alt='Фото автомобиля клиента '+(mediaIndex+1);card.appendChild(el)}});
     var who=document.createElement('div');who.className='review-name';who.textContent=rv.name;
     var text=document.createElement('p');text.className='review-text';text.textContent=rv.text||'';
     card.appendChild(who);card.appendChild(text);list.appendChild(card);
