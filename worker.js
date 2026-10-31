@@ -264,6 +264,8 @@ async function stageChannelPost(post, env, adminIds) {
     saved.photo = all;
     if (!saved.caption && post.caption) saved.caption = post.caption;
     entry.post = saved;
+    entry.photo = saved.photo;
+    entry.caption = saved.caption;
     await env.REVIEWS.put(key,JSON.stringify(entry),{expirationTtl:2592000});
    }
    return;
@@ -272,7 +274,7 @@ async function stageChannelPost(post, env, adminIds) {
  const duplicateCarId = "car_" + String(chat.id).replace(/-/g,"") + "_" + String(post.message_id);
  if (await env.REVIEWS.get(key) || await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id) || await env.REVIEWS.get("car_pending:" + duplicateCarId) || await env.REVIEWS.get("car_approved:" + duplicateCarId)) return;
  const stored = {...post,chat,message_id:Number(post.message_id),albumId};
- await env.REVIEWS.put(key,JSON.stringify({post:stored,albumId}),{expirationTtl:2592000});
+ await env.REVIEWS.put(key,JSON.stringify({...stored,post:stored,albumId}),{expirationTtl:2592000});
  if (albumPointer) await env.REVIEWS.put(albumPointer,id,{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
