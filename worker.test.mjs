@@ -570,9 +570,10 @@ test("admin native Reply sends a response to a customer who connected Telegram",
   const kv = memoryKV();
   await withTelegramMock(async calls => {
     const response = await worker.fetch(siteRequest({ name: "Анна", contact: "+79990000000" }), orderEnv(kv));
-    const { orderId } = await response.json();
+    const { orderId, botLink } = await response.json();
+    const bindToken = new URL(botLink).searchParams.get("start").slice("order_".length);
     const card = calls.find(c => c.method === "sendMessage" && c.payload.text.includes("Заявка: " + orderId));
-    await worker.fetch(webhook({ chat: { id: 444444444, type: "private" }, from: { id: 444444444 }, text: "/start order_" + orderId }), orderEnv(kv));
+    await worker.fetch(webhook({ chat: { id: 444444444, type: "private" }, from: { id: 444444444 }, text: "/start order_" + bindToken }), orderEnv(kv));
     await worker.fetch(webhook({ chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "Подобрали варианты", reply_to_message: { text: card.payload.text } }), orderEnv(kv));
     assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text === "Подобрали варианты"));
     assert.ok(calls.some(c => String(c.payload.chat_id) === "111111111" && c.payload.text.includes("Ответ отправлен клиенту")));
