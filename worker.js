@@ -6,8 +6,13 @@ function cleanPublicationText(value) {
  return String(value || "")
   .replace(/\r/g, "")
   .replace(/(?:^|\n)\s*Для заказа аналогичного автомобиля обращайтесь\s*:?[^]*$/i, "")
-  .replace(/^\s*Видео\s*$/gim, "")
   .replace(/^\s*Источник:\s*https?:\/\/\S+\s*$/gim, "")
+  .replace(/^\s*(?:📞|☎️?|тел(?:ефон)?\s*[:：]?|владимир\s*[:：]?|whats?app\s*[:：]?|telegram\s*[:：]?|контакт\s*[:：]?|имя\s*[:：]?).*$/gim, "")
+  .replace(/^\s*Видео\s*$/gim, "")
+  .replace(/(?:https?:\/\/)?t\.me\/[\w+/?=&%-]+/gi, "")
+  .replace(/\+?\d[\d\s().-]{7,}\d/g, "")
+  .replace(/^\s*[-–—|,;:]+\s*$/gm, "")
+  .replace(/\n{3,}/g, "\n\n")
   .trim();
 }
 
@@ -707,7 +712,7 @@ export default {
       const raw = await env.REVIEWS.get(key.name);
       if (!raw) continue;
       const r = JSON.parse(raw);
-      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),name:r.name || "Клиент",media:r.fileId ? `/api/review-media/${r.id}` : null});
+      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media:r.fileId ? `/api/review-media/${r.id}` : null});
      }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
