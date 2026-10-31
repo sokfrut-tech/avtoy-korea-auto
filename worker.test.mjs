@@ -379,6 +379,73 @@ test("configured group media sent by an admin is routed privately to review mode
   });
 });
 
+test("group media notification retries missing admin delivery without duplicating completed sends", async () => {
+ const kv=memoryKV(), originalFetch=globalThis.fetch, calls=[];
+ let failOnce=true;
+ globalThis.fetch=async(input,init={})=>{
+  if(String(input).startsWith("https://api.telegram.org/")){
+   const method=new URL(String(input)).pathname.split("/").pop(),payload=JSON.parse(init.body||"{}");
+   if(method==="sendMessage"&&String(payload.chat_id)==="222222222"&&failOnce){failOnce=false;return Response.json({ok:false,description:"temporary failure"});}
+   calls.push({method,payload});return Response.json({ok:true,result:{}});
+  }
+  return originalFetch(input,init);
+ };
+ const update={update_id:9001,message:{message_id:82,chat:{id:Number(REVIEW_GROUP),type:"supergroup"},from:{id:111111111,first_name:"Admin"},caption:"Фото для отзыва",photo:[{file_id:"GROUP_PHOTO_RETRY"}]}};
+ try{
+  const first=await worker.fetch(webhookUpdate(update),reviewEnv(kv));
+  assert.equal(first.status,502);
+  assert.ok(await kv.get("import_pending:"+REVIEW_GROUP+"_82"));
+  const second=await worker.fetch(webhookUpdate(update),reviewEnv(kv));
+  assert.equal(second.status,200);
+  for(const adminId of ["111111111","222222222"]){
+   assert.equal(calls.filter(c=>c.method==="sendPhoto"&&String(c.payload.chat_id)===adminId&&c.payload.photo==="GROUP_PHOTO_RETRY").length,1);
+   assert.equal(calls.filter(c=>c.method==="sendMessage"&&String(c.payload.chat_id)===adminId&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="imp:review:"+REVIEW_GROUP+"_82").length,1);
+  }
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("review import keeps staged media and resumes missing admin delivery after failure", async () => {
+ const kv=memoryKV(),originalFetch=globalThis.fetch,calls=[];
+ let failOnce=true;
+ await kv.put("import_pending:"+REVIEW_GROUP+"_83",JSON.stringify({chat:{id:Number(REVIEW_GROUP),type:"supergroup"},message_id:83,sourceType:"group",caption:"Отзыв с фото",photo:[{file_id:"IMPORT_RETRY_PHOTO"}]}));
+ globalThis.fetch=async(input,init={})=>{
+  if(String(input).startsWith("https://api.telegram.org/")){
+   const method=new URL(String(input)).pathname.split("/").pop(),payload=JSON.parse(init.body||"{}");
+   if(method==="sendPhoto"&&String(payload.chat_id)==="222222222"&&failOnce){failOnce=false;return Response.json({ok:false,description:"temporary failure"});}
+   calls.push({method,payload});return Response.json({ok:true,result:{}});
+  }
+  return originalFetch(input,init);
+ };
+ try{
+  const update=webhookUpdate(callback(111111111,"imp:review:"+REVIEW_GROUP+"_83"));
+  const first=await worker.fetch(update,reviewEnv(kv));
+  assert.equal(first.status,502);
+  assert.ok(await kv.get("import_pending:"+REVIEW_GROUP+"_83"));
+  assert.ok(await kv.get("pending:"+REVIEW_GROUP+"_83"));
+  const second=await worker.fetch(webhookUpdate(callback(111111111,"imp:review:"+REVIEW_GROUP+"_83")),reviewEnv(kv));
+  assert.equal(second.status,200);
+  assert.equal(await kv.get("import_pending:"+REVIEW_GROUP+"_83"),null);
+  for(const adminId of ["111111111","222222222"]){
+   assert.equal(calls.filter(c=>c.method==="sendPhoto"&&String(c.payload.chat_id)===adminId&&c.payload.photo==="IMPORT_RETRY_PHOTO").length,1);
+   assert.equal(calls.filter(c=>c.method==="sendMessage"&&String(c.payload.chat_id)===adminId&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:"+REVIEW_GROUP+"_83").length,1);
+  }
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("admin can upload review photo directly in private bot chat for moderation", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const response=await worker.fetch(webhookUpdate({message:{message_id:88,chat:{id:111111111,type:"private"},from:{id:111111111,first_name:"Admin"},caption:"Отзыв клиента",photo:[{file_id:"SMALL"},{file_id:"DIRECT_UPLOAD"}]}}),reviewEnv(kv));
+  assert.equal(response.status,200);
+  const review=JSON.parse(await kv.get("pending:111111111_88"));
+  assert.equal(review.fileId,"DIRECT_UPLOAD");
+  assert.equal(review.text,"Отзыв клиента");
+  assert.ok(calls.some(c=>c.method==="sendMessage"&&String(c.payload.chat_id)==="111111111"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:111111111_88"));
+  await worker.fetch(webhookUpdate(callback(111111111,"pub:111111111_88")),reviewEnv(kv));
+  assert.ok(await kv.get("approved:111111111_88"));
+ });
+});
+
 test("video review without thanks can be published after admin approval", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
