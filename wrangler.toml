@@ -1,0 +1,7 @@
+name = "avtoy-korea-auto"
+main = "worker.js"
+compatibility_date = "2026-10-23"
+
+[[kv_namespaces]]
+binding = "REVIEWS"
+id = "302a622dc2514025b2118c8f3216beac"
