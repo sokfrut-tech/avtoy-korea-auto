@@ -216,7 +216,7 @@ test("forwarded posts from another channel are not imported", async () => {
   });
 });
 
-test("forwarding the same channel post twice does not duplicate category-choice cards", async () => {
+test("forwarding the same unpublished channel post again resends category-choice cards", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
     const message = {
@@ -230,9 +230,63 @@ test("forwarding the same channel post twice does not duplicate category-choice 
     await worker.fetch(webhookUpdate({message}), reviewEnv(kv));
     const secondCardCount = calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_43").length;
     assert.equal(firstCardCount, 2);
-    assert.equal(secondCardCount, 2);
+    assert.equal(secondCardCount, 4, "repeat must send a fresh action card to both admins");
     assert.ok(await kv.get("import_pending:-100555_43"));
   });
+});
+
+test("re-forwarding a review still awaiting moderation resends its publish button", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const message={message_id:193,chat:{id:111111111,type:"private"},from:{id:111111111},
+   forward_origin:{type:"channel",date:1790000000,chat:{id:-100555,username:"avtoYkorea",type:"channel"},message_id:143},
+   caption:"Спасибо за автомобиль",photo:[{file_id:"RETRY_REVIEW_PHOTO"}]};
+  await worker.fetch(webhookUpdate({message}),reviewEnv(kv));
+  await worker.fetch(webhookUpdate(callback(111111111,"imp:review:-100555_143")),reviewEnv(kv));
+  assert.ok(await kv.get("pending:-100555_143"));
+  const before=calls.filter(c=>c.method==="sendMessage"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:-100555_143").length;
+  await worker.fetch(webhookUpdate({message}),reviewEnv(kv));
+  const after=calls.filter(c=>c.method==="sendMessage"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:-100555_143").length;
+  assert.equal(after,before+2,"pending review card must be resent to both admins");
+  assert.ok(await kv.get("pending:-100555_143"));
+  assert.equal(await kv.get("approved:-100555_143"),null);
+ });
+});
+
+test("re-forwarding an automobile still awaiting moderation resends its publish button", async()=>{
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const message={message_id:194,chat:{id:111111111,type:"private"},from:{id:111111111},
+   forward_origin:{type:"channel",date:1790000000,chat:{id:-100555,username:"avtoYkorea",type:"channel"},message_id:144},
+   caption:"Kia Sorento 2026",photo:[{file_id:"RETRY_CAR_PHOTO"}]};
+  await worker.fetch(webhookUpdate({message}),reviewEnv(kv));
+  await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_144")),reviewEnv(kv));
+  assert.ok(await kv.get("car_pending:car_100555_144"));
+  const before=calls.filter(c=>c.method==="sendMessage"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="carpub:car_100555_144").length;
+  await worker.fetch(webhookUpdate({message}),reviewEnv(kv));
+  const after=calls.filter(c=>c.method==="sendMessage"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="carpub:car_100555_144").length;
+  assert.equal(after,before+2,"pending car card must be resent to both admins");
+  assert.ok(await kv.get("car_pending:car_100555_144"));
+  assert.equal(await kv.get("car_approved:car_100555_144"),null);
+ });
+});
+
+test("re-forwarding an already published channel post does not republish it", async()=>{
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const message={message_id:195,chat:{id:111111111,type:"private"},from:{id:111111111},
+   forward_origin:{type:"channel",date:1790000000,chat:{id:-100555,username:"avtoYkorea",type:"channel"},message_id:145},
+   caption:"Спасибо за помощь",photo:[{file_id:"PUBLISHED_PHOTO"}]};
+  await worker.fetch(webhookUpdate({message}),reviewEnv(kv));
+  await worker.fetch(webhookUpdate(callback(111111111,"imp:review:-100555_145")),reviewEnv(kv));
+  await worker.fetch(webhookUpdate(callback(111111111,"pub:-100555_145")),reviewEnv(kv));
+  assert.ok(await kv.get("approved:-100555_145"));
+  const publishedCards=calls.filter(c=>c.method==="sendMessage"&&c.payload.text==="Опубликовано на сайте").length;
+  await worker.fetch(webhookUpdate({message}),reviewEnv(kv));
+  assert.equal(calls.filter(c=>c.method==="sendMessage"&&c.payload.text.includes("уже опубликована на сайте")).length,2);
+  assert.equal(calls.filter(c=>c.method==="sendMessage"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:-100555_145").length,2);
+  assert.ok(await kv.get("approved:-100555_145"));
+ });
 });
 
 test("forwarded channel post first asks admin to choose car or review; no immediate publication", async () => {
