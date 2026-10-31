@@ -479,7 +479,7 @@ test("homepage inline JavaScript parses before deployment", async () => {
   const response = await worker.fetch(new Request("https://worker.test/"), env);
   assert.equal(response.status, 200);
   const html = await response.text();
-  const scripts = [...html.matchAll(/<script>([\\s\\S]*?)<\\/script>/g)];
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
   assert.ok(scripts.length > 0, "homepage contains inline JavaScript");
   for (const script of scripts) new vm.Script(script[1]);
 });
