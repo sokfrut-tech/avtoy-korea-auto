@@ -29,6 +29,31 @@ function formatReviewCard(review) {
 }
 
 // Бот читает только одну группу (TELEGRAM_REVIEW_GROUP_ID) и только сообщения с командой /review.
+
+async function handleAdminMediaUpload(msg, env, adminIds) {
+ const adminId = String(msg.chat && msg.chat.id || "");
+ if (!adminIds.includes(adminId)) return false;
+ const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
+ const video = msg.video || null;
+ if (!photo && !video) return false;
+ if (!env.REVIEWS) {
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Хранилище REVIEWS не настроено. Медиа не принято."});
+  return true;
+ }
+ const id = adminId + "_" + String(msg.message_id);
+ const existing = await env.REVIEWS.get("pending:" + id);
+ if (existing) {
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Это медиа уже ожидает модерации."});
+  return true;
+ }
+ const caption = String(msg.caption || "").trim().slice(0,1000);
+ const review = {id,kind:video ? "video" : "text",text:caption,name:"Администратор загрузил",fileId:video ? video.file_id : photo.file_id,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(caption),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"Загрузка администратора"};
+ await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
+ const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}]]};
+ await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nМедиа загружено вами в личный чат с ботом. Проверьте и выберите действие.",reply_markup:keyboard});
+ return true;
+}
+
 async function handleReviewSubmission(msg, env, adminIds) {
  const reviewGroupId = String(env.TELEGRAM_REVIEW_GROUP_ID || "").trim();
  if (!reviewGroupId || String(msg.chat.id) !== reviewGroupId) return;
@@ -151,18 +176,31 @@ async function handleImportedReview(post, env, adminIds) {
   return;
  }
  const id = String(chat.id) + "_" + String(post.message_id);
- if (await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) {
-  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Этот отзыв уже импортирован или находится на модерации."})));
-  return;
- }
- const review = {id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + post.message_id : "Сообщение из закрытой группы")};
- await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
+ if (await env.REVIEWS.get("approved:" + id)) return;
+ const existingReview = await env.REVIEWS.get("pending:" + id);
+ const review = existingReview ? JSON.parse(existingReview) : {
+  id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + post.message_id : "Сообщение из закрытой группы")
+ };
+ if (!existingReview) await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}]]};
- await Promise.all(adminIds.map(async adminId => {
-  if (video) await callTelegram(env,"sendVideo",{chat_id:adminId,video});
-  else if (photo) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo});
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nИсточник: " + review.sourceUrl,reply_markup:keyboard});
- }));
+ const deliveryKey = "review_delivery:" + id;
+ const delivery = JSON.parse(await env.REVIEWS.get(deliveryKey) || "{}");
+ delivery.admins = delivery.admins || {};
+ for (const adminId of adminIds) {
+  const status = delivery.admins[String(adminId)] || {mediaSent:!review.fileId,cardSent:false};
+  if (review.fileId && !status.mediaSent) {
+   await callTelegram(env,review.kind === "video" ? "sendVideo" : "sendPhoto",{chat_id:adminId,[review.kind === "video" ? "video" : "photo"]:review.fileId});
+   status.mediaSent = true;
+   delivery.admins[String(adminId)] = status;
+   await env.REVIEWS.put(deliveryKey,JSON.stringify(delivery),{expirationTtl:2592000});
+  }
+  if (!status.cardSent) {
+   await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nИсточник: " + review.sourceUrl,reply_markup:keyboard});
+   status.cardSent = true;
+   delivery.admins[String(adminId)] = status;
+   await env.REVIEWS.put(deliveryKey,JSON.stringify(delivery),{expirationTtl:2592000});
+  }
+ }
 }
 
 async function handleImportChoice(callback, env, adminIds) {
@@ -172,12 +210,14 @@ async function handleImportChoice(callback, env, adminIds) {
  const match = String(callback.data || "").match(/^imp:(car|review):(-?\d+_\d+)$/);
  if (!match || !env.REVIEWS) return answer("Импорт не найден",true);
  const [,kind,id] = match;
- const raw = await env.REVIEWS.get("import_pending:" + id);
+ const key = "import_pending:" + id;
+ const raw = await env.REVIEWS.get(key);
  if (!raw) return answer("Публикация уже обработана или не найдена",true);
- const post = JSON.parse(raw);
- await env.REVIEWS.delete("import_pending:" + id);
+ const entry = JSON.parse(raw);
+ const post = entry && entry.post ? entry.post : entry;
  if (kind === "car") await handleCarPost(post,env,adminIds);
  else await handleImportedReview(post,env,adminIds);
+ await env.REVIEWS.delete(key);
  return answer(kind === "car" ? "Передано в модерацию автомобилей" : "Передано в модерацию отзывов");
 }
 
@@ -206,15 +246,29 @@ async function stageGroupMedia(msg, env, adminIds) {
  const video = msg.video || null;
  if (!photo && !video) return;
  const id = String(msg.chat.id) + "_" + String(msg.message_id);
- if (await env.REVIEWS.get("import_pending:" + id) || await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) return;
- const post = {...msg, sourceType:"group"};
- await env.REVIEWS.put("import_pending:" + id, JSON.stringify(post));
+ if (await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) return;
+ const key = "import_pending:" + id;
+ let state = JSON.parse(await env.REVIEWS.get(key) || "null");
+ if (!state || !state.post) {
+  state = {type:"group_media",post:{...msg,sourceType:"group"},notified:{}};
+  await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
+ }
  const keyboard = {inline_keyboard:[[{text:"⭐ Передать в модерацию отзывов",callback_data:"imp:review:" + id}]]};
- await Promise.all(adminIds.map(async adminId => {
-  if (video) await callTelegram(env,"sendVideo",{chat_id:adminId,video:video.file_id});
-  else await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:photo.file_id});
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Медиа из группы отзывов. Выберите, передавать ли его на модерацию сайта.\n\n" + String(msg.caption || "").slice(0,1000),reply_markup:keyboard});
- }));
+ for (const adminId of adminIds) {
+  const status = state.notified[String(adminId)] || {mediaSent:false,cardSent:false};
+  if (!status.mediaSent) {
+   await callTelegram(env,video ? "sendVideo" : "sendPhoto",{chat_id:adminId,[video ? "video" : "photo"]:(video ? video.file_id : photo.file_id)});
+   status.mediaSent = true;
+   state.notified[String(adminId)] = status;
+   await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
+  }
+  if (!status.cardSent) {
+   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Медиа из группы отзывов. Выберите, передавать ли его на модерацию сайта.\n\n" + String(msg.caption || "").slice(0,1000),reply_markup:keyboard});
+   status.cardSent = true;
+   state.notified[String(adminId)] = status;
+   await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
+  }
+ }
 }
 
 async function handleCarCallback(callback, env, adminIds) {
@@ -374,6 +428,7 @@ export default {
     chat_id: target, text: body, disable_web_page_preview: true
    });
    try {
+    if (await handleAdminMediaUpload(msg, env, adminIds)) return Response.json({ok:true});
     // /myid returns only the sender's own numeric Telegram ID for safe admin configuration.
     if (/^\/myid(?:@\w+)?$/i.test(text)) {
      await send(chatId, "Ваш Telegram ID: " + chatId + "\nПередайте этот номер владельцу настройки TELEGRAM_ADMIN_IDS. Не отправляйте токен бота.");
