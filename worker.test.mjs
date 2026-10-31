@@ -446,6 +446,39 @@ test("admin can upload review photo directly in private bot chat for moderation"
  });
 });
 
+test("private admin upload retries moderation card after Telegram send failure", async () => {
+ const kv=memoryKV(),originalFetch=globalThis.fetch,calls=[];
+ let failOnce=true;
+ globalThis.fetch=async(input,init={})=>{
+  if(String(input).startsWith("https://api.telegram.org/")){
+   const method=new URL(String(input)).pathname.split("/").pop(),payload=JSON.parse(init.body||"{}");
+   if(method==="sendMessage"&&failOnce){failOnce=false;return Response.json({ok:false,description:"temporary failure"});}
+   calls.push({method,payload});return Response.json({ok:true,result:{}});
+  }
+  return originalFetch(input,init);
+ };
+ const update={update_id:9902,message:{message_id:89,chat:{id:111111111,type:"private"},from:{id:111111111},photo:[{file_id:"DIRECT_RETRY"}]}};
+ try{
+  const first=await worker.fetch(webhookUpdate(update),reviewEnv(kv));
+  assert.equal(first.status,502);
+  assert.equal(JSON.parse(await kv.get("admin_upload:111111111_89")).cardSent,false);
+  const second=await worker.fetch(webhookUpdate(update),reviewEnv(kv));
+  assert.equal(second.status,200);
+  assert.equal(calls.filter(c=>c.method==="sendMessage"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:111111111_89").length,1);
+  assert.equal(JSON.parse(await kv.get("admin_upload:111111111_89")).cardSent,true);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("non-admin private media upload is not staged or forwarded to administrators", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const response=await worker.fetch(webhookUpdate({message:{message_id:90,chat:{id:333333333,type:"private"},from:{id:333333333},photo:[{file_id:"UNTRUSTED_UPLOAD"}]}}),reviewEnv(kv));
+  assert.equal(response.status,200);
+  assert.equal(await kv.get("pending:333333333_90"),null);
+  assert.equal(calls.length,0);
+ });
+});
+
 test("video review without thanks can be published after admin approval", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
