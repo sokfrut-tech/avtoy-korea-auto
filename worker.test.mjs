@@ -446,6 +446,24 @@ test("admin can upload review photo directly in private bot chat for moderation"
  });
 });
 
+test("admin can forward a group review photo to the bot for private moderation", async () => {
+  const kv=memoryKV();
+  await withTelegramMock(async calls=>{
+    const response=await worker.fetch(webhookUpdate({message:{
+      message_id:188,chat:{id:111111111,type:"private"},from:{id:111111111,first_name:"Admin"},
+      forward_origin:{type:"user",date:1760000000,sender_user:{id:333333333,first_name:"Buyer"}},
+      caption:"Отзыв покупателя из группы",photo:[{file_id:"SMALL"},{file_id:"FORWARDED_GROUP_PHOTO"}]
+    }}),reviewEnv(kv));
+    assert.equal(response.status,200);
+    const review=JSON.parse(await kv.get("pending:111111111_188"));
+    assert.equal(review.fileId,"FORWARDED_GROUP_PHOTO");
+    assert.equal(review.text,"Отзыв покупателя из группы");
+    assert.equal(review.name,"Администратор загрузил");
+    assert.ok(calls.some(c=>c.method==="sendMessage"&&String(c.payload.chat_id)==="111111111"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:111111111_188"));
+    assert.equal(calls.some(c=>String(c.payload.chat_id)==="333333333"),false);
+  });
+});
+
 test("private admin upload retries moderation card after Telegram send failure", async () => {
  const kv=memoryKV(),originalFetch=globalThis.fetch,calls=[];
  let failOnce=true;
