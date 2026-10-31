@@ -283,6 +283,7 @@ export default {
    }
    const chatId = String(msg.chat.id);
    const text = String(msg.text || "").trim();
+   const origin = msg.forward_origin || null;
    const api = async (method, payload) => {
     const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
      method: "POST",
