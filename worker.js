@@ -423,7 +423,7 @@ async function stageChannelPost(post, env, adminIds) {
  }
  const duplicateCarId = "car_" + String(chat.id).replace(/-/g,"") + "_" + String(post.message_id);
  if (await env.REVIEWS.get(key) || await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id) || await env.REVIEWS.get("car_pending:" + duplicateCarId) || await env.REVIEWS.get("car_approved:" + duplicateCarId)) return;
- const stored = {...post,chat,message_id:Number(post.message_id),albumId};
+ const stored = {...post,chat,message_id:Number(post.message_id),albumId,photo:Array.isArray(post.photo)&&post.photo.length?[post.photo[post.photo.length-1]]:[]};
  await env.REVIEWS.put(key,JSON.stringify({...stored,post:stored,albumId}),{expirationTtl:2592000});
  if (albumPointer) await env.REVIEWS.put(albumPointer,id,{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
@@ -851,7 +851,7 @@ export default {
       const r = JSON.parse(raw);
       const photos = Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []);
       const mediaItems = r.kind === "video" ? (r.fileId ? [`/api/review-media/${r.id}/0`] : []) : photos.map((_,index)=>`/api/review-media/${r.id}/${index}`);
-      const media = mediaItems[0] || null;
+      const media = r.fileId ? `/api/review-media/${r.id}` : null;
       reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems});
      }
      cursor = page.list_complete ? null : page.cursor;
