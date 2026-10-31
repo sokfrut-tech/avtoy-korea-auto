@@ -387,7 +387,7 @@ export default {
     if (deliveries.some(ok => !ok)) return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
     return Response.json({ok:true});
    }
-   return Response.json({ok:true,telegramText:message,setupNeeded:true});
+   return Response.json({ok:false,error:"Не настроена доставка заявок. Сообщите администратору сайта."},{status:503});
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
    const cars = [];
@@ -612,10 +612,10 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
 <section class="wrap section" id="order" style="padding-top:40px">
   <div class="eyebrow">Как заказать</div>
   <h2>Четыре шага до вашего автомобиля</h2>
-  <p class="sub">Заполните короткую форму. Заявка сразу приходит администратору в Telegram, и он отвечает с предложениями.</p>
+  <p class="sub">Заполните короткую форму. Заявка приходит обоим администраторам лично. Они свяжутся с вами по указанному контакту.</p>
   <div class="steps">
     <article class="card"><div class="num">01</div><h3>Заполните форму</h3><p>Марка и модель, бюджет, страна покупки, год выпуска и пожелания.</p></article>
-    <article class="card"><div class="num">02</div><h3>Получите предложения</h3><p>Подбираем варианты под ваш бюджет и отвечаем вам в Telegram.</p></article>
+    <article class="card"><div class="num">02</div><h3>Получите предложения</h3><p>Подбираем варианты под ваш бюджет и связываемся с вами по указанному контакту.</p></article>
     <article class="card"><div class="num">03</div><h3>Проверьте перед покупкой</h3><p>Оцениваем состояние автомобиля и документы до решения о покупке.</p></article>
     <article class="card"><div class="num">04</div><h3>Доставка и итог</h3><p>Стоимость доставки и итоговая цена обсуждаются с вами отдельно.</p></article>
   </div>
@@ -659,7 +659,7 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
     <div>
       <div class="eyebrow">Бесплатный подбор</div>
       <h2>Какой автомобиль вы ищете?</h2>
-      <p class="form-intro">Оставьте параметры автомобиля и удобный контакт. Мы свяжемся с вами в Telegram.</p>
+      <p class="form-intro">Оставьте параметры автомобиля и удобный контакт. Мы свяжемся с вами по указанному телефону или другому контакту.</p>
       <p class="hint">Можно обратиться и по вопросам рекламы, партнёрства или размещения предложений.</p>
     </div>
     <div>
@@ -693,7 +693,7 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
 
 <script>
 const form=document.getElementById('request-form'),statusEl=document.getElementById('status');
-form.addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('submit-btn');b.disabled=true;statusEl.textContent='Отправляем заявку…';try{const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))});const x=await r.json();if(!r.ok||!x.ok)throw Error(x.error||'Не удалось отправить заявку.');if(x.setupNeeded){statusEl.textContent='Заявка подготовлена. Откроется Telegram: выберите чат менеджера и отправьте сообщение.';location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText)}else{statusEl.textContent='Заявка отправлена. Спасибо!';form.reset();if(x.botLink){var a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a)}}}catch(err){statusEl.textContent=err.message||'Ошибка. Попробуйте ещё раз.'}finally{b.disabled=false}});
+form.addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('submit-btn');b.disabled=true;statusEl.textContent='Отправляем заявку…';try{const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))});const x=await r.json();if(!r.ok||!x.ok)throw Error(x.error||'Не удалось отправить заявку.');if(x.setupNeeded){statusEl.textContent='Заявка подготовлена. Откроется Telegram: выберите чат менеджера и отправьте сообщение.';location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText)}else{statusEl.textContent='Заявка доставлена администраторам. Спасибо! Свяжемся с вами по указанному контакту.';form.reset();if(x.botLink){var a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a)}}}catch(err){statusEl.textContent=err.message||'Ошибка. Попробуйте ещё раз.'}finally{b.disabled=false}});
 fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
   var list=document.getElementById('reviews-list');
   if(!data.reviews||!data.reviews.length)return;
