@@ -846,6 +846,7 @@ test("public car and review APIs remove Telegram promotional footer and source l
  assert.equal(Object.hasOwn(cars.cars[0],"sourceUrl"),false);
  const reviews=await (await worker.fetch(new Request("https://worker.test/api/reviews"),siteEnv)).json();
  assert.equal(reviews.reviews[0].text,"Отличный автомобиль!");
+ assert.equal(Object.hasOwn(reviews.reviews[0],"name"),false);
  assert.doesNotMatch(JSON.stringify({cars,reviews}),/Владимир|79537477230|WhatsApp|avtoYkorea|Источник:|Видео/);
 });
 test("homepage inline JavaScript parses before deployment", async () => {
