@@ -265,10 +265,16 @@ export default {
    if (!env.TELEGRAM_BOT_TOKEN || adminIds.length === 0) {
     return new Response("Bot configuration missing", { status: 503 });
    }
+   const webhookLength = Number(request.headers.get("content-length") || 0);
+   if (webhookLength > 65536) return new Response("Payload Too Large", { status: 413 });
+   let webhookRaw;
+   try { webhookRaw = await request.text(); } catch { return new Response("Bad Request", { status: 400 }); }
+   if (new TextEncoder().encode(webhookRaw).byteLength > 65536) return new Response("Payload Too Large", { status: 413 });
    let update;
-   try { update = await request.json(); } catch {
+   try { update = JSON.parse(webhookRaw); } catch {
     return new Response("Bad Request", { status: 400 });
    }
+   if (!update || typeof update !== "object" || Array.isArray(update)) return new Response("Bad Request", { status: 400 });
    if (update.callback_query) {
     const cb = update.callback_query;
     try {
