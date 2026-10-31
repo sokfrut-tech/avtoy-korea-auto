@@ -89,7 +89,7 @@ test("website requests are delivered to every personal admin ID", async () => {
   await withTelegramMock(async calls => {
     const request = new Request("https://worker.test/api/request", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "idempotency-key": "11111111-2222-4333-8444-555555555555" },
       body: JSON.stringify({ name: "Тест", contact: "@test", model: "Kia" }),
     });
     const response = await worker.fetch(request, reviewEnv(memoryKV()));
@@ -106,7 +106,7 @@ test("website requests are delivered to every personal admin ID", async () => {
 test("website order receives a number and sends a privacy-safe card with admin controls", async () => {
  const kv=memoryKV();
  await withTelegramMock(async calls=>{
-  const response=await worker.fetch(new Request("https://worker.test/api/request",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:"Client Name",contact:"+79990000000",model:"Kia"})}),reviewEnv(kv));
+  const response=await worker.fetch(new Request("https://worker.test/api/request",{method:"POST",headers:{"content-type":"application/json","idempotency-key":"22222222-2222-4222-8222-222222222222"},body:JSON.stringify({name:"Client Name",contact:"+79990000000",model:"Kia"})}),reviewEnv(kv));
   assert.equal(response.status,200);
   const body=await response.json();
   assert.ok(body.orderNumber);
