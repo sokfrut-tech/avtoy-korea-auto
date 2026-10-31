@@ -212,13 +212,13 @@ async function handleCarCallback(callback, env, adminIds) {
 }
 // --- Заявки с сайта: карточка администраторам, кнопка «Принять в работу», ответ клиенту в Telegram ---
 function formatOrderPrivate(order) {
- return ["🔐 Данные заявки №"+order.number,"Статус: "+order.status,"Имя: "+order.name,"Контакт: "+order.contact,"Telegram ID: "+(order.telegramId||"не привязан"),"Telegram: "+(order.username?"@"+order.username:"не указан"),"Марка / модель: "+(order.model||"не указано"),"Бюджет: "+(order.budget||"не указан"),"Страна: "+(order.country||"не указана"),"Год от: "+(order.year||"не указан"),"Тема: "+(order.purpose||"Подбор автомобиля"),"Пожелания: "+(order.details||"нет"),"Создана: "+order.createdAt].join("\\n");
+ return ["🔐 Данные заявки №"+order.number,"Статус: "+order.status,"Имя: "+order.name,"Контакт: "+order.contact,"Telegram ID: "+(order.telegramId||"не привязан"),"Telegram: "+(order.username?"@"+order.username:"не указан"),"Марка / модель: "+(order.model||"не указано"),"Бюджет: "+(order.budget||"не указан"),"Страна: "+(order.country||"не указана"),"Год от: "+(order.year||"не указан"),"Тема: "+(order.purpose||"Подбор автомобиля"),"Пожелания: "+(order.details||"нет"),"Создана: "+order.createdAt].join("\n");
 }
 async function handleOrderCallback(callback, env, adminIds) {
  const answer=(text,alert=false)=>callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
  const fromId=String((callback.from&&callback.from.id)||"");
  if(!adminIds.includes(fromId))return answer("Нет доступа",true);
- const data=String(callback.data||""),match=data.match(/^ord:(\\d+)$/),detail=data.match(/^ordinfo:(\\d+)$/);
+ const data=String(callback.data||""),match=data.match(/^ord:(\d+)$/),detail=data.match(/^ordinfo:(\d+)$/);
  if((!match&&!detail)||!env.REVIEWS)return answer("Заявка не найдена",true);
  const number=(match||detail)[1],raw=await env.REVIEWS.get("order_no:"+number);
  if(!raw)return answer("Заявка не найдена",true);
@@ -234,7 +234,7 @@ async function handleOrderCallback(callback, env, adminIds) {
 async function handleOrderDoneCallback(callback,env,adminIds){
  const answer=(text,alert=false)=>callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
  const fromId=String((callback.from&&callback.from.id)||"");if(!adminIds.includes(fromId))return answer("Нет доступа",true);
- const m=String(callback.data||"").match(/^orddone:(\\d+)$/);if(!m||!env.REVIEWS)return answer("Заявка не найдена",true);
+ const m=String(callback.data||"").match(/^orddone:(\d+)$/);if(!m||!env.REVIEWS)return answer("Заявка не найдена",true);
  const raw=await env.REVIEWS.get("order_no:"+m[1]);if(!raw)return answer("Заявка не найдена",true);
  const order=JSON.parse(raw);order.status="done";order.completedAt=new Date().toISOString();
  await env.REVIEWS.put("order_no:"+order.number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
