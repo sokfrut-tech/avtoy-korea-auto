@@ -89,7 +89,7 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
   - One-time Telegram bind token is deleted only after both order indexes are saved and the confirmation message succeeds, allowing Telegram retries after partial failures.
 - Added regression tests for group media retry, import retry, direct admin upload, non-admin upload rejection, and binding retry after partial KV failure.
 - Latest Worker checks [#105](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41215004691): syntax passed; full suite reports 56 tests, 56 passed, 0 failed.
-- Factory Review workflow has been upgraded: the security/privacy job now runs targeted regression tests for private delivery, admin-only callbacks, review media boundaries and retry behavior rather than only checking source file presence. Latest Factory Review for this branch head is still pending at time of update.
+- Factory Review workflow has been upgraded: the security/privacy job now runs targeted regression tests for private delivery, admin-only callbacks, review media boundaries and retry behavior rather than only checking source file presence. Factory Review [#40](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41215035516) completed successfully; Worker checks [#107](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41215035583) completed successfully, with 56/56 tests passing.
 - Transient CI failures during development were corrected: forwarded channel media is explicitly excluded from the direct-upload handler; the bind-token regression test now creates the initial order under Telegram API mocks. The latest full suite is green.
 - Claude was tagged in PR #12 for an independent review; no Claude reply was visible as of this update.
 
@@ -98,3 +98,5 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Cloudflare runtime Worker secrets and the `REVIEWS` KV binding are not visible through GitHub Actions. The deploy workflow confirmed only that its GitHub Cloudflare deploy credentials were present.
 - Telegram webhook URL/secret registration, actual `/start` delivery, controlled form submission and admin inbox delivery remain unverified. Do not change webhook or send admin test notifications without explicit user approval.
 - PR #12 remains open. No merge, production deployment, secret change, or webhook mutation has been performed.
+
+- Final PR head at 2026-10-31 15:29 UTC: `643b110e187ad764c2cd02e8c0be4b75e6ee84a9`; current main/base SHA remains `cfae5aaa4b3a00e3c11060467973cd224ccd0721`. PR #12 remains open and mergeable, not merged. No production deployment, webhook change, or secret mutation was performed.
