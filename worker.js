@@ -7,8 +7,11 @@ async function callTelegram(env, method, payload) {
   headers: { "content-type": "application/json" },
   body: JSON.stringify(payload)
  });
- if (!response.ok) throw new Error("Telegram API request failed");
- return response.json();
+ if (!response.ok) throw new Error("Telegram HTTP request failed");
+ const result = await response.json();
+ // Telegram may return HTTP 200 with { ok: false }; treat that as a failed delivery.
+ if (!result || result.ok !== true) throw new Error("Telegram API rejected the request");
+ return result;
 }
 
 // Правило публикации: текстовый отзыв — только с фото автомобиля; видео публикуется по решению администратора.
