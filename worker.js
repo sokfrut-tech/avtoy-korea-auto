@@ -223,7 +223,7 @@ async function handleOrderCallback(callback, env, adminIds) {
  const number=(match||detail)[1],raw=await env.REVIEWS.get((/^[0-9a-f]{16}$/i.test(number)?"order:":"order_no:")+number);
  if(!raw)return answer("Заявка не найдена",true);
  const order=JSON.parse(raw);
- if(detail){await callTelegram(env,"sendMessage",{chat_id:callback.message.chat.id,text:formatOrderPrivate(order)});return answer("Данные отправлены только вам");}
+ if(detail){const targetChat=callback.message&&callback.message.chat; if(!targetChat||targetChat.type!=="private"||String(targetChat.id)!==fromId)return answer("Откройте карточку в личном чате с ботом. Данные не отправлены.",true); await callTelegram(env,"sendMessage",{chat_id:fromId,text:formatOrderPrivate(order)});return answer("Данные отправлены только вам");}
  if(order.status==="in_work")return answer("Заявка уже принята в работу"); if(order.status==="done")return answer("Заявка уже завершена");
  order.status="in_work";order.acceptedBy=fromId;order.acceptedAt=new Date().toISOString();
  await env.REVIEWS.put("order_no:"+number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
