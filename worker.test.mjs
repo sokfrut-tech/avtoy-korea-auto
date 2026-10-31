@@ -890,3 +890,43 @@ test("messages without update_id or message_id are each delivered, not dropped a
     assert.equal(adminDeliveries.filter(t => t.includes("Второе сообщение")).length, 1);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+
+test("failed order acceptance notification is retried on the next callback", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  let failClientNotice = true;
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const method = new URL(String(input)).pathname.split("/").pop();
+      const payload = JSON.parse(init.body || "{}");
+      calls.push({ method, payload });
+      if (method === "sendMessage" && String(payload.chat_id) === "444444444" && failClientNotice) {
+        failClientNotice = false;
+        return Response.json({ ok: false, description: "temporary failure" });
+      }
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const created = await (await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv))).json();
+    const token = new URL(created.botLink).searchParams.get("start").slice("order_".length);
+    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { id: 444444444, first_name: "Anna" }, text: "/start order_" + token } }), orderEnv(kv));
+
+    const first = await worker.fetch(webhookUpdate(callback(111111111, "ord:" + created.orderId)), orderEnv(kv));
+    assert.equal(first.status, 502);
+    assert.equal(JSON.parse(await kv.get("order:" + created.orderId)).status, "in_work");
+    assert.equal(JSON.parse(await kv.get("order:" + created.orderId)).acceptanceNotifiedAt, undefined);
+
+    const retry = await worker.fetch(webhookUpdate(callback(111111111, "ord:" + created.orderId)), orderEnv(kv));
+    assert.equal(retry.status, 200);
+    const order = JSON.parse(await kv.get("order:" + created.orderId));
+    assert.ok(order.acceptanceNotifiedAt);
+    const notices = calls.filter(c => c.method === "sendMessage" && String(c.payload.chat_id) === "444444444" && c.payload.text.includes("принята в работу"));
+    assert.equal(notices.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
