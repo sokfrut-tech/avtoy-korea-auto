@@ -960,7 +960,11 @@ footer{border-top-color:#ffffff18}
 .review-carousel .reviews::-webkit-scrollbar{display:none}
 .review-carousel .reviews>article{flex:0 0 calc((100% - 36px)/3);min-width:0;scroll-snap-align:start;overflow:hidden;padding:18px;border:1px solid #ffffff18;background:linear-gradient(155deg,#1a202b,#10141b);border-radius:22px;box-shadow:0 16px 42px #0004}
 .review-carousel .reviews>article:hover{transform:translateY(-3px);border-color:#ff735e70}
-.review-carousel .review-media{height:220px;object-fit:cover;border-radius:15px}
+.review-carousel .review-media{width:100%;height:220px;object-fit:cover;border-radius:15px;background:#080b10;display:block}
+.review-carousel video.review-media{height:auto;aspect-ratio:16/9;object-fit:contain}
+.review-video-label{display:inline-flex;align-items:center;gap:6px;margin:0 0 10px;padding:6px 10px;border-radius:99px;background:#ff735e18;color:#ff9b89;font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase}
+.review-video-label:before{content:'▶';font-size:9px}
+.review-carousel .reviews>article:has(video){border-color:#ff735e45}
 .review-carousel .review-name{font-size:14px;margin-top:16px}
 .review-carousel .review-text{font-size:15px;line-height:1.65}
 .review-controls{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:4px}
@@ -971,7 +975,7 @@ footer{border-top-color:#ffffff18}
 .review-arrow{width:42px;height:42px;display:grid;place-items:center;border:1px solid #ffffff25;border-radius:50%;background:#171d27;color:#fff;font-size:21px;cursor:pointer}
 .review-arrow:hover{background:var(--red);border-color:var(--red)}
 .review-arrow:disabled{opacity:.35;cursor:default}
-@media(max-width:780px){.review-carousel .reviews{gap:12px;padding-bottom:16px}.review-carousel .reviews>article{flex:0 0 min(82%,340px);padding:14px;border-radius:19px}.review-carousel .review-media{height:auto;aspect-ratio:4/3}.review-carousel .review-name{font-size:13px}.review-carousel .review-text{font-size:13px;line-height:1.55}.review-arrow{width:38px;height:38px}}
+@media(max-width:780px){.review-carousel .reviews{gap:12px;padding-bottom:16px}.review-carousel .reviews>article{flex:0 0 min(82%,340px);padding:14px;border-radius:19px}.review-carousel .review-media{height:auto;aspect-ratio:4/3}.review-carousel video.review-media{aspect-ratio:16/9;object-fit:contain}.review-carousel .review-name{font-size:13px}.review-carousel .review-text{font-size:13px;line-height:1.55}.review-arrow{width:38px;height:38px}}
 @media(max-width:420px){.review-carousel .reviews>article{flex-basis:88%}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}.review-carousel .reviews{scroll-behavior:auto}}
 </style>
@@ -1175,7 +1179,7 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
   list.textContent='';dots.textContent='';
   data.reviews.forEach(function(rv,index){
     var card=document.createElement('article');card.className='card';
-    if(rv.media){var el=document.createElement(rv.kind==='video'?'video':'img');el.className='review-media';el.src=rv.media;if(rv.kind==='video'){el.controls=true;el.playsInline=true;el.preload='metadata'}else{el.loading='lazy';el.alt='Фото автомобиля клиента'}card.appendChild(el)}
+    if(rv.media){if(rv.kind==='video'){var label=document.createElement('div');label.className='review-video-label';label.textContent='Видеоотзыв клиента';card.appendChild(label)}var el=document.createElement(rv.kind==='video'?'video':'img');el.className='review-media';el.src=rv.media;if(rv.kind==='video'){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видеоотзыв клиента')}else{el.loading='lazy';el.alt='Фото автомобиля клиента'}card.appendChild(el)}
     var who=document.createElement('div');who.className='review-name';who.textContent=rv.name;
     var text=document.createElement('p');text.className='review-text';text.textContent=rv.text||'';
     card.appendChild(who);card.appendChild(text);list.appendChild(card);
