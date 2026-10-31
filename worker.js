@@ -240,18 +240,27 @@ async function handleOrderCallback(callback, env, adminIds) {
  const answer=(text,alert=false)=>callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
  const fromId=String((callback.from&&callback.from.id)||"");
  if(!adminIds.includes(fromId))return answer("Нет доступа",true);
- const data=String(callback.data||""),match=data.match(/^ord:(\d+|[0-9a-f]{16}|[0-9a-f]{32})$/i),detail=data.match(/^ordinfo:(\d+|[0-9a-f]{16}|[0-9a-f]{32})$/i);
+ const data=String(callback.data||""),match=data.match(/^ord:(\\d+|[0-9a-f]{16}|[0-9a-f]{32})$/i),detail=data.match(/^ordinfo:(\\d+|[0-9a-f]{16}|[0-9a-f]{32})$/i);
  if((!match&&!detail)||!env.REVIEWS)return answer("Заявка не найдена",true);
  const number=(match||detail)[1],raw=await env.REVIEWS.get((/^[0-9a-f]{16}$/i.test(number)?"order:":"order_no:")+number);
  if(!raw)return answer("Заявка не найдена",true);
  const order=JSON.parse(raw);
- if(detail){const targetChat=callback.message&&callback.message.chat; if(!targetChat||targetChat.type!=="private"||String(targetChat.id)!==fromId)return answer("Откройте карточку в личном чате с ботом. Данные не отправлены.",true); await callTelegram(env,"sendMessage",{chat_id:fromId,text:formatOrderPrivate(order)});return answer("Данные отправлены только вам");}
- const targetChat=callback.message&&callback.message.chat;if(!targetChat||targetChat.type!=="private"||String(targetChat.id)!==fromId)return answer("Откройте карточку в личном чате с ботом. Статус не изменён.",true); if(order.status==="in_work")return answer("Заявка уже принята в работу"); if(order.status==="done")return answer("Заявка уже завершена");
- order.status="in_work";order.acceptedBy=fromId;order.acceptedAt=new Date().toISOString();
- await env.REVIEWS.put("order_no:"+number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
- if(callback.message)await callTelegram(env,"editMessageReplyMarkup",{chat_id:callback.message.chat.id,message_id:callback.message.message_id,reply_markup:{inline_keyboard:[[{text:"🔐 Данные клиента",callback_data:"ordinfo:"+number},{text:"🏁 Завершить",callback_data:"orddone:"+number}]]}});
- if(order.chatId)await callTelegram(env,"sendMessage",{chat_id:order.chatId,text:"Ваша заявка №"+(order.number||number)+" принята в работу. С вами свяжутся в этом чате."});
- return answer("Заявка принята в работу");
+ const targetChat=callback.message&&callback.message.chat;
+ if(!targetChat||targetChat.type!=="private"||String(targetChat.id)!==fromId)return answer("Откройте карточку в личном чате с ботом. Данные не отправлены.",true);
+ if(detail){await callTelegram(env,"sendMessage",{chat_id:fromId,text:formatOrderPrivate(order)});return answer("Данные отправлены только вам");}
+ if(order.status==="done")return answer("Заявка уже завершена");
+ if(order.status!=="in_work"){
+  order.status="in_work";order.acceptedBy=fromId;order.acceptedAt=new Date().toISOString();
+  await env.REVIEWS.put("order_no:"+number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
+  if(callback.message)await callTelegram(env,"editMessageReplyMarkup",{chat_id:callback.message.chat.id,message_id:callback.message.message_id,reply_markup:{inline_keyboard:[[{text:"🔐 Данные клиента",callback_data:"ordinfo:"+number},{text:"🏁 Завершить",callback_data:"orddone:"+number}]]}});
+ }
+ // If Telegram failed after the status was saved, a repeated callback retries this notification.
+ if(order.chatId&&!order.acceptanceNotifiedAt){
+  await callTelegram(env,"sendMessage",{chat_id:order.chatId,text:"Ваша заявка №"+(order.number||number)+" принята в работу. С вами свяжутся в этом чате."});
+  order.acceptanceNotifiedAt=new Date().toISOString();
+  await env.REVIEWS.put("order_no:"+number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
+ }
+ return answer(order.acceptanceNotifiedAt?"Заявка принята в работу":"Заявка принята; Telegram клиента ещё не подключён");
 }
 async function handleOrderDoneCallback(callback,env,adminIds){
  const answer=(text,alert=false)=>callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
