@@ -797,7 +797,7 @@ fetch('/api/cars',{cache:'no-store'}).then(r=>r.json()).then(data=>{
   const article=document.createElement('article'); article.className='card car-card';
   if(car.media){const img=document.createElement('img');img.className='review-media';img.src=car.media;img.alt='Фотография автомобиля';img.loading='lazy';article.appendChild(img)}
   const body=document.createElement('div');body.className='car-body';
-  const title=document.createElement('h3');title.textContent=(car.caption||'Автомобиль из объявления').split('\n')[0].slice(0,120);
+  const title=document.createElement('h3');title.textContent=(car.caption||'Автомобиль из объявления').split('\\n')[0].slice(0,120);
   const desc=document.createElement('div');desc.className='car-specs';desc.style.display='block';desc.style.whiteSpace='pre-line';desc.textContent=car.caption||'Описание не указано';
   body.appendChild(title);body.appendChild(desc);
   if(car.sourceUrl){const a=document.createElement('a');a.className='car-link';a.href=car.sourceUrl;a.target='_blank';a.rel='noopener';a.textContent='Исходная публикация →';body.appendChild(a)}
