@@ -242,6 +242,23 @@ async function handleOrderDoneCallback(callback,env,adminIds){
  return answer("Заявка завершена");
 }
 
+async function readBodyLimited(request, maxBytes) {
+ const reader = request.body && request.body.getReader ? request.body.getReader() : null;
+ if (!reader) return "";
+ const chunks = []; let total = 0;
+ try {
+  while (true) {
+   const part = await reader.read();
+   if (part.done) break;
+   total += part.value.byteLength;
+   if (total > maxBytes) { await reader.cancel(); throw new Error("BODY_TOO_LARGE"); }
+   chunks.push(part.value);
+  }
+ } finally { try { reader.releaseLock(); } catch {} }
+ const merged = new Uint8Array(total); let offset = 0;
+ for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.byteLength; }
+ return new TextDecoder("utf-8", {fatal:true}).decode(merged);
+}
 export default {
  async fetch(request, env) {
   const url = new URL(request.url);
@@ -268,7 +285,7 @@ export default {
    const webhookLength = Number(request.headers.get("content-length") || 0);
    if (webhookLength > 65536) return new Response("Payload Too Large", { status: 413 });
    let webhookRaw;
-   try { webhookRaw = await request.text(); } catch { return new Response("Bad Request", { status: 400 }); }
+   try { webhookRaw = await readBodyLimited(request,65536); } catch (e) { return new Response(e && e.message === "BODY_TOO_LARGE" ? "Payload Too Large" : "Bad Request", { status: e && e.message === "BODY_TOO_LARGE" ? 413 : 400 }); }
    if (new TextEncoder().encode(webhookRaw).byteLength > 65536) return new Response("Payload Too Large", { status: 413 });
    let update;
    try { update = JSON.parse(webhookRaw); } catch {
@@ -397,7 +414,7 @@ export default {
    const declaredLength = Number(request.headers.get("content-length") || 0);
    if (declaredLength > 12000) return fail(413,"Слишком большой запрос");
    let raw;
-   try { raw = await request.text(); } catch { return fail(400,"Некорректные данные"); }
+   try { raw = await readBodyLimited(request,12000); } catch (e) { return e && e.message === "BODY_TOO_LARGE" ? fail(413,"Слишком большой запрос") : fail(400,"Некорректные данные"); }
    if (new TextEncoder().encode(raw).byteLength > 12000) return fail(413,"Слишком большой запрос");
    let d;
    try { d = JSON.parse(raw); } catch { return fail(400,"Некорректные данные"); }
