@@ -296,8 +296,29 @@ export default {
     chat_id: target, text: body, disable_web_page_preview: true
    });
    try {
-    const origin = msg.forward_origin;
-    if (adminIds.includes(chatId) && origin && origin.type === "channel") {
+    // Native Telegram Reply on an admin notification routes the response without typing a Chat ID.
+    if (adminIds.includes(chatId) && msg.reply_to_message) {
+     const repliedText = String(msg.reply_to_message.text || msg.reply_to_message.caption || "");
+     const orderMatch = repliedText.match(/Заявка:\\s*([0-9a-f]{16})/i);
+     if (orderMatch && env.REVIEWS) {
+      const rawOrder = await env.REVIEWS.get("order:" + orderMatch[1]);
+      if (rawOrder) {
+       const order = JSON.parse(rawOrder);
+       if (order.chatId) {
+        await send(order.chatId, text || " ");
+        await send(chatId, "Ответ отправлен клиенту по заявке " + order.id + ".");
+       } else {
+        await send(chatId, "У клиента нет подключённого Telegram. Свяжитесь с ним по контакту из заявки: " + order.contact);
+       }
+      } else await send(chatId, "Заявка не найдена в хранилище.");
+     } else {
+      const chatMatch = repliedText.match(/Chat ID:\\s*(-?\\d+)/i);
+      if (chatMatch && text) {
+       await send(chatMatch[1], text);
+       await send(chatId, "Ответ отправлен клиенту.");
+      } else await send(chatId, "Не удалось определить клиента. Ответьте через Reply на карточку заявки или уведомление бота.");
+     }
+    } else if (adminIds.includes(chatId) && origin && origin.type === "channel") {
      const sourceChat = origin.chat || {};
      if (String(sourceChat.username || "").toLowerCase() !== "avtoykorea") {
       await send(chatId, "Переслано сообщение не из канала @avtoYkorea. Для импорта перешлите публикацию именно из этого канала, не копируйте её текст.");
@@ -331,7 +352,7 @@ export default {
       await Promise.all(adminIds.map(id => send(id, notice)));
      }
     } else if (text === "/help") {
-     await send(chatId, "Напишите марку и модель, бюджет и страну покупки. Чтобы обратиться к менеджеру, просто отправьте сообщение сюда. Команда для администратора: /reply CHAT_ID текст сообщения.");
+     await send(chatId, "Напишите марку и модель, бюджет и страну покупки. Чтобы обратиться к менеджеру, просто отправьте сообщение сюда.");
     } else if (text === "/countries") {
      await send(chatId, "🌍 Подбираем автомобили из:\n🇰🇷 Южной Кореи\n🇨🇳 Китая\n🇦🇪 ОАЭ\n\nНапишите, какая страна вас интересует.");
     } else if (text === "/catalog") {
