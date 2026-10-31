@@ -489,13 +489,15 @@ export default {
       } else if (order.telegramId && String(order.telegramId) !== senderId) {
        await send(chatId, "К заявке уже привязан другой Telegram-аккаунт. Свяжитесь с менеджером.");
       } else {
-       await env.REVIEWS.delete(tokenKey);
        order.chatId = chatId;
        order.telegramId = senderId;
        order.username = msg.from && msg.from.username ? String(msg.from.username).slice(0, 64) : null;
        await env.REVIEWS.put(`order:${orderId}`, JSON.stringify(order));
        await env.REVIEWS.put(`order_no:${order.number}`, JSON.stringify(order));
+       // Keep the one-time token until both order indexes are saved and the confirmation is sent.
+       // If a KV write or Telegram send fails, Telegram can retry this update using the same token.
        await send(chatId, "Спасибо! Ваш Telegram подключён к заявке. С вами свяжутся в этом чате.");
+       await env.REVIEWS.delete(tokenKey);
       }
      }
     } else if (text === "/start" || text.startsWith("/start ")) {
