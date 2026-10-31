@@ -224,7 +224,7 @@ async function handleOrderCallback(callback, env, adminIds) {
  if(!raw)return answer("Заявка не найдена",true);
  const order=JSON.parse(raw);
  if(detail){const targetChat=callback.message&&callback.message.chat; if(!targetChat||targetChat.type!=="private"||String(targetChat.id)!==fromId)return answer("Откройте карточку в личном чате с ботом. Данные не отправлены.",true); await callTelegram(env,"sendMessage",{chat_id:fromId,text:formatOrderPrivate(order)});return answer("Данные отправлены только вам");}
- if(order.status==="in_work")return answer("Заявка уже принята в работу"); if(order.status==="done")return answer("Заявка уже завершена");
+ const targetChat=callback.message&&callback.message.chat;if(!targetChat||targetChat.type!=="private"||String(targetChat.id)!==fromId)return answer("Откройте карточку в личном чате с ботом. Статус не изменён.",true); if(order.status==="in_work")return answer("Заявка уже принята в работу"); if(order.status==="done")return answer("Заявка уже завершена");
  order.status="in_work";order.acceptedBy=fromId;order.acceptedAt=new Date().toISOString();
  await env.REVIEWS.put("order_no:"+number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
  if(callback.message)await callTelegram(env,"editMessageReplyMarkup",{chat_id:callback.message.chat.id,message_id:callback.message.message_id,reply_markup:{inline_keyboard:[[{text:"🔐 Данные клиента",callback_data:"ordinfo:"+number},{text:"🏁 Завершить",callback_data:"orddone:"+number}]]}});
@@ -236,7 +236,7 @@ async function handleOrderDoneCallback(callback,env,adminIds){
  const fromId=String((callback.from&&callback.from.id)||"");if(!adminIds.includes(fromId))return answer("Нет доступа",true);
  const m=String(callback.data||"").match(/^orddone:(\d+)$/);if(!m||!env.REVIEWS)return answer("Заявка не найдена",true);
  const raw=await env.REVIEWS.get("order_no:"+m[1]);if(!raw)return answer("Заявка не найдена",true);
- const order=JSON.parse(raw);order.status="done";order.completedAt=new Date().toISOString();
+ const targetChat=callback.message&&callback.message.chat;if(!targetChat||targetChat.type!=="private"||String(targetChat.id)!==fromId)return answer("Откройте карточку в личном чате с ботом. Статус не изменён.",true);const order=JSON.parse(raw);if(order.status==="done")return answer("Заявка уже завершена");order.status="done";order.completedAt=new Date().toISOString();
  await env.REVIEWS.put("order_no:"+order.number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
  if(callback.message)await callTelegram(env,"editMessageReplyMarkup",{chat_id:callback.message.chat.id,message_id:callback.message.message_id,reply_markup:{inline_keyboard:[]}});
  return answer("Заявка завершена");
