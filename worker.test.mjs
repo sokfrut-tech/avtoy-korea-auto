@@ -619,8 +619,9 @@ test("Telegram binding token is one-time and cannot bind a second chat", async (
  });
 });
 test("failed KV write during Telegram binding keeps the one-time token for retry", async () => {
- const kv=memoryKV(),created=await worker.fetch(siteRequest({name:"Иван",contact:"@ivan"}),orderEnv(kv));
- const body=await created.json(),token=new URL(body.botLink).searchParams.get("start").slice("order_".length);
+ const kv=memoryKV();
+ const body=await withTelegramMock(async()=>await (await worker.fetch(siteRequest({name:"Иван",contact:"@ivan"}),orderEnv(kv))).json());
+ const token=new URL(body.botLink).searchParams.get("start").slice("order_".length);
  let failOnce=true;
  const flakyKV={
   async get(k){return kv.get(k);},
