@@ -665,23 +665,27 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); cars.push({id:car.id,caption:car.caption,media:car.fileId ? "/api/car-media/" + car.id : null,sourceUrl:car.sourceUrl || "",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photos = Array.isArray(car.photos) && car.photos.length ? car.photos.map((_,index)=>"/api/car-media/"+car.id+"/"+index) : (car.fileId ? ["/api/car-media/"+car.id+"/0"] : []); cars.push({id:car.id,caption:car.caption,media:photos[0] || null,mediaItems:photos,sourceUrl:car.sourceUrl || "",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
    cars.sort((a,b)=>String(b.publishedAt||"").localeCompare(String(a.publishedAt||"")));
    return Response.json({cars},{headers:{"cache-control":"no-store"}});
   }
-  const carMediaId = url.pathname.startsWith("/api/car-media/") ? url.pathname.slice("/api/car-media/".length) : "";
-  const carMediaMatch = /^car_-?[0-9]+_[0-9]+$/.test(carMediaId) ? [null, carMediaId] : null;
+  const carMediaPath = url.pathname.startsWith("/api/car-media/") ? url.pathname.slice("/api/car-media/".length) : "";
+  const carMediaMatch = carMediaPath.match(/^(car_-?[0-9]+_[0-9]+)(?:\/(\d+))?$/);
   if (request.method === "GET" && carMediaMatch) {
    if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found",{status:404});
    const raw = await env.REVIEWS.get("car_approved:" + carMediaMatch[1]); if (!raw) return new Response("Not found",{status:404});
-   const car = JSON.parse(raw); if (!car.fileId) return new Response("Not found",{status:404});
-   const info = await callTelegram(env,"getFile",{file_id:car.fileId}).catch(()=>null); const path = info && info.result && info.result.file_path;
+   const car = JSON.parse(raw); const index = Number(carMediaMatch[2] || 0);
+   const photos = Array.isArray(car.photos) ? car.photos : [];
+   const selected = photos[index]; const fileId = selected && selected.file_id ? selected.file_id : (!photos.length && index === 0 ? car.fileId : null);
+   if (!fileId) return new Response("Not found",{status:404});
+   const info = await callTelegram(env,"getFile",{file_id:fileId}).catch(()=>null); const path = info && info.result && info.result.file_path;
    if (!path) return new Response("Not found",{status:404});
    const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path); if (!upstream.ok) return new Response("Bad Gateway",{status:502});
-   return new Response(upstream.body,{headers:{"content-type":"image/jpeg","cache-control":"public, max-age=3600","x-content-type-options":"nosniff"}});
+   const contentType = /\.(mp4|webm)$/i.test(path) ? "video/mp4" : "image/jpeg";
+   return new Response(upstream.body,{headers:{"content-type":contentType,"cache-control":"public, max-age=3600","x-content-type-options":"nosniff"}});
   }
   if (request.method === "GET" && url.pathname === "/api/reviews") {
    const reviews = [];
@@ -1153,7 +1157,7 @@ fetch('/api/cars',{cache:'no-store'}).then(r=>r.json()).then(data=>{
  const list=document.getElementById('cars-list'); if(!list || !data.cars || !data.cars.length)return; list.textContent='';
  data.cars.forEach(car=>{
   const article=document.createElement('article'); article.className='card car-card';
-  if(car.media){const img=document.createElement('img');img.className='review-media';img.src=car.media;img.alt='Фотография автомобиля';img.loading='lazy';article.appendChild(img)}
+  (Array.isArray(car.mediaItems)&&car.mediaItems.length?car.mediaItems:(car.media?[car.media]:[])).forEach(function(mediaUrl,index){const img=document.createElement('img');img.className='review-media';img.src=mediaUrl;img.alt='Фотография автомобиля '+(index+1);img.loading='lazy';article.appendChild(img)});
   const body=document.createElement('div');body.className='car-body';
   const title=document.createElement('h3');title.textContent=(car.caption||'Автомобиль из объявления').split('\\n')[0].slice(0,120);
   const desc=document.createElement('div');desc.className='car-specs';desc.style.display='block';desc.style.whiteSpace='pre-line';desc.textContent=car.caption||'Описание не указано';
