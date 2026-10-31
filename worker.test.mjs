@@ -902,7 +902,7 @@ test("failed order acceptance notification is retried on the next callback", asy
       const method = new URL(String(input)).pathname.split("/").pop();
       const payload = JSON.parse(init.body || "{}");
       calls.push({ method, payload });
-      if (method === "sendMessage" && String(payload.chat_id) === "444444444" && failClientNotice) {
+      if (method === "sendMessage" && String(payload.chat_id) === "444444444" && String(payload.text || "").includes("принята в работу") && failClientNotice) {
         failClientNotice = false;
         return Response.json({ ok: false, description: "temporary failure" });
       }
