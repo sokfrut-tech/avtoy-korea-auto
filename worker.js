@@ -257,7 +257,7 @@ async function handleReviewCallback(callback, env, adminIds) {
   text: review.text,
   name: review.anonymous ? "" : review.name,
   fileId: review.fileId,
-  photos: Array.isArray(review.photos) ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []),
+  photos: Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []),
   publishedAt: new Date().toISOString()
  };
  await env.REVIEWS.put(`approved:${id}`, JSON.stringify(published));
@@ -848,21 +848,28 @@ export default {
       const raw = await env.REVIEWS.get(key.name);
       if (!raw) continue;
       const r = JSON.parse(raw);
-      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media:r.fileId ? `/api/review-media/${r.id}` : null});
+      const photos = Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []);
+      const mediaItems = r.kind === "video" ? (r.fileId ? [`/api/review-media/${r.id}/0`] : []) : photos.map((_,index)=>`/api/review-media/${r.id}/${index}`);
+      const media = mediaItems[0] || null;
+      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems});
      }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
    return Response.json({ reviews }, { headers: { "cache-control": "no-store" } });
   }
-  const mediaMatch = url.pathname.match(/^\/api\/review-media\/(-?\d+_\d+)$/);
+  const mediaMatch = url.pathname.match(/^\/api\/review-media\/(-?\d+_\d+)(?:\/(\d+))?$/);
   if (request.method === "GET" && mediaMatch) {
    // Файлы отдаются через Worker: токен бота в браузер не попадает.
    if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found", { status: 404 });
    const raw = await env.REVIEWS.get(`approved:${mediaMatch[1]}`);
    if (!raw) return new Response("Not found", { status: 404 });
    const review = JSON.parse(raw);
-   const info = await callTelegram(env, "getFile", { file_id: review.fileId }).catch(() => null);
+   const index = Number(mediaMatch[2] || 0);
+   const photos = Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []);
+   const fileId = review.kind === "video" ? (index === 0 ? review.fileId : null) : (photos[index] && photos[index].file_id);
+   if (!fileId) return new Response("Not found", { status: 404 });
+   const info = await callTelegram(env, "getFile", { file_id: fileId }).catch(() => null);
    const path = info && info.result && info.result.file_path;
    if (!path) return new Response("Not found", { status: 404 });
    const upstream = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${path}`);
@@ -1330,7 +1337,8 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
   list.textContent='';dots.textContent='';
   data.reviews.forEach(function(rv,index){
     var card=document.createElement('article');card.className='card';
-    if(rv.media){if(rv.kind==='video'){var label=document.createElement('div');label.className='review-video-label';label.textContent='Видеоотзыв клиента';card.appendChild(label)}var el=document.createElement(rv.kind==='video'?'video':'img');el.className='review-media';el.src=rv.media;if(rv.kind==='video'){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видеоотзыв клиента')}else{el.loading='lazy';el.alt='Фото автомобиля клиента'}card.appendChild(el)}
+    var mediaItems=Array.isArray(rv.mediaItems)&&rv.mediaItems.length?rv.mediaItems:(rv.media?[rv.media]:[]);
+    mediaItems.forEach(function(mediaUrl,mediaIndex){if(rv.kind==='video'){var label=document.createElement('div');label.className='review-video-label';label.textContent='Видеоотзыв клиента';if(mediaIndex===0)card.appendChild(label);var el=document.createElement('video');el.className='review-media';el.src=mediaUrl;el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видеоотзыв клиента');card.appendChild(el)}else{var el=document.createElement('img');el.className='review-media';el.src=mediaUrl;el.loading='lazy';el.alt='Фото автомобиля клиента '+(mediaIndex+1);card.appendChild(el)}});
     var who=document.createElement('div');who.className='review-name';who.textContent=rv.name;
     var text=document.createElement('p');text.className='review-text';text.textContent=rv.text||'';
     card.appendChild(who);card.appendChild(text);list.appendChild(card);
