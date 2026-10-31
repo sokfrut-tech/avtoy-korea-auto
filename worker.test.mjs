@@ -593,6 +593,20 @@ test("admin Reply can resolve a card containing only the visible order number", 
   });
 });
 
+test("admin import buttons are rejected outside the admin private chat", async () => {
+  const kv = memoryKV();
+  await kv.put("import_pending:-100123_77", JSON.stringify({ chat: { id: -100123, username: "avtoykorea" }, message_id: 77, text: "Post" }));
+  await withTelegramMock(async calls => {
+    const update = webhookUpdate(callback(111111111, "imp:review:-100123_77", { id: -100123, type: "supergroup" }));
+    const response = await worker.fetch(update, reviewEnv(kv));
+    assert.equal(response.status, 200);
+    assert.ok(await kv.get("import_pending:-100123_77"));
+    const answer = calls.find(c => c.method === "answerCallbackQuery");
+    assert.match(answer.payload.text, /только в личном чате/);
+    assert.equal(calls.some(c => c.method === "sendMessage" && String(c.payload.chat_id) === "111111111"), false);
+  });
+});
+
 test("homepage inline JavaScript parses before deployment", async () => {
   const vm = await import("node:vm");
   const response = await worker.fetch(new Request("https://worker.test/"), env);
