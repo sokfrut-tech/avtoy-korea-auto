@@ -87,23 +87,24 @@ test("website requests are delivered to every personal admin ID", async () => {
 });
 
 
-test("admin can forward an existing channel post to import it for moderation", async () => {
+test("admin forwarding a channel post stages it for category choice before moderation", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
     const response = await worker.fetch(webhookUpdate({ message: {
       message_id: 90,
       chat: { id: 111111111, type: "private" },
       from: { id: 111111111, first_name: "Admin" },
-      forward_origin: { type: "channel", chat: { id: -100555, username: "avtoYkorea", type: "channel" }, message_id: 42 },
+      forward_origin: { type: "channel", date: 1790000000, chat: { id: -100555, username: "avtoYkorea", type: "channel" }, message_id: 42 },
       caption: "Kia Sorento, 2022",
       photo: [{ file_id: "SMALL" }, { file_id: "LARGE" }]
     }}), reviewEnv(kv));
     assert.equal(response.status, 200);
-    const pending = await kv.get("car_pending:car_100555_42");
-    assert.ok(pending);
-    assert.equal(JSON.parse(pending).caption, "Kia Sorento, 2022");
-    assert.equal(JSON.parse(pending).fileId, "LARGE");
-    assert.ok(calls.some(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "carpub:car_100555_42"));
+    const pending = JSON.parse(await kv.get("import_pending:-100555_42"));
+    assert.equal(pending.caption, "Kia Sorento, 2022");
+    assert.equal(pending.photo[1].file_id, "LARGE");
+    assert.equal((await kv.list({ prefix: "car_pending:" })).keys.length, 0);
+    assert.ok(calls.some(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_42"));
+    assert.ok(calls.some(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[1]?.callback_data === "imp:review:-100555_42"));
   });
 });
 
@@ -121,21 +122,22 @@ test("forwarded posts from another channel are not imported", async () => {
   });
 });
 
-test("forwarding the same channel post twice does not create duplicate moderation cards", async () => {
+test("forwarding the same channel post twice does not duplicate category-choice cards", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
     const message = {
       message_id: 92, chat: { id: 111111111, type: "private" },
       from: { id: 111111111 },
-      forward_origin: { type: "channel", chat: { id: -100555, username: "avtoYkorea" }, message_id: 43 },
+      forward_origin: { type: "channel", date: 1790000000, chat: { id: -100555, username: "avtoYkorea" }, message_id: 43 },
       caption: "Hyundai Tucson"
     };
     await worker.fetch(webhookUpdate({message}), reviewEnv(kv));
-    const firstCardCount = calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "carpub:car_100555_43").length;
+    const firstCardCount = calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_43").length;
     await worker.fetch(webhookUpdate({message}), reviewEnv(kv));
-    const secondCardCount = calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "carpub:car_100555_43").length;
+    const secondCardCount = calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_43").length;
     assert.equal(firstCardCount, 2);
     assert.equal(secondCardCount, 2);
+    assert.ok(await kv.get("import_pending:-100555_43"));
   });
 });
 
