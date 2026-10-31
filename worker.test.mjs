@@ -194,7 +194,8 @@ test("admin forwarding a channel post stages it for category choice before moder
     assert.equal(response.status, 200);
     const pending = JSON.parse(await kv.get("import_pending:-100555_42"));
     assert.equal(pending.caption, "Kia Sorento, 2022");
-    assert.equal(pending.photo[1].file_id, "LARGE");
+    assert.equal(pending.photo[0].file_id, "LARGE");
+    assert.equal(pending.photo.length, 1, "store one best-size file_id per photo, not Telegram size variants");
     assert.equal((await kv.list({ prefix: "car_pending:" })).keys.length, 0);
     assert.ok(calls.some(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_42"));
     assert.ok(calls.some(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[1]?.callback_data === "imp:review:-100555_42"));
