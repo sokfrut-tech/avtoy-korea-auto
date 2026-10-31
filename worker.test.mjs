@@ -816,6 +816,26 @@ test("admin import buttons are rejected outside the admin private chat", async (
   });
 });
 
+test("channel album imports one vehicle with all photos", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const first = { update_id: 7001, channel_post: { message_id: 77, media_group_id: "album-abc", date: 1790000000, chat: { id: -100555, username: "avtoYkorea", type: "channel" }, caption: "Kia Sorento 2022", photo: [{file_id:"PHOTO_1"}] }};
+    const second = { update_id: 7002, channel_post: { message_id: 78, media_group_id: "album-abc", date: 1790000000, chat: { id: -100555, username: "avtoYkorea", type: "channel" }, photo: [{file_id:"PHOTO_2"}] }};
+    assert.equal((await worker.fetch(webhookUpdate(first), reviewEnv(kv))).status, 200);
+    assert.equal((await worker.fetch(webhookUpdate(second), reviewEnv(kv))).status, 200);
+    const staged = JSON.parse(await kv.get("import_pending:-100555_77"));
+    assert.equal(staged.post.caption, "Kia Sorento 2022");
+    assert.deepEqual(staged.post.photo.map(p => p.file_id), ["PHOTO_1","PHOTO_2"]);
+    assert.equal(calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_77").length, 1);
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_77")), reviewEnv(kv));
+    const cars = await kv.list({prefix:"car_pending:"});
+    assert.equal(cars.keys.length, 1);
+    const car = JSON.parse(await kv.get(cars.keys[0].name));
+    assert.deepEqual(car.photos.map(p => p.file_id), ["PHOTO_1","PHOTO_2"]);
+    assert.equal(calls.filter(c => c.method === "sendMediaGroup").length, 2);
+  });
+});
+
 test("homepage inline JavaScript parses before deployment", async () => {
   const vm = await import("node:vm");
   const response = await worker.fetch(new Request("https://worker.test/"), env);
