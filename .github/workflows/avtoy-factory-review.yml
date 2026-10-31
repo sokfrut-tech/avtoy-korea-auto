@@ -1,0 +1,90 @@
+name: AVTOY Korea — Factory Review
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker.js'
+      - 'worker.test.mjs'
+      - 'README.md'
+      - '.github/workflows/**'
+  push:
+    branches: [feature/numbered-private-order-workflow]
+    paths:
+      - 'worker.js'
+      - 'worker.test.mjs'
+      - 'README.md'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avtoy-factory-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  functional:
+    name: Functional / regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: node --check worker.js
+      - name: Full test suite
+        run: node --test worker.test.mjs
+
+  security:
+    name: Security / privacy baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required source and obvious secret leaks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, sys
+          worker = Path("worker.js").read_text()
+          tests = Path("worker.test.mjs").read_text()
+          errors = []
+          if not worker.strip(): errors.append("worker.js is empty")
+          if not tests.strip(): errors.append("worker.test.mjs is empty")
+          if re.search(r'console\\.(?:log|info|debug).*?(?:TELEGRAM_BOT_TOKEN|Authorization|api_key|password)', worker, re.I):
+              errors.append("possible secret logging")
+          if re.search(r'TELEGRAM_BOT_TOKEN\\s*=\\s*["\\'][^"\\']+', worker):
+              errors.append("possible hard-coded Telegram token")
+          if errors:
+              print("\\n".join(errors)); sys.exit(1)
+          print("Basic secret-leak checks passed.")
+          PY
+
+  director:
+    name: Director / release evidence
+    needs: [functional, security]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write factory handoff
+        env:
+          TEST_RESULT: ${{ needs.functional.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+        run: |
+          mkdir -p build/factory
+          cat > build/factory/AVTOY_HANDOFF.md <<EOF
+          # AVTOY Korea factory handoff
+          - commit: ${GITHUB_SHA}
+          - functional_tests: ${TEST_RESULT}
+          - security_review: ${SECURITY_RESULT}
+          - scope: Cloudflare Worker, Telegram webhook, private order delivery, review moderation
+          - production_deploy: NOT AUTHORIZED BY THIS WORKFLOW
+          - release_rule: passing CI is not proof of live Telegram or website operation
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avtoy-factory-handoff
+          path: build/factory/AVTOY_HANDOFF.md
