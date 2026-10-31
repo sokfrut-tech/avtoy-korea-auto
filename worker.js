@@ -457,7 +457,7 @@ export default {
    }
    const orderId=crypto.randomUUID().replace(/-/g,"").slice(0,16);
    const bindToken=crypto.randomUUID().replace(/-/g,"")+crypto.randomUUID().replace(/-/g,"");
-   const orderNumber=String(Date.now());
+   // Timestamp plus cryptographically random suffix avoids same-millisecond collisions in ordinary KV usage.\n   // KV has no atomic compare-and-set, so this is collision-resistant, not a formal uniqueness lock.\n   const orderNumber=String(Date.now())+String(crypto.getRandomValues(new Uint32Array(1))[0]).padStart(10,"0");
    const order={id:orderId,number:orderNumber,...f,status:"new",chatId:null,telegramId:null,username:null,createdAt:new Date().toISOString()};
    await env.REVIEWS.put("order:"+orderId,JSON.stringify(order));
    await env.REVIEWS.put("order_no:"+orderNumber,JSON.stringify(order));
