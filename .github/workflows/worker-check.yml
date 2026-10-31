@@ -5,6 +5,7 @@ on:
     branches: [main, feature/reviews-moderation]
     paths:
       - "worker.js"
+      - "wrangler.toml"
       - "worker.test.mjs"
       - ".github/workflows/worker-check.yml"
   pull_request:

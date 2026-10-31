@@ -35,12 +35,15 @@ Telegram webhook должен быть зарегистрирован именн
 
 ### Обязательное хранилище заявок (REVIEWS)
 
-Создайте KV namespace в Cloudflare Workers & Pages → KV (например, `AVTOY_REVIEWS`). Затем откройте Worker `avtoy-korea-auto` → Settings → Bindings → Add → KV namespace и задайте:
+Созданный production KV namespace: `avtoy-korea-reviews` (Standard). Его ID хранится в `wrangler.toml`; не создавайте другой namespace и не меняйте ID без отдельной миграции.
+
+В Cloudflare Workers → `avtoy-korea-auto` → Settings → Bindings → Add → KV namespace задайте:
 
 - Variable name: `REVIEWS`
-- KV namespace: созданный namespace `AVTOY_REVIEWS`
+- Production namespace: `avtoy-korea-reviews`
+- Preview: использовать production value, если отдельное preview-хранилище не требуется.
 
-Сохраните изменения и убедитесь, что binding доступен Worker. Без `REVIEWS` форма намеренно возвращает ошибку и не сообщает клиенту, что заявка принята. Не создавайте namespace заново при каждом обновлении: в нём хранятся заявки, статусы и опубликованные отзывы.
+Конфигурация `wrangler.toml` является частью репозитория и должна оставаться синхронизированной с Cloudflare Dashboard. Workflow деплоя запускается также при изменении `wrangler.toml`. Без `REVIEWS` форма намеренно возвращает ошибку и не сообщает клиенту, что заявка принята. Не создавайте namespace заново при каждом обновлении: в нём хранятся заявки, статусы и опубликованные отзывы.
 
 ### Ограничение частоты заявок
 
