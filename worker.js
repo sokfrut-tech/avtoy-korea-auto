@@ -218,7 +218,7 @@ async function handleOrderCallback(callback, env, adminIds) {
  const answer=(text,alert=false)=>callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
  const fromId=String((callback.from&&callback.from.id)||"");
  if(!adminIds.includes(fromId))return answer("Нет доступа",true);
- const data=String(callback.data||""),match=data.match(/^ord:(\d+|[0-9a-f]{16})$/i),detail=data.match(/^ordinfo:(\d+|[0-9a-f]{16})$/i);
+ const data=String(callback.data||""),match=data.match(/^ord:(\d+|[0-9a-f]{16}|[0-9a-f]{32})$/i),detail=data.match(/^ordinfo:(\d+|[0-9a-f]{16}|[0-9a-f]{32})$/i);
  if((!match&&!detail)||!env.REVIEWS)return answer("Заявка не найдена",true);
  const number=(match||detail)[1],raw=await env.REVIEWS.get((/^[0-9a-f]{16}$/i.test(number)?"order:":"order_no:")+number);
  if(!raw)return answer("Заявка не найдена",true);
@@ -367,17 +367,25 @@ export default {
       await send(match[1], match[2]);
       await send(chatId, "Ответ отправлен.");
      }
-    } else if (/^\/start order_[0-9a-f]{16}$/.test(text)) {
-     // Клиент открыл бота по ссылке с сайта: привязываем его чат к заявке.
-     const orderId = text.slice("/start order_".length);
-     const raw = env.REVIEWS ? await env.REVIEWS.get(`order:${orderId}`) : null;
+    } else if (/^\/start order_[0-9a-f]{64}$/.test(text)) {
+     // Одноразовый bearer-токен: 256 бит случайности, срок действия 7 дней.
+     const bindToken = text.slice("/start order_".length);
+     const tokenKey = `bind_token:${bindToken}`;
+     const orderId = env.REVIEWS ? await env.REVIEWS.get(tokenKey) : null;
+     const raw = orderId ? await env.REVIEWS.get(`order:${orderId}`) : null;
      if (!raw) {
-      await send(chatId, "Заявка не найдена. Оставьте её на сайте ещё раз.");
+      await send(chatId, "Ссылка недействительна или уже использована. Оставьте заявку на сайте ещё раз.");
      } else {
       const order = JSON.parse(raw);
-      order.chatId = chatId;
-      await env.REVIEWS.put(`order:${orderId}`, JSON.stringify(order));
-      await send(chatId, "Спасибо! Ваша заявка получена. С вами свяжутся в этом чате.");
+      if (order.chatId && String(order.chatId) !== chatId) {
+       await send(chatId, "К заявке уже привязан другой Telegram-чат. Свяжитесь с менеджером.");
+      } else {
+       await env.REVIEWS.delete(tokenKey);
+       order.chatId = chatId;
+       await env.REVIEWS.put(`order:${orderId}`, JSON.stringify(order));
+       await env.REVIEWS.put(`order_no:${order.number}`, JSON.stringify(order));
+       await send(chatId, "Спасибо! Ваш Telegram подключён к заявке. С вами свяжутся в этом чате.");
+      }
      }
     } else if (text === "/start" || text.startsWith("/start ")) {
      await send(chatId, "Здравствуйте! Это AVTOY KOREA 🚘\n\nПомогаем с подбором автомобилей из Кореи, Китая и ОАЭ.\n\nКоманды:\n/countries — страны покупки\n/catalog — как проходит подбор\n/contact — оставить заявку\n/help — помощь\n\nНапишите, какой автомобиль ищете, и мы передадим запрос менеджеру.");
@@ -432,16 +440,18 @@ export default {
     return Response.json({ok:false,error:"Система учёта заявок временно недоступна. Попробуйте позже."},{status:503});
    }
    const orderId=crypto.randomUUID().replace(/-/g,"").slice(0,16);
+   const bindToken=crypto.randomUUID().replace(/-/g,"")+crypto.randomUUID().replace(/-/g,"");
    const orderNumber=String(Date.now());
    const order={id:orderId,number:orderNumber,...f,status:"new",chatId:null,telegramId:null,username:null,createdAt:new Date().toISOString()};
    await env.REVIEWS.put("order:"+orderId,JSON.stringify(order));
    await env.REVIEWS.put("order_no:"+orderNumber,JSON.stringify(order));
+   await env.REVIEWS.put("bind_token:"+bindToken,orderId,{expirationTtl:604800});
    const cardText=["🚘 Новая заявка №"+orderNumber,"Модель: "+(f.model||"не указано"),"Бюджет: "+(f.budget||"не указан"),"Страна: "+(f.country||"не указана"),"Тема: "+(f.purpose||"Подбор автомобиля"),"Статус: новая","","Личные данные доступны администратору по кнопке.", "Заявка: " + orderId].join("\n");
    const keyboard={inline_keyboard:[[{text:"✅ Принять в работу",callback_data:"ord:"+orderNumber},{text:"🔐 Данные клиента",callback_data:"ordinfo:"+orderNumber}]]};
    const deliveries=await Promise.all(adminIds.map(async chat_id=>{try{const payload=await callTelegram(env,"sendMessage",{chat_id,text:cardText,reply_markup:keyboard});return Boolean(payload&&payload.ok===true);}catch{return false;}}));
    if(deliveries.some(ok=>!ok))return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
    const botUser=String(env.TELEGRAM_BOT_USERNAME||"").replace(/^@/,"");
-   return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+orderId:null},{headers});
+   return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+bindToken:null},{headers});
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
    const cars = [];
