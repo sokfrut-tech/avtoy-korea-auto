@@ -334,8 +334,9 @@ export default {
     } else if (adminIds.includes(chatId) && msg.reply_to_message) {
      const repliedText = String(msg.reply_to_message.text || msg.reply_to_message.caption || "");
      const orderMatch = repliedText.match(/Заявка:\s*([0-9a-f]{16})/i);
-     if (orderMatch && env.REVIEWS) {
-      const rawOrder = await env.REVIEWS.get("order:" + orderMatch[1]);
+     const orderNumberMatch = repliedText.match(/Заявка\s*№\s*(\d+)/i);
+     if ((orderMatch || orderNumberMatch) && env.REVIEWS) {
+      const rawOrder = await env.REVIEWS.get(orderNumberMatch ? "order_no:" + orderNumberMatch[1] : "order:" + orderMatch[1]);
       if (rawOrder) {
        const order = JSON.parse(rawOrder);
        if (order.chatId) {
