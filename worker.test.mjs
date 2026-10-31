@@ -475,7 +475,7 @@ test("client opens the link, admin accepts, client gets the confirmation", async
     const bindToken = new URL(botLink).searchParams.get("start").slice("order_".length);
 
     await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${bindToken}` } }), orderEnv(kv));
-    assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("заявка получена")));
+    assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("Telegram подключён к заявке")));
 
     await worker.fetch(webhookUpdate(callback(111111111, `ord:${orderId}`)), orderEnv(kv));
     assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("принята в работу")));
