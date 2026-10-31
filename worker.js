@@ -720,6 +720,18 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
 </div></footer>
 
 <script>
+// Все кнопки заявки ведут к одной форме и переводят фокус на первое обязательное поле.
+document.querySelectorAll('a[href="#request"]').forEach(function(link){
+  link.addEventListener('click',function(event){
+    var section=document.getElementById('request');
+    var firstField=document.getElementById('name');
+    if(!section||!firstField)return;
+    event.preventDefault();
+    section.scrollIntoView({behavior:'smooth',block:'start'});
+    window.setTimeout(function(){firstField.focus({preventScroll:true});},350);
+    if(history.replaceState)history.replaceState(null,'','#request');
+  });
+});
 const form=document.getElementById('request-form'),statusEl=document.getElementById('status');
 form.addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('submit-btn');b.disabled=true;statusEl.textContent='Отправляем заявку…';try{const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))});const x=await r.json();if(!r.ok||!x.ok)throw Error(x.error||'Не удалось отправить заявку.');if(x.setupNeeded){statusEl.textContent='Заявка подготовлена. Откроется Telegram: выберите чат менеджера и отправьте сообщение.';location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText)}else{statusEl.textContent='Заявка доставлена администраторам. Спасибо! Свяжемся с вами по указанному контакту.';form.reset();if(x.botLink){var a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a)}}}catch(err){statusEl.textContent=err.message||'Ошибка. Попробуйте ещё раз.'}finally{b.disabled=false}});
 fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
