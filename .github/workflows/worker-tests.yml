@@ -1,0 +1,30 @@
+name: Worker tests
+
+on:
+  pull_request:
+    branches:
+      - main
+      - feature/reviews-moderation
+      - feature/admin-edit-before-publish
+  push:
+    branches:
+      - main
+      - feature/reviews-moderation
+      - feature/admin-edit-before-publish
+      - fix/review-album-and-inline-edit
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run Worker regression tests
+        run: node --test worker.test.mjs
