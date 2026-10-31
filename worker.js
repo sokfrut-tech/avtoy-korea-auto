@@ -41,16 +41,26 @@ async function handleAdminMediaUpload(msg, env, adminIds) {
   return true;
  }
  const id = adminId + "_" + String(msg.message_id);
- const existing = await env.REVIEWS.get("pending:" + id);
- if (existing) {
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Это медиа уже ожидает модерации."});
+ const uploadKey = "admin_upload:" + id;
+ let state = JSON.parse(await env.REVIEWS.get(uploadKey) || "null");
+ if (state && ["approved","rejected"].includes(state.status)) {
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Это медиа уже обработано."});
   return true;
  }
- const caption = String(msg.caption || "").trim().slice(0,1000);
- const review = {id,kind:video ? "video" : "text",text:caption,name:"Администратор загрузил",fileId:video ? video.file_id : photo.file_id,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(caption),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"Загрузка администратора"};
- await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
- const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}]]};
- await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nМедиа загружено вами в личный чат с ботом. Проверьте и выберите действие.",reply_markup:keyboard});
+ if (!state) {
+  const caption = String(msg.caption || "").trim().slice(0,1000);
+  const review = {id,kind:video ? "video" : "text",text:caption,name:"Администратор загрузил",fileId:video ? video.file_id : photo.file_id,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(caption),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"Загрузка администратора"};
+  state = {review,cardSent:false,status:"pending"};
+  await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
+  await env.REVIEWS.put(uploadKey,JSON.stringify(state),{expirationTtl:2592000});
+ }
+ if (!state.cardSent) {
+  const review = state.review;
+  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}]]};
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nМедиа загружено вами в личный чат с ботом. Проверьте и выберите действие.",reply_markup:keyboard});
+  state.cardSent = true;
+  await env.REVIEWS.put(uploadKey,JSON.stringify(state),{expirationTtl:2592000});
+ }
  return true;
 }
 
@@ -109,6 +119,8 @@ async function handleReviewCallback(callback, env, adminIds) {
  }
  if (action === "rej") {
   await env.REVIEWS.delete(`pending:${id}`);
+  const uploadRaw = await env.REVIEWS.get("admin_upload:" + id);
+  if (uploadRaw) { const uploadState = JSON.parse(uploadRaw); uploadState.status = "rejected"; await env.REVIEWS.put("admin_upload:" + id,JSON.stringify(uploadState),{expirationTtl:2592000}); }
   return answer("Не публикуется");
  }
  const problem = reviewRuleProblem(review);
@@ -123,6 +135,8 @@ async function handleReviewCallback(callback, env, adminIds) {
  };
  await env.REVIEWS.put(`approved:${id}`, JSON.stringify(published));
  await env.REVIEWS.delete(`pending:${id}`);
+ const uploadRaw = await env.REVIEWS.get("admin_upload:" + id);
+ if (uploadRaw) { const uploadState = JSON.parse(uploadRaw); uploadState.status = "approved"; await env.REVIEWS.put("admin_upload:" + id,JSON.stringify(uploadState),{expirationTtl:2592000}); }
  return answer("Опубликовано на сайте");
 }
 
