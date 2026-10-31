@@ -92,7 +92,7 @@ test("website requests are delivered to every personal admin ID", async () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Тест", contact: "@test", model: "Kia" }),
     });
-    const response = await worker.fetch(request, env);
+    const response = await worker.fetch(request, reviewEnv(memoryKV()));
     assert.equal(response.status, 200);
     assert.deepEqual(
       calls.map(call => String(call.payload.chat_id)).sort(),
@@ -101,6 +101,49 @@ test("website requests are delivered to every personal admin ID", async () => {
   });
 });
 
+
+
+test("website order receives a number and sends a privacy-safe card with admin controls", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const response=await worker.fetch(new Request("https://worker.test/api/request",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:"Client Name",contact:"+79990000000",model:"Kia"})}),reviewEnv(kv));
+  assert.equal(response.status,200);
+  const body=await response.json();
+  assert.ok(body.orderNumber);
+  const saved=JSON.parse(await kv.get("order_no:"+body.orderNumber));
+  assert.equal(saved.contact,"+79990000000");
+  const cards=calls.filter(c=>c.method==="sendMessage" && ["111111111","222222222"].includes(String(c.payload.chat_id)));
+  assert.equal(cards.length,2);
+  assert.ok(cards[0].payload.text.includes("Заявка №"+body.orderNumber));
+  assert.ok(!cards[0].payload.text.includes("+79990000000"));
+  assert.ok(cards[0].payload.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="ord:"+body.orderNumber));
+  assert.ok(cards[0].payload.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="ordinfo:"+body.orderNumber));
+ });
+});
+
+test("only an admin can request private order details; admin can accept and finish", async()=>{
+ const kv=memoryKV(), order={id:"abc123",number:"123456",name:"Private Name",contact:"+79990000000",status:"new",createdAt:"now"};
+ await kv.put("order_no:123456",JSON.stringify(order)); await kv.put("order:abc123",JSON.stringify(order));
+ await withTelegramMock(async calls=>{
+  await worker.fetch(webhookUpdate(callback(999999999,"ordinfo:123456")),reviewEnv(kv));
+  assert.ok(calls.some(c=>c.method==="answerCallbackQuery"&&c.payload.text==="Нет доступа"));
+  assert.ok(!calls.some(c=>c.method==="sendMessage"&&String(c.payload.chat_id)==="999999999"));
+  await worker.fetch(webhookUpdate(callback(111111111,"ordinfo:123456")),reviewEnv(kv));
+  assert.ok(calls.some(c=>c.method==="sendMessage"&&c.payload.text.includes("+79990000000")));
+  await worker.fetch(webhookUpdate(callback(111111111,"ord:123456")),reviewEnv(kv));
+  assert.equal(JSON.parse(await kv.get("order_no:123456")).status,"in_work");
+  await worker.fetch(webhookUpdate(callback(111111111,"orddone:123456")),reviewEnv(kv));
+  assert.equal(JSON.parse(await kv.get("order_no:123456")).status,"done");
+ });
+});
+
+test("website refuses order registration when durable KV is unavailable",async()=>{
+ await withTelegramMock(async calls=>{
+  const response=await worker.fetch(new Request("https://worker.test/api/request",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:"Test",contact:"@test"})}),env);
+  assert.equal(response.status,503);
+  assert.equal(calls.length,0);
+ });
+});
 
 test("admin forwarding a channel post stages it for category choice before moderation", async () => {
   const kv = memoryKV();
