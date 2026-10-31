@@ -954,7 +954,26 @@ footer{border-top-color:#ffffff18}
  .nav .pill{white-space:normal;text-align:center}
 }
 
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+/* Homepage customer reviews carousel */
+.review-carousel{position:relative}
+.review-carousel .reviews{display:flex;gap:18px;overflow-x:auto;overflow-y:hidden;padding:4px 3px 22px;scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain;scrollbar-width:none}
+.review-carousel .reviews::-webkit-scrollbar{display:none}
+.review-carousel .reviews>article{flex:0 0 calc((100% - 36px)/3);min-width:0;scroll-snap-align:start;overflow:hidden;padding:18px;border:1px solid #ffffff18;background:linear-gradient(155deg,#1a202b,#10141b);border-radius:22px;box-shadow:0 16px 42px #0004}
+.review-carousel .reviews>article:hover{transform:translateY(-3px);border-color:#ff735e70}
+.review-carousel .review-media{height:220px;object-fit:cover;border-radius:15px}
+.review-carousel .review-name{font-size:14px;margin-top:16px}
+.review-carousel .review-text{font-size:15px;line-height:1.65}
+.review-controls{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:4px}
+.review-dots{display:flex;align-items:center;gap:7px;min-height:36px}
+.review-dot{width:7px;height:7px;padding:0;border:0;border-radius:99px;background:#687080;cursor:pointer;transition:width .2s,background .2s}
+.review-dot[aria-current=true]{width:24px;background:var(--red)}
+.review-arrows{display:flex;gap:9px}
+.review-arrow{width:42px;height:42px;display:grid;place-items:center;border:1px solid #ffffff25;border-radius:50%;background:#171d27;color:#fff;font-size:21px;cursor:pointer}
+.review-arrow:hover{background:var(--red);border-color:var(--red)}
+.review-arrow:disabled{opacity:.35;cursor:default}
+@media(max-width:780px){.review-carousel .reviews{gap:12px;padding-bottom:16px}.review-carousel .reviews>article{flex:0 0 min(82%,340px);padding:14px;border-radius:19px}.review-carousel .review-media{height:auto;aspect-ratio:4/3}.review-carousel .review-name{font-size:13px}.review-carousel .review-text{font-size:13px;line-height:1.55}.review-arrow{width:38px;height:38px}}
+@media(max-width:420px){.review-carousel .reviews>article{flex-basis:88%}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}.review-carousel .reviews{scroll-behavior:auto}}
 </style>
 </head>
 <body>
@@ -1017,8 +1036,17 @@ footer{border-top-color:#ffffff18}
 <section class="wrap section" id="reviews" style="padding-top:20px">
   <h2>Отзывы наших клиентов</h2>
   <p class="sub">Публикуем отзывы только с согласия клиентов.</p>
-  <div class="reviews" id="reviews-list">
-    <article class="card dashed"><div class="review-name" style="margin-top:0">Скоро здесь появятся отзывы</div><p class="review-text">Клиенты, которые уже купили автомобиль через нас, смогут поделиться опытом.</p></article>
+  <div class="review-carousel">
+    <div class="reviews" id="reviews-list" aria-label="Отзывы клиентов">
+      <article class="card dashed"><div class="review-name" style="margin-top:0">Скоро здесь появятся отзывы</div><p class="review-text">Клиенты, которые уже купили автомобиль через нас, смогут поделиться опытом.</p></article>
+    </div>
+    <div class="review-controls">
+      <div class="review-dots" id="review-dots" aria-label="Выбрать отзыв"></div>
+      <div class="review-arrows">
+        <button class="review-arrow" id="reviews-prev" type="button" aria-label="Предыдущие отзывы">‹</button>
+        <button class="review-arrow" id="reviews-next" type="button" aria-label="Следующие отзывы">›</button>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1141,16 +1169,30 @@ form.addEventListener('submit',async function(e){
  }
 });
 fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
-  var list=document.getElementById('reviews-list');
-  if(!data.reviews||!data.reviews.length)return;
-  list.textContent='';
-  data.reviews.forEach(function(rv){
+  var list=document.getElementById('reviews-list'),dots=document.getElementById('review-dots');
+  var prev=document.getElementById('reviews-prev'),next=document.getElementById('reviews-next');
+  if(!list||!data.reviews||!data.reviews.length)return;
+  list.textContent='';dots.textContent='';
+  data.reviews.forEach(function(rv,index){
     var card=document.createElement('article');card.className='card';
-    if(rv.media){var el=document.createElement(rv.kind==='video'?'video':'img');el.className='review-media';el.src=rv.media;if(rv.kind==='video'){el.controls=true;el.preload='metadata'}else{el.loading='lazy';el.alt='Фото автомобиля'}card.appendChild(el)}
+    if(rv.media){var el=document.createElement(rv.kind==='video'?'video':'img');el.className='review-media';el.src=rv.media;if(rv.kind==='video'){el.controls=true;el.playsInline=true;el.preload='metadata'}else{el.loading='lazy';el.alt='Фото автомобиля клиента'}card.appendChild(el)}
     var who=document.createElement('div');who.className='review-name';who.textContent=rv.name;
     var text=document.createElement('p');text.className='review-text';text.textContent=rv.text||'';
     card.appendChild(who);card.appendChild(text);list.appendChild(card);
+    var dot=document.createElement('button');dot.type='button';dot.className='review-dot';dot.setAttribute('aria-label','Показать отзыв '+(index+1));
+    dot.addEventListener('click',function(){list.scrollTo({left:card.offsetLeft-list.offsetLeft,behavior:'smooth'})});dots.appendChild(dot);
   });
+  var dotItems=Array.from(dots.children);
+  function updateReviewControls(){
+    var maxScroll=list.scrollWidth-list.clientWidth,position=maxScroll>0?list.scrollLeft/maxScroll:0;
+    var active=Math.round(position*Math.max(0,dotItems.length-1));
+    dotItems.forEach(function(dot,i){dot.setAttribute('aria-current',i===active?'true':'false')});
+    prev.disabled=list.scrollLeft<=2;next.disabled=list.scrollLeft>=maxScroll-2;
+    dots.style.display=dotItems.length>1?'flex':'none';prev.parentElement.style.display=dotItems.length>1?'flex':'none';
+  }
+  prev.addEventListener('click',function(){list.scrollBy({left:-list.clientWidth*.85,behavior:'smooth'})});
+  next.addEventListener('click',function(){list.scrollBy({left:list.clientWidth*.85,behavior:'smooth'})});
+  list.addEventListener('scroll',updateReviewControls,{passive:true});window.addEventListener('resize',updateReviewControls);updateReviewControls();
 }).catch(function(){});
 // Каталог показывает только одобренные публикации из Telegram
 fetch('/api/cars',{cache:'no-store'}).then(r=>r.json()).then(data=>{
