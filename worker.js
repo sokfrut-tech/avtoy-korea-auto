@@ -220,15 +220,15 @@ async function handleOrderCallback(callback, env, adminIds) {
  if(!adminIds.includes(fromId))return answer("Нет доступа",true);
  const data=String(callback.data||""),match=data.match(/^ord:(\d+)$/),detail=data.match(/^ordinfo:(\d+)$/);
  if((!match&&!detail)||!env.REVIEWS)return answer("Заявка не найдена",true);
- const number=(match||detail)[1],raw=await env.REVIEWS.get("order_no:"+number);
+ const number=(match||detail)[1],raw=await env.REVIEWS.get((/^[0-9a-f]{16}$/i.test(number)?"order:":"order_no:")+number);
  if(!raw)return answer("Заявка не найдена",true);
  const order=JSON.parse(raw);
  if(detail){await callTelegram(env,"sendMessage",{chat_id:callback.message.chat.id,text:formatOrderPrivate(order)});return answer("Данные отправлены только вам");}
- if(order.status!=="new")return answer("Заявка уже не новая");
+ if(order.status==="in_work")return answer("Заявка уже принята в работу"); if(order.status==="done")return answer("Заявка уже завершена");
  order.status="in_work";order.acceptedBy=fromId;order.acceptedAt=new Date().toISOString();
  await env.REVIEWS.put("order_no:"+number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
  if(callback.message)await callTelegram(env,"editMessageReplyMarkup",{chat_id:callback.message.chat.id,message_id:callback.message.message_id,reply_markup:{inline_keyboard:[[{text:"🔐 Данные клиента",callback_data:"ordinfo:"+number},{text:"🏁 Завершить",callback_data:"orddone:"+number}]]}});
- if(order.chatId)await callTelegram(env,"sendMessage",{chat_id:order.chatId,text:"Ваша заявка №"+number+" принята в работу. С вами свяжутся в этом чате."});
+ if(order.chatId)await callTelegram(env,"sendMessage",{chat_id:order.chatId,text:"Ваша заявка №"+(order.number||number)+" принята в работу. С вами свяжутся в этом чате."});
  return answer("Заявка принята в работу");
 }
 async function handleOrderDoneCallback(callback,env,adminIds){
@@ -398,7 +398,7 @@ export default {
    const order={id:orderId,number:orderNumber,...f,status:"new",chatId:null,telegramId:null,username:null,createdAt:new Date().toISOString()};
    await env.REVIEWS.put("order:"+orderId,JSON.stringify(order));
    await env.REVIEWS.put("order_no:"+orderNumber,JSON.stringify(order));
-   const cardText=["🚘 Новая заявка №"+orderNumber,"Модель: "+(f.model||"не указано"),"Бюджет: "+(f.budget||"не указан"),"Страна: "+(f.country||"не указана"),"Тема: "+(f.purpose||"Подбор автомобиля"),"Статус: новая","","Личные данные доступны администратору по кнопке."].join("\n");
+   const cardText=["🚘 Новая заявка №"+orderNumber,"Модель: "+(f.model||"не указано"),"Бюджет: "+(f.budget||"не указан"),"Страна: "+(f.country||"не указана"),"Тема: "+(f.purpose||"Подбор автомобиля"),"Статус: новая","","Личные данные доступны администратору по кнопке.", "Заявка: " + orderId].join("\n");
    const keyboard={inline_keyboard:[[{text:"✅ Принять в работу",callback_data:"ord:"+orderNumber},{text:"🔐 Данные клиента",callback_data:"ordinfo:"+orderNumber}]]};
    const deliveries=await Promise.all(adminIds.map(async chat_id=>{try{const payload=await callTelegram(env,"sendMessage",{chat_id,text:cardText,reply_markup:keyboard});return Boolean(payload&&payload.ok===true);}catch{return false;}}));
    if(deliveries.some(ok=>!ok))return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
