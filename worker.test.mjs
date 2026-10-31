@@ -114,7 +114,7 @@ test("website order receives a number and sends a privacy-safe card with admin c
   assert.equal(saved.contact,"+79990000000");
   const cards=calls.filter(c=>c.method==="sendMessage" && ["111111111","222222222"].includes(String(c.payload.chat_id)));
   assert.equal(cards.length,2);
-  assert.ok(cards[0].payload.text.includes("Заявка №"+body.orderNumber));
+  assert.ok(cards[0].payload.text.includes("заявка №"+body.orderNumber));
   assert.ok(!cards[0].payload.text.includes("+79990000000"));
   assert.ok(cards[0].payload.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="ord:"+body.orderNumber));
   assert.ok(cards[0].payload.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="ordinfo:"+body.orderNumber));
@@ -134,6 +134,18 @@ test("only an admin can request private order details; admin can accept and fini
   assert.equal(JSON.parse(await kv.get("order_no:123456")).status,"in_work");
   await worker.fetch(webhookUpdate(callback(111111111,"orddone:123456")),reviewEnv(kv));
   assert.equal(JSON.parse(await kv.get("order_no:123456")).status,"done");
+ });
+});
+
+
+test("order details are never sent to a group even when an admin clicks a forwarded card", async()=>{
+ const kv=memoryKV(), order={id:"abc123",number:"123456",name:"Private Name",contact:"+79990000000",status:"new",createdAt:"now"};
+ await kv.put("order_no:123456",JSON.stringify(order));
+ await withTelegramMock(async calls=>{
+  await worker.fetch(webhookUpdate(callback(111111111,"ordinfo:123456",{id:-1009876543210,type:"supergroup"})),reviewEnv(kv));
+  assert.ok(calls.some(c=>c.method==="answerCallbackQuery"&&/личном чате/.test(c.payload.text)));
+  assert.ok(!calls.some(c=>c.method==="sendMessage"&&String(c.payload.chat_id)==="-1009876543210"));
+  assert.ok(!calls.some(c=>c.method==="sendMessage"&&String(c.payload.chat_id)==="111111111"&&c.payload.text.includes("+79990000000")));
  });
 });
 
@@ -305,8 +317,8 @@ function groupReview(messageId, extra) {
   return { message_id: messageId, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { first_name: "Ivan" }, ...extra };
 }
 
-function callback(fromId, data) {
-  return { callback_query: { id: "cb" + data, from: { id: fromId }, data } };
+function callback(fromId, data, chat = { id: fromId, type: "private" }) {
+  return { callback_query: { id: "cb" + data, from: { id: fromId }, data, message: { message_id: 77, chat } } };
 }
 
 test("group messages are ignored when no review group is configured", async () => {
