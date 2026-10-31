@@ -814,6 +814,110 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
   .field.full{grid-column:auto}
   .form-foot .btn{width:100%}
 }
+
+/* AVTOY KOREA responsive tile refresh — phone, tablet and desktop */
+:root{--max:1240px;--surface:#11151c;--surface-2:#171c25;--line:#2a303b;--muted:#aeb6c3}
+body{background:radial-gradient(ellipse at 82% 5%,#1c2734 0,transparent 34%),var(--bg)}
+.wrap{width:min(var(--max),calc(100% - 48px))}
+.topbar{background:rgba(8,10,14,.92);border-bottom-color:#ffffff18}
+.nav{min-height:76px}
+.brand{font-size:20px;letter-spacing:.14em}
+.nav-links{gap:22px}
+.hero{grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);gap:clamp(28px,5vw,72px);padding:clamp(48px,7vw,92px) 0 70px}
+.hero h1{font-size:clamp(48px,6vw,82px);line-height:.99}
+.photo{aspect-ratio:16/11;min-height:0;border-radius:30px;border-color:#ffffff20;box-shadow:0 28px 90px #0009}
+.section{padding:76px 0}
+.steps,.cars,.reviews{gap:18px}
+.card{background:linear-gradient(145deg,#171c25,#101319);border-color:#ffffff16;border-radius:22px;box-shadow:0 12px 34px #0002;transition:transform .2s,border-color .2s,box-shadow .2s}
+.card:hover{transform:translateY(-3px);border-color:#ff654d70;box-shadow:0 18px 42px #0005}
+.steps .card{min-height:194px;padding:25px}
+.steps .card h3{font-size:19px;line-height:1.25}
+.steps .card p{font-size:14px}
+.get{background:linear-gradient(120deg,#151b24,#101319);border-color:#ffffff18;border-radius:22px}
+.form-card{background:linear-gradient(145deg,#171c25,#101319);border-color:#ffffff1c;box-shadow:0 22px 70px #0005}
+.field input,.field textarea,.field select{background:#0b0e13;border-color:#343c49;min-height:50px}
+.field textarea{min-height:110px}
+.telegram-promo{background:linear-gradient(125deg,#0c1d2c,#111b29 65%,#191d27);border-color:#ffffff20}
+footer{border-top-color:#ffffff18}
+:focus-visible{outline:3px solid #ff735e;outline-offset:3px}
+@media(min-width:781px) and (max-width:1100px){
+ .wrap{width:calc(100% - 40px)}
+ .nav-links{gap:14px;font-size:14px}
+ .pill{padding:11px 15px;font-size:14px}
+ .hero{gap:28px;padding:58px 0}
+ .hero h1{font-size:clamp(44px,5.5vw,64px)}
+ .steps{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .cars,.reviews{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .form-card{gap:28px;padding:34px}
+}
+@media(max-width:780px){
+ .wrap{width:calc(100% - 32px)}
+ .nav{min-height:66px;gap:10px}
+ .brand{font-size:16px;letter-spacing:.11em}
+ .brand small{letter-spacing:.18em}
+ .nav-links{gap:0}
+ .pill{padding:10px 13px;font-size:12px;white-space:nowrap}
+ .hero{grid-template-columns:minmax(0,1fr);gap:22px;padding:30px 0 28px}
+ .hero h1{font-size:clamp(42px,10vw,58px);margin:14px 0 16px}
+ .intro{font-size:16px;line-height:1.55}
+ .photo{width:100%;aspect-ratio:16/10;min-height:0;border-radius:22px}
+ .hero-caption{left:16px;right:16px;bottom:16px;font-size:14px}
+ .hero-dots{right:17px;bottom:21px}
+ .actions{display:grid;grid-template-columns:1fr;gap:10px;margin-top:22px}
+ .btn{width:100%;min-height:50px;padding:14px 18px;border-radius:14px;font-size:15px}
+ .section{padding:48px 0}
+ h2{font-size:clamp(25px,6.5vw,34px);line-height:1.12}
+ .sub{font-size:14px;line-height:1.55;margin-bottom:22px}
+ .steps{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+ .steps .card{min-height:0;padding:16px 14px;border-radius:17px}
+ .steps .card .num{font-size:22px}
+ .steps .card h3{font-size:15px;line-height:1.25;margin:9px 0 6px}
+ .steps .card p{font-size:12px;line-height:1.48}
+ .get{grid-template-columns:1fr;padding:18px;border-radius:18px;gap:12px;margin-top:12px}
+ .get-title{font-size:16px}
+ .get ul{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:0;list-style:none;font-size:12px;line-height:1.4}
+ .get li{background:#0b0e13;border:1px solid var(--line);border-radius:12px;padding:11px}
+ .cars,.reviews{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+ .car-card{padding:0;min-height:0}
+ .car-body{padding:13px}
+ .car-body h3{font-size:14px;line-height:1.3;margin:0 0 7px}
+ .car-specs{display:block!important;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+ .car-link{display:inline-block;margin-top:10px;font-size:12px}
+ .review-media{height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:12px}
+ .reviews>article{padding:13px;border-radius:17px}
+ .review-name{font-size:12px;margin-top:9px}
+ .review-text{font-size:12px;line-height:1.5}
+ .form-card{grid-template-columns:minmax(0,1fr);gap:18px;padding:20px;border-radius:21px}
+ .form-card h2{font-size:28px}
+ .form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+ .field.full{grid-column:1/-1}
+ .field{font-size:12px}
+ .field input,.field textarea,.field select{padding:13px;font-size:16px;min-height:48px}
+ .form-foot{display:grid;grid-template-columns:1fr;gap:10px}
+ .form-foot .btn{width:100%}
+ .telegram-promo{grid-template-columns:minmax(0,1fr);text-align:center;padding:22px 18px;gap:17px;border-radius:21px}
+ .telegram-promo-qr{width:164px;grid-row:1}
+ .footer-row{justify-content:center;text-align:center}
+}
+@media(max-width:420px){
+ .wrap{width:calc(100% - 26px)}
+ .brand{font-size:14px}
+ .brand small{font-size:7px}
+ .pill{font-size:11px;padding:9px 10px}
+ .steps,.cars,.reviews{gap:8px}
+ .steps .card{padding:14px 11px}
+ .steps .card h3{font-size:14px}
+ .steps .card p{font-size:11px}
+ .get ul{font-size:11px}
+ .form-grid{grid-template-columns:minmax(0,1fr)}
+ .field.full{grid-column:auto}
+ .telegram-promo-qr{width:148px}
+}
+@media(max-width:340px){
+ .steps,.cars,.reviews{grid-template-columns:minmax(0,1fr)}
+ .nav .pill{white-space:normal;text-align:center}
+}
+
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 </style>
 </head>
