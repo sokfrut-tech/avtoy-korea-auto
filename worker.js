@@ -98,10 +98,24 @@ async function handleReviewCallback(callback, env, adminIds) {
  return answer("Опубликовано на сайте");
 }
 
-// --- Автомобили из Telegram-канала: публикация только после одобрения ---
+// --- Импорт канала: сначала администратор выбирает тип, затем отдельная модерация ---
+function sourcePostDate(post) {
+ const value = Number(post.sourceDate || post.date || 0);
+ return value > 0 ? value : 0;
+}
+
 async function handleCarPost(post, env, adminIds) {
  const chat = post.chat || {};
- if (String(chat.username || "").toLowerCase() !== "avtoyKorea".toLowerCase()) return;
+ if (String(chat.username || "").toLowerCase() !== "avtoykorea") return;
+ const created = sourcePostDate(post);
+ const cutoff = Math.floor(Date.UTC(2026, 0, 1) / 1000);
+ if (!created || created < cutoff) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env, "sendMessage", {
+   chat_id: adminId,
+   text: "⏭ Автомобиль не импортирован: публикация создана до 1 января 2026 года или дата источника недоступна. Для отзывов такого ограничения нет."
+  })));
+  return;
+ }
  const caption = String(post.caption || post.text || "").trim().slice(0, 3000);
  const photos = Array.isArray(post.photo) ? post.photo : [];
  const fileId = photos.length ? photos[photos.length - 1].file_id : null;
@@ -113,12 +127,71 @@ async function handleCarPost(post, env, adminIds) {
   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Это объявление уже импортировано или находится на модерации: https://t.me/" + chat.username + "/" + post.message_id})));
   return;
  }
- const car = {id,caption,fileId,sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id,createdAt:new Date().toISOString()};
+ const car = {id,caption,fileId,sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id,createdAt:new Date().toISOString(),sourceDate:created};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
   if (fileId) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:fileId});
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 Объявление из канала AVTOY KOREA\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 Автомобиль из канала AVTOY KOREA\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
+ }));
+}
+
+async function handleImportedReview(post, env, adminIds) {
+ const chat = post.chat || {};
+ if (String(chat.username || "").toLowerCase() !== "avtoykorea" || !env.REVIEWS) return;
+ const text = String(post.caption || post.text || "").trim().slice(0, 1000);
+ const photos = Array.isArray(post.photo) ? post.photo : [];
+ const photo = photos.length ? photos[photos.length - 1].file_id : null;
+ const video = post.video && post.video.file_id ? post.video.file_id : null;
+ if (!text && !photo && !video) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"Отзыв не импортирован: в публикации нет текста, фото или видео."})));
+  return;
+ }
+ const id = String(chat.id) + "_" + String(post.message_id);
+ if (await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Этот отзыв уже импортирован или находится на модерации."})));
+  return;
+ }
+ const review = {id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id};
+ await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
+ const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}]]};
+ await Promise.all(adminIds.map(async adminId => {
+  if (video) await callTelegram(env,"sendVideo",{chat_id:adminId,video});
+  else if (photo) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nИсточник: " + review.sourceUrl,reply_markup:keyboard});
+ }));
+}
+
+async function handleImportChoice(callback, env, adminIds) {
+ const answer = (text, alert=false) => callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
+ const fromId = String((callback.from && callback.from.id) || "");
+ if (!adminIds.includes(fromId)) return answer("Нет доступа",true);
+ const match = String(callback.data || "").match(/^imp:(car|review):(-?\d+_\d+)$/);
+ if (!match || !env.REVIEWS) return answer("Импорт не найден",true);
+ const [,kind,id] = match;
+ const raw = await env.REVIEWS.get("import_pending:" + id);
+ if (!raw) return answer("Публикация уже обработана или не найдена",true);
+ const post = JSON.parse(raw);
+ await env.REVIEWS.delete("import_pending:" + id);
+ if (kind === "car") await handleCarPost(post,env,adminIds);
+ else await handleImportedReview(post,env,adminIds);
+ return answer(kind === "car" ? "Передано в модерацию автомобилей" : "Передано в модерацию отзывов");
+}
+
+async function stageChannelPost(post, env, adminIds) {
+ const chat = post.chat || {};
+ if (String(chat.username || "").toLowerCase() !== "avtoykorea" || !env.REVIEWS) return;
+ const id = String(chat.id) + "_" + String(post.message_id);
+ if (await env.REVIEWS.get("import_pending:" + id) || await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id) || await env.REVIEWS.get("car_pending:car_" + String(chat.id).replace(/-/g,"") + "_" + post.message_id) || await env.REVIEWS.get("car_approved:car_" + String(chat.id).replace(/-/g,"") + "_" + post.message_id)) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Эта публикация уже импортирована или ожидает выбора/модерации."})));
+  return;
+ }
+ await env.REVIEWS.put("import_pending:" + id,JSON.stringify(post));
+ const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
+ await Promise.all(adminIds.map(async adminId => {
+  if (post.video) await callTelegram(env,"sendVideo",{chat_id:adminId,video:post.video.file_id});
+  else if (Array.isArray(post.photo) && post.photo.length) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:post.photo[post.photo.length-1].file_id});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Новая публикация из @avtoYkorea. Выберите раздел для импорта.\n\n" + String(post.caption || post.text || "Без текста").slice(0,2500) + "\n\nДата оригинала: " + (post.sourceDate ? new Date(post.sourceDate*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow"}) : "не определена"),reply_markup:keyboard});
  }));
 }
 
@@ -193,13 +266,14 @@ export default {
     const cb = update.callback_query;
     try {
      if (String(cb.data || "").startsWith("ord:")) await handleOrderCallback(cb, env, adminIds);
+     else if (String(cb.data || "").startsWith("imp:")) await handleImportChoice(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("car")) await handleCarCallback(cb, env, adminIds);
      else await handleReviewCallback(cb, env, adminIds);
     } catch { return new Response("Telegram processing failed", { status: 502 }); }
     return Response.json({ ok: true });
    }
    const channelPost = update.channel_post;
-   if (channelPost) { try { await handleCarPost(channelPost, env, adminIds); } catch { return new Response("Telegram car processing failed", {status:502}); } return Response.json({ok:true}); }
+   if (channelPost) { try { await stageChannelPost({...channelPost,sourceDate:channelPost.date}, env, adminIds); } catch { return new Response("Telegram import staging failed", {status:502}); } return Response.json({ok:true}); }
    const msg = update.message;
    if (!msg || !msg.chat || !msg.chat.id) return Response.json({ ok: true });
    // Groups/channels: only the one review group, only /review messages. Everything else is ignored.
@@ -228,7 +302,7 @@ export default {
      if (String(sourceChat.username || "").toLowerCase() !== "avtoykorea") {
       await send(chatId, "Переслано сообщение не из канала @avtoYkorea. Для импорта перешлите публикацию именно из этого канала, не копируйте её текст.");
      } else {
-      await handleCarPost({...msg, chat: sourceChat, message_id: origin.message_id}, env, adminIds);
+      await stageChannelPost({...msg, chat: sourceChat, message_id: origin.message_id, sourceDate: origin.date || 0}, env, adminIds);
      }
     } else if (text.startsWith("/reply") && adminIds.includes(chatId)) {
      const match = text.match(/^\/reply\s+(-?\d+)\s+([\s\S]+)$/);
