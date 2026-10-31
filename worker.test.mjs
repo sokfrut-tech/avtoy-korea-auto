@@ -271,6 +271,25 @@ test("re-forwarding an automobile still awaiting moderation resends its publish 
  });
 });
 
+test("rejected imported review can be forwarded again and receives a fresh moderation card",async()=>{
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const message={message_id:196,chat:{id:111111111,type:"private"},from:{id:111111111},
+   forward_origin:{type:"channel",date:1790000000,chat:{id:-100555,username:"avtoYkorea",type:"channel"},message_id:146},
+   caption:"Повтор после отказа",photo:[{file_id:"REJECT_RETRY_PHOTO"}]};
+  await worker.fetch(webhookUpdate({message}),reviewEnv(kv));
+  await worker.fetch(webhookUpdate(callback(111111111,"imp:review:-100555_146")),reviewEnv(kv));
+  await worker.fetch(webhookUpdate(callback(111111111,"rej:-100555_146")),reviewEnv(kv));
+  assert.equal(await kv.get("pending:-100555_146"),null);
+  await worker.fetch(webhookUpdate({message}),reviewEnv(kv));
+  assert.ok(await kv.get("import_pending:-100555_146"));
+  await worker.fetch(webhookUpdate(callback(111111111,"imp:review:-100555_146")),reviewEnv(kv));
+  assert.ok(await kv.get("pending:-100555_146"));
+  const cards=calls.filter(c=>c.method==="sendMessage"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:-100555_146");
+  assert.equal(cards.length,4,"both admins receive a moderation card on both attempts");
+ });
+});
+
 test("re-forwarding an already published channel post does not republish it", async()=>{
  const kv=memoryKV();
  await withTelegramMock(async calls=>{
