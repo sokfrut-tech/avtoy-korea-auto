@@ -243,40 +243,42 @@ async function handleImportChoice(callback, env, adminIds) {
 async function stageChannelPost(post, env, adminIds) {
  const chat = post.chat || {};
  if (String(chat.username || "").toLowerCase() !== "avtoykorea" || !env.REVIEWS) return;
- // Telegram sends every photo in an album as a separate update. Use media_group_id
- // as the import identity so all images become one vehicle publication.
+ // Telegram sends each album photo as a separate channel_post update.
+ // Keep the normal numeric callback ID, and map the album ID to that record.
  const albumId = String(post.media_group_id || "");
- const firstMessageId = Number(post.message_id);
- const groupKey = albumId ? String(chat.id) + "_album_" + albumId : String(chat.id) + "_" + String(post.message_id);
- const id = groupKey;
- const key = "import_pending:" + id;
- const existing = await env.REVIEWS.get(key);
- if (existing) {
-  const entry = JSON.parse(existing);
-  const saved = entry.post || entry;
-  if (albumId && Array.isArray(post.photo) && post.photo.length) {
-   const all = Array.isArray(saved.photo) ? saved.photo : [];
-   const fileId = post.photo[post.photo.length - 1].file_id;
-   if (!all.some(p => p.file_id === fileId)) all.push({file_id:fileId});
-   saved.photo = all;
-   if (!saved.caption && post.caption) saved.caption = post.caption;
-   entry.post = saved;
-   await env.REVIEWS.put(key,JSON.stringify(entry),{expirationTtl:2592000});
+ const albumPointer = albumId ? "import_album:" + String(chat.id) + "_" + albumId : null;
+ let id = String(chat.id) + "_" + String(post.message_id);
+ let key = "import_pending:" + id;
+ if (albumPointer) {
+  const linkedId = await env.REVIEWS.get(albumPointer);
+  if (linkedId) {
+   id = linkedId;
+   key = "import_pending:" + id;
+   const raw = await env.REVIEWS.get(key);
+   if (raw) {
+    const entry = JSON.parse(raw);
+    const saved = entry.post || entry;
+    const all = Array.isArray(saved.photo) ? saved.photo : [];
+    const fileId = Array.isArray(post.photo) && post.photo.length ? post.photo[post.photo.length-1].file_id : null;
+    if (fileId && !all.some(p => p.file_id === fileId)) all.push({file_id:fileId});
+    saved.photo = all;
+    if (!saved.caption && post.caption) saved.caption = post.caption;
+    entry.post = saved;
+    await env.REVIEWS.put(key,JSON.stringify(entry),{expirationTtl:2592000});
+   }
+   return;
   }
-  return;
  }
  const duplicateCarId = "car_" + String(chat.id).replace(/-/g,"") + "_" + String(post.message_id);
- if (await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id) || await env.REVIEWS.get("car_pending:" + duplicateCarId) || await env.REVIEWS.get("car_approved:" + duplicateCarId)) {
-  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Эта публикация уже импортирована или ожидает выбора/модерации."})));
-  return;
- }
- const stored = {...post,chat,message_id:firstMessageId,albumId};
- await env.REVIEWS.put(key,JSON.stringify({post:stored,albumId,notified:true}),{expirationTtl:2592000});
+ if (await env.REVIEWS.get(key) || await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id) || await env.REVIEWS.get("car_pending:" + duplicateCarId) || await env.REVIEWS.get("car_approved:" + duplicateCarId)) return;
+ const stored = {...post,chat,message_id:Number(post.message_id),albumId};
+ await env.REVIEWS.put(key,JSON.stringify({post:stored,albumId}),{expirationTtl:2592000});
+ if (albumPointer) await env.REVIEWS.put(albumPointer,id,{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
   if (post.video) await callTelegram(env,"sendVideo",{chat_id:adminId,video:post.video.file_id});
   else if (Array.isArray(post.photo) && post.photo.length) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:post.photo[post.photo.length-1].file_id});
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Новая публикация из @avtoYkorea. Выберите раздел для импорта.\n\n" + String(post.caption || post.text || "Без текста").slice(0,2500) + "\n\nФотографии альбома будут объединены в одну карточку.\nДата оригинала: " + (post.sourceDate ? new Date(post.sourceDate*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow"}) : "не определена"),reply_markup:keyboard});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Новая публикация из @avtoYkorea. Выберите раздел для импорта.\n\n" + String(post.caption || post.text || "Без текста").slice(0,2500) + "\n\nСнимки одного альбома объединяются в одну карточку.\nДата оригинала: " + (post.sourceDate ? new Date(post.sourceDate*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow"}) : "не определена"),reply_markup:keyboard});
  }));
 }
 
