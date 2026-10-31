@@ -296,7 +296,11 @@ export default {
     const cb = update.callback_query;
     const callbackChat = cb.message && cb.message.chat;
     const callbackUserId = String((cb.from && cb.from.id) || "");
-    if (!adminIds.includes(callbackUserId) || !callbackChat || callbackChat.type !== "private" || String(callbackChat.id) !== callbackUserId) {
+    if (!adminIds.includes(callbackUserId)) {
+     try { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "Нет доступа", show_alert: true }); } catch {}
+     return Response.json({ ok: true });
+    }
+    if (!callbackChat || callbackChat.type !== "private" || String(callbackChat.id) !== callbackUserId) {
      try { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "Административные кнопки доступны только в личном чате с ботом.", show_alert: true }); } catch {}
      return Response.json({ ok: true });
     }
