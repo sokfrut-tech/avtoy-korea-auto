@@ -582,6 +582,17 @@ test("admin native Reply sends a response to a customer who connected Telegram",
 });
 
 
+test("admin Reply can resolve a card containing only the visible order number", async () => {
+  const kv = memoryKV();
+  const order = { id: "0123456789abcdef", number: "1793456789012", contact: "+79990000000", chatId: "444444444", status: "new" };
+  await kv.put("order_no:" + order.number, JSON.stringify(order));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhook({ chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "Ответ по заявке", reply_to_message: { text: "🚘 Новая заявка №" + order.number } }), orderEnv(kv));
+    assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text === "Ответ по заявке"));
+    assert.ok(calls.some(c => String(c.payload.chat_id) === "111111111" && c.payload.text.includes("Ответ отправлен клиенту")));
+  });
+});
+
 test("homepage inline JavaScript parses before deployment", async () => {
   const vm = await import("node:vm");
   const response = await worker.fetch(new Request("https://worker.test/"), env);
