@@ -1100,6 +1100,7 @@ test("admin can edit a pending review before publishing; original text is retain
   assert.equal(started.status,200);
   const prompt = calls.find(c=>c.method==="sendMessage" && String(c.payload.text||"").startsWith("✏️ РЕДАКТИРОВАНИЕ"));
   assert.ok(prompt);
+  assert.ok(await kv.get("moderation_edit:111111111"), "callback must persist the admin edit session");
   const response = await worker.fetch(webhookUpdate({message_id:902,chat:{id:111111111,type:"private"},from:{id:111111111},text:"Новый текст отзыва",reply_to_message:{text:prompt.payload.text}}),reviewEnv(kv));
   assert.equal(response.status,200);
   const saved=JSON.parse(await kv.get("pending:"+id));
