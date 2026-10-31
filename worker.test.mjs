@@ -475,7 +475,7 @@ test("client opens the link, admin accepts, client gets the confirmation", async
     const { orderId, botLink } = await res.json();
     const bindToken = new URL(botLink).searchParams.get("start").slice("order_".length);
 
-    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${bindToken}` } }), orderEnv(kv));
+    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { id: 444444444, first_name: "Anna" }, text: `/start order_${bindToken}` } }), orderEnv(kv));
     assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("Telegram подключён к заявке")));
 
     await worker.fetch(webhookUpdate(callback(111111111, `ord:${orderId}`)), orderEnv(kv));
@@ -491,7 +491,7 @@ test("accepting an order twice does not message the client twice", async () => {
     const created = await (await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv))).json();
     const { orderId } = created;
     const bindToken = new URL(created.botLink).searchParams.get("start").slice("order_".length);
-    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${bindToken}` } }), orderEnv(kv));
+    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { id: 444444444, first_name: "Anna" }, text: `/start order_${bindToken}` } }), orderEnv(kv));
     await worker.fetch(webhookUpdate(callback(111111111, `ord:${orderId}`)), orderEnv(kv));
     await worker.fetch(webhookUpdate(callback(222222222, `ord:${orderId}`)), orderEnv(kv));
     const confirmations = calls.filter(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("принята в работу"));
