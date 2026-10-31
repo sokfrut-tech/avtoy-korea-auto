@@ -138,7 +138,7 @@ async function handleCarPost(post, env, adminIds) {
 
 async function handleImportedReview(post, env, adminIds) {
  const chat = post.chat || {};
- if (String(chat.username || "").toLowerCase() !== "avtoykorea" || !env.REVIEWS) return;
+ if ((String(chat.username || "").toLowerCase() !== "avtoykorea" && post.sourceType !== "group") || !env.REVIEWS) return;
  const text = String(post.caption || post.text || "").trim().slice(0, 1000);
  const photos = Array.isArray(post.photo) ? post.photo : [];
  const photo = photos.length ? photos[photos.length - 1].file_id : null;
@@ -152,7 +152,7 @@ async function handleImportedReview(post, env, adminIds) {
   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Этот отзыв уже импортирован или находится на модерации."})));
   return;
  }
- const review = {id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id};
+ const review = {id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + post.message_id : "Сообщение из закрытой группы")};
  await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
@@ -192,6 +192,25 @@ async function stageChannelPost(post, env, adminIds) {
   if (post.video) await callTelegram(env,"sendVideo",{chat_id:adminId,video:post.video.file_id});
   else if (Array.isArray(post.photo) && post.photo.length) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:post.photo[post.photo.length-1].file_id});
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Новая публикация из @avtoYkorea. Выберите раздел для импорта.\n\n" + String(post.caption || post.text || "Без текста").slice(0,2500) + "\n\nДата оригинала: " + (post.sourceDate ? new Date(post.sourceDate*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow"}) : "не определена"),reply_markup:keyboard});
+ }));
+}
+
+// Администратор может отправить фото/видео в настроенную группу отзывов; публикация всё равно проходит личную модерацию.
+async function stageGroupMedia(msg, env, adminIds) {
+ const groupId = String(env.TELEGRAM_REVIEW_GROUP_ID || "").trim();
+ if (!groupId || String(msg.chat && msg.chat.id) !== groupId || !env.REVIEWS) return;
+ const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
+ const video = msg.video || null;
+ if (!photo && !video) return;
+ const id = String(msg.chat.id) + "_" + String(msg.message_id);
+ if (await env.REVIEWS.get("import_pending:" + id) || await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) return;
+ const post = {...msg, sourceType:"group"};
+ await env.REVIEWS.put("import_pending:" + id, JSON.stringify(post));
+ const keyboard = {inline_keyboard:[[{text:"⭐ Передать в модерацию отзывов",callback_data:"imp:review:" + id}]]};
+ await Promise.all(adminIds.map(async adminId => {
+  if (video) await callTelegram(env,"sendVideo",{chat_id:adminId,video:video.file_id});
+  else await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:photo.file_id});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Медиа из группы отзывов. Выберите, передавать ли его на модерацию сайта.\n\n" + String(msg.caption || "").slice(0,1000),reply_markup:keyboard});
  }));
 }
 
@@ -319,7 +338,10 @@ export default {
    if (!msg || !msg.chat || !msg.chat.id) return Response.json({ ok: true });
    // Groups/channels: only the one review group, only /review messages. Everything else is ignored.
    if (msg.chat.type !== "private") {
-    try { await handleReviewSubmission(msg, env, adminIds); } catch { return new Response("Telegram processing failed", { status: 502 }); }
+    try {
+     if (adminIds.includes(String((msg.from && msg.from.id) || ""))) await stageGroupMedia(msg, env, adminIds);
+     await handleReviewSubmission(msg, env, adminIds);
+    } catch { return new Response("Telegram processing failed", { status: 502 }); }
     return Response.json({ ok: true });
    }
    const chatId = String(msg.chat.id);
