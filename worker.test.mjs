@@ -194,7 +194,8 @@ test("admin forwarding a channel post stages it for category choice before moder
     assert.equal(response.status, 200);
     const pending = JSON.parse(await kv.get("import_pending:-100555_42"));
     assert.equal(pending.caption, "Kia Sorento, 2022");
-    assert.equal(pending.photo[1].file_id, "LARGE");
+    assert.equal(pending.photo[0].file_id, "LARGE");
+    assert.equal(pending.photo.length, 1, "store one best-size file_id per photo, not Telegram size variants");
     assert.equal((await kv.list({ prefix: "car_pending:" })).keys.length, 0);
     assert.ok(calls.some(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_42"));
     assert.ok(calls.some(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[1]?.callback_data === "imp:review:-100555_42"));
@@ -1162,4 +1163,108 @@ test("admin can edit a pending car caption and the public API uses only the edit
   assert.equal(cars.cars[0].caption,"Kia Sorento 2022\nПробег 20 000 км");
   assert.doesNotMatch(JSON.stringify(cars),/79991234567/);
  });
+});
+
+
+test("channel album imported as one review keeps every photo through publication and website API", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const first={channel_post:{message_id:440,chat:{id:-100555,username:"avtoYkorea",type:"channel"},date:1790000000,media_group_id:"778899",caption:"Спасибо за автомобиль!",photo:[{file_id:"ALBUM_PHOTO_1_SMALL"},{file_id:"ALBUM_PHOTO_1"}]}};
+  const second={channel_post:{message_id:441,chat:{id:-100555,username:"avtoYkorea",type:"channel"},date:1790000000,media_group_id:"778899",photo:[{file_id:"ALBUM_PHOTO_2_SMALL"},{file_id:"ALBUM_PHOTO_2"}]}};
+  await worker.fetch(webhookUpdate(first),reviewEnv(kv));
+  await worker.fetch(webhookUpdate(second),reviewEnv(kv));
+  const staged=JSON.parse(await kv.get("import_pending:-100555_440"));
+  assert.deepEqual(staged.post.photo.map(p=>p.file_id),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"]);
+  await worker.fetch(webhookUpdate(callback(111111111,"imp:review:-100555_440")),reviewEnv(kv));
+  const pending=JSON.parse(await kv.get("pending:-100555_440"));
+  assert.deepEqual(pending.photos.map(p=>p.file_id),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"]);
+  assert.ok(calls.some(c=>c.method==="sendMediaGroup"&&String(c.payload.chat_id)==="111111111"&&c.payload.media.map(m=>m.media).join(",")==="ALBUM_PHOTO_1,ALBUM_PHOTO_2"));
+  await worker.fetch(webhookUpdate(callback(111111111,"pub:-100555_440")),reviewEnv(kv));
+  const approved=JSON.parse(await kv.get("approved:-100555_440"));
+  assert.deepEqual(approved.photos.map(p=>p.file_id),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"]);
+  const response=await worker.fetch(new Request("https://worker.test/api/reviews"),reviewEnv(kv));
+  const body=await response.json();
+  assert.deepEqual(body.reviews[0].mediaItems,["/api/review-media/-100555_440/0","/api/review-media/-100555_440/1"]);
+ });
+});
+
+test("editing one phrase in a review preserves every photo and shows the current text", async () => {
+ const kv=memoryKV();
+ await kv.put("pending:"+REVIEW_GROUP+"_901",JSON.stringify({
+  id:REVIEW_GROUP+"_901",kind:"text",text:"Спасибо за автомобиль. Всё понравилось.",name:"Клиент",
+  fileId:"EDIT_PHOTO_1",photos:[{file_id:"EDIT_PHOTO_1"},{file_id:"EDIT_PHOTO_2"}],
+  hasPhoto:true,hasThanks:true,anonymous:false,createdAt:"now"
+ }));
+ await withTelegramMock(async calls=>{
+  await worker.fetch(webhookUpdate(callback(111111111,"edit:"+REVIEW_GROUP+"_901")),reviewEnv(kv));
+  const prompt=calls.find(c=>c.method==="sendMessage"&&String(c.payload.chat_id)==="111111111"&&c.payload.reply_markup?.force_reply);
+  assert.ok(prompt);
+  assert.ok(prompt.payload.text.includes("Спасибо за автомобиль. Всё понравилось."));
+  await worker.fetch(webhookUpdate({message:{
+   message_id:902,chat:{id:111111111,type:"private"},from:{id:111111111},
+   reply_to_message:{message_id:prompt.payload.message_id||1,text:prompt.payload.text},
+   text:"ЗАМЕНИТЬ: Всё понравилось => Всё отлично"
+  }}),reviewEnv(kv));
+  const updated=JSON.parse(await kv.get("pending:"+REVIEW_GROUP+"_901"));
+  assert.equal(updated.text,"Спасибо за автомобиль. Всё отлично.");
+  assert.deepEqual(updated.photos.map(p=>p.file_id),["EDIT_PHOTO_1","EDIT_PHOTO_2"]);
+  assert.equal(updated.hasThanks,true);
+ });
+});
+
+test("failed fragment edit leaves review text unchanged and allows a later edit", async()=>{
+ const kv=memoryKV();
+ await kv.put("pending:"+REVIEW_GROUP+"_903",JSON.stringify({id:REVIEW_GROUP+"_903",kind:"text",text:"Исходный текст отзыва",name:"Клиент",fileId:"PHOTO",photos:[{file_id:"PHOTO"}],hasPhoto:true,anonymous:false}));
+ await withTelegramMock(async calls=>{
+  await worker.fetch(webhookUpdate(callback(111111111,"edit:"+REVIEW_GROUP+"_903")),reviewEnv(kv));
+  const prompt=calls.find(c=>c.method==="sendMessage"&&c.payload.reply_markup?.force_reply);
+  const reply={message_id:904,chat:{id:111111111,type:"private"},from:{id:111111111},reply_to_message:{message_id:1,text:prompt.payload.text},text:"ЗАМЕНИТЬ: такого фрагмента нет => новый"};
+  await worker.fetch(webhookUpdate({message:reply}),reviewEnv(kv));
+  assert.equal(JSON.parse(await kv.get("pending:"+REVIEW_GROUP+"_903")).text,"Исходный текст отзыва");
+  await worker.fetch(webhookUpdate({message:{...reply,message_id:905,text:"ДОБАВИТЬ В КОНЕЦ: Дополнение"}}),reviewEnv(kv));
+  assert.equal(JSON.parse(await kv.get("pending:"+REVIEW_GROUP+"_903")).text,"Исходный текст отзыва\n\nДополнение");
+ });
+});
+
+test("one Telegram photo sent in several sizes is stored as a single photo", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 300, chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, caption: "Отзыв, спасибо", photo: [{ file_id: "SMALL" }, { file_id: "MEDIUM" }, { file_id: "LARGE" }] } }), reviewEnv(kv));
+    const saved = JSON.parse(await kv.get("pending:111111111_300"));
+    assert.deepEqual(saved.photos.map(p => p.file_id), ["LARGE"]);
+    assert.equal(saved.fileId, "LARGE");
+  });
+});
+
+test("group review album keeps photos from every message and shows them on the site after publishing", async () => {
+  const kv = memoryKV();
+  const chat = { id: Number(REVIEW_GROUP), type: "supergroup" };
+  const from = { id: 333333333, first_name: "Buyer" };
+  await withTelegramMock(async () => {
+    // Фото без команды приходит раньше /review; его нужно не потерять.
+    await worker.fetch(webhookUpdate({ message: { message_id: 401, chat, from, media_group_id: "7700001", photo: [{ file_id: "A_S" }, { file_id: "A_L" }] } }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: { message_id: 402, chat, from, media_group_id: "7700001", caption: "/review Отличный автомобиль, спасибо!", photo: [{ file_id: "B_S" }, { file_id: "B_L" }] } }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: { message_id: 403, chat, from, media_group_id: "7700001", photo: [{ file_id: "C_S" }, { file_id: "C_L" }] } }), reviewEnv(kv));
+    const id = REVIEW_GROUP + "_7700001";
+    const pending = JSON.parse(await kv.get("pending:" + id));
+    assert.deepEqual(pending.photos.map(p => p.file_id), ["A_L", "B_L", "C_L"]);
+    assert.equal(await kv.get("pending:" + REVIEW_GROUP + "_402"), null, "album must not create a second review");
+    await worker.fetch(webhookUpdate(callback(111111111, "pub:" + id)), reviewEnv(kv));
+    const body = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
+    const item = body.reviews.find(r => r.id === id);
+    assert.ok(item, "published album is visible on the site");
+    assert.equal(item.mediaItems.length, 3, "every album photo is shown on the site");
+  });
+});
+
+test("admin album uploaded in the private chat keeps every photo in one review", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 501, chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, caption: "Отзыв клиента, спасибо", media_group_id: "880002", photo: [{ file_id: "X1_S" }, { file_id: "X1_L" }] } }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: { message_id: 502, chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, media_group_id: "880002", photo: [{ file_id: "X2_S" }, { file_id: "X2_L" }] } }), reviewEnv(kv));
+    const saved = JSON.parse(await kv.get("pending:111111111_880002"));
+    assert.deepEqual(saved.photos.map(p => p.file_id), ["X1_L", "X2_L"]);
+    assert.equal(saved.text, "Отзыв клиента, спасибо");
+    assert.equal(await kv.get("pending:111111111_501"), null);
+  });
 });
