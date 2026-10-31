@@ -453,7 +453,7 @@ test("site order goes to every admin with an accept button and returns a bot lin
   });
 });
 
-test("Telegram binding token is one-time and cannot bind a second chat", async () => {
+test("website orders created in the same millisecond receive distinct visible numbers", async () => {\n  const kv = memoryKV();\n  await withTelegramMock(async () => {\n    const first = await (await worker.fetch(siteRequest({ name: "Анна", contact: "+79990000000" }), orderEnv(kv))).json();\n    const second = await (await worker.fetch(siteRequest({ name: "Иван", contact: "+79991111111" }), orderEnv(kv))).json();\n    assert.equal(first.ok, true);\n    assert.equal(second.ok, true);\n    assert.match(first.orderNumber, /^\\d{23}$/);\n    assert.match(second.orderNumber, /^\\d{23}$/);\n    assert.notEqual(first.orderNumber, second.orderNumber);\n    assert.ok(await kv.get("order_no:" + first.orderNumber));\n    assert.ok(await kv.get("order_no:" + second.orderNumber));\n  });\n});\n\ntest("Telegram binding token is one-time and cannot bind a second chat", async () => {
  const kv=memoryKV();
  await withTelegramMock(async calls=>{
   const created=await (await worker.fetch(siteRequest({name:"Анна",contact:"@anna"}),orderEnv(kv))).json();
