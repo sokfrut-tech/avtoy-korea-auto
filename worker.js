@@ -691,7 +691,7 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
       <p class="hint">Можно обратиться и по вопросам рекламы, партнёрства или размещения предложений.</p>
     </div>
     <div>
-      <form id="request-form">
+      <form id="request-form" novalidate>
         <div class="form-grid">
           <div class="field"><label for="name">Ваше имя *</label><input id="name" name="name" required maxlength="100" autocomplete="name" placeholder="Как к вам обращаться"></div>
           <div class="field"><label for="contact">Telegram или телефон *</label><input id="contact" name="contact" required maxlength="150" autocomplete="tel" placeholder="@username или номер"></div>
@@ -733,7 +733,51 @@ document.querySelectorAll('a[href="#request"]').forEach(function(link){
   });
 });
 const form=document.getElementById('request-form'),statusEl=document.getElementById('status');
-form.addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('submit-btn');b.disabled=true;statusEl.textContent='Отправляем заявку…';try{const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))});const x=await r.json();if(!r.ok||!x.ok)throw Error(x.error||'Не удалось отправить заявку.');if(x.setupNeeded){statusEl.textContent='Заявка подготовлена. Откроется Telegram: выберите чат менеджера и отправьте сообщение.';location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText)}else{statusEl.textContent='Заявка доставлена администраторам. Спасибо! Свяжемся с вами по указанному контакту.';form.reset();if(x.botLink){var a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a)}}}catch(err){statusEl.textContent=err.message||'Ошибка. Попробуйте ещё раз.'}finally{b.disabled=false}});
+function showFormStatus(message,isError){
+ statusEl.textContent=message;
+ statusEl.style.display='block';
+ statusEl.style.padding='12px 14px';
+ statusEl.style.marginTop='14px';
+ statusEl.style.borderRadius='10px';
+ statusEl.style.background=isError?'#3a1717':'#123326';
+ statusEl.style.color='#fff';
+ statusEl.setAttribute('role','status');
+}
+form.addEventListener('submit',async function(e){
+ e.preventDefault();
+ const b=document.getElementById('submit-btn');
+ const data=Object.fromEntries(new FormData(form).entries());
+ if(!String(data.name||'').trim()||!String(data.contact||'').trim()){
+  showFormStatus('Заполните имя и телефон или Telegram для связи.',true);
+  return;
+ }
+ b.disabled=true;
+ b.textContent='Отправляем…';
+ showFormStatus('Отправляем заявку администраторам…',false);
+ try{
+  const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify(data)});
+  const raw=await r.text();
+  let x;
+  try{x=JSON.parse(raw)}catch{x={ok:false,error:'Сервер вернул некорректный ответ. Попробуйте позже.'}}
+  if(!r.ok||!x.ok)throw new Error(x.error||('Ошибка отправки: HTTP '+r.status));
+  if(x.setupNeeded){
+   showFormStatus('Заявка подготовлена. Откроется Telegram — выберите чат менеджера и отправьте сообщение.',false);
+   location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText);
+  }else{
+   showFormStatus('Заявка доставлена администраторам. Спасибо! Свяжемся с вами по указанному контакту.',false);
+   form.reset();
+   if(x.botLink){
+    const a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';
+    statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a);
+   }
+  }
+ }catch(err){
+  showFormStatus(err.message||'Не удалось отправить заявку. Проверьте соединение и попробуйте ещё раз.',true);
+ }finally{
+  b.disabled=false;
+  b.textContent='Отправить заявку →';
+ }
+});
 fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
   var list=document.getElementById('reviews-list');
   if(!data.reviews||!data.reviews.length)return;
