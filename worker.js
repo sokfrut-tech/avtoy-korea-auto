@@ -297,8 +297,10 @@ export default {
     chat_id: target, text: body, disable_web_page_preview: true
    });
    try {
-    // Native Telegram Reply on an admin notification routes the response without typing a Chat ID.
-    if (adminIds.includes(chatId) && msg.reply_to_message) {
+    // /myid returns only the sender's own numeric Telegram ID for safe admin configuration.
+    if (/^\/myid(?:@\w+)?$/i.test(text)) {
+     await send(chatId, "Ваш Telegram ID: " + chatId + "\nПередайте этот номер владельцу настройки TELEGRAM_ADMIN_IDS. Не отправляйте токен бота.");
+    } else if (adminIds.includes(chatId) && msg.reply_to_message) {
      const repliedText = String(msg.reply_to_message.text || msg.reply_to_message.caption || "");
      const orderMatch = repliedText.match(/Заявка:\s*([0-9a-f]{16})/i);
      if (orderMatch && env.REVIEWS) {
