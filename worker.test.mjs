@@ -388,3 +388,30 @@ test("accept button from a non-admin is refused", async () => {
     assert.equal(JSON.parse(await kv.get(`order:${orderId}`)).status, "new");
   });
 });
+
+test("website form never reports success when two-admin delivery is not configured", async () => {
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(siteRequest({ name: "Тест", contact: "+79990000000" }), {
+      TELEGRAM_BOT_TOKEN: "test-token",
+      TELEGRAM_ADMIN_IDS: "111111111",
+    });
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(body.ok, false);
+    assert.equal(calls.length, 0);
+  });
+});
+
+test("website form accepts a phone-only contact and sends the lead privately to both admins", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(siteRequest({ name: "Иван", contact: "+79991234567", model: "Hyundai" }), orderEnv(kv));
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    const notices = calls.filter(c => c.method === "sendMessage" && c.payload.text.includes("+79991234567"));
+    assert.equal(notices.length, 2);
+    assert.ok(notices.every(c => !String(c.payload.chat_id).startsWith("-")));
+    assert.ok(notices.every(c => c.payload.text.includes("Заявка: " + body.orderId)));
+  });
+});
