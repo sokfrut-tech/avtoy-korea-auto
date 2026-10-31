@@ -382,40 +382,20 @@ export default {
    const f = {name:clean(d.name,100),contact:clean(d.contact,150),model:clean(d.model,150),budget:clean(d.budget,100),country:clean(d.country,80),year:clean(d.year,30),purpose:clean(d.purpose,100),details:clean(d.details,1000)};
    if (!f.name || !f.contact) return Response.json({ok:false,error:"Укажите имя и контакт для связи."},{status:400});
    const message = ["🚘 Новая заявка AVTOY KOREA","",`Имя: ${f.name}`,`Контакт: ${f.contact}`,`Марка / модель: ${f.model||"не указано"}`,`Бюджет: ${f.budget||"не указан"}`,`Страна: ${f.country||"не указана"}`,`Год от: ${f.year||"не указан"}`,`Тема обращения: ${f.purpose||"Подбор автомобиля"}`,`Пожелания: ${f.details||"нет"}`].join("\n");
-   if (!env.TELEGRAM_BOT_TOKEN || adminIds.length < 1) {
-    return Response.json({ok:false,error:"Не настроен получатель заявок. Сообщите администратору сайта."},{status:503});
+   if (!env.TELEGRAM_BOT_TOKEN || adminIds.length < 0 || !env.REVIEWS) {
+    return Response.json({ok:false,error:"Система учёта заявок временно недоступна. Попробуйте позже."},{status:503});
    }
-   if (env.REVIEWS) {
-    const orderId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    await env.REVIEWS.put(`order:${orderId}`, JSON.stringify({ id: orderId, ...f, status: "new", chatId: null, createdAt: new Date().toISOString() }));
-    const cardText = message + "\n\nЗаявка: " + orderId;
-    const keyboard = { inline_keyboard: [[{ text: "✅ Принять в работу", callback_data: `ord:${orderId}` }]] };
-    const deliveries = await Promise.all(adminIds.map(async chat_id => {
-     try {
-      const payload = await callTelegram(env, "sendMessage", { chat_id, text: cardText, reply_markup: keyboard });
-      return Boolean(payload && payload.ok === true);
-     } catch {
-      return false;
-     }
-    }));
-    if (deliveries.some(ok => !ok)) return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
-    const botUser = String(env.TELEGRAM_BOT_USERNAME || "").replace(/^@/, "");
-    return Response.json({ok:true, orderId, botLink: botUser ? `https://t.me/${botUser}?start=order_${orderId}` : null});
-   }
-   if (env.TELEGRAM_BOT_TOKEN && adminIds.length) {
-    const deliveries = await Promise.all(adminIds.map(async chat_id => {
-     try {
-      const r = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id,text:message})});
-      const payload = await r.json().catch(() => null);
-      return r.ok && payload && payload.ok === true;
-     } catch {
-      return false;
-     }
-    }));
-    if (deliveries.some(ok => !ok)) return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
-    return Response.json({ok:true});
-   }
-   return Response.json({ok:false,error:"Не настроена доставка заявок. Сообщите администратору сайта."},{status:503});
+   const orderId=crypto.randomUUID().replace(/-/g,"").slice(0,16);
+   const orderNumber=String(Date.now());
+   const order={id:orderId,number:orderNumber,...f,status:"new",chatId:null,telegramId:null,username:null,createdAt:new Date().toISOString()};
+   await env.REVIEWS.put("order:"+orderId,JSON.stringify(order));
+   await env.REVIEWS.put("order_no:"+orderNumber,JSON.stringify(order));
+   const cardText=["🚘 Новая заявка №"+orderNumber,"Модель: "+(f.model||"не указано"),"Бюджет: "+(f.budget||"не указан"),"Страна: "+(f.country||"не указана"),"Тема: "+(f.purpose||"Подбор автомобиля"),"Статус: новая","","Личные данные доступны администратору по кнопке."].join("\n");
+   const keyboard={inline_keyboard:[[{text:"✅ Принять в работу",callback_data:"ord:"+orderNumber},{text:"🔐 Данные клиента",callback_data:"ordinfo:"+orderNumber}]]};
+   const deliveries=await Promise.all(adminIds.map(async chat_id=>{try{const payload=await callTelegram(env,"sendMessage",{chat_id,text:cardText,reply_markup:keyboard});return Boolean(payload&&payload.ok===true);}catch{return false;}}));
+   if(deliveries.some(ok=>!ok))return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
+   const botUser=String(env.TELEGRAM_BOT_USERNAME||"").replace(/^@/,"");
+   return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+orderId:null});
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
    const cars = [];
