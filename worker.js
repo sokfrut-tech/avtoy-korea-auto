@@ -844,8 +844,17 @@ function showFormStatus(message,isError){
 form.addEventListener('submit',async function(e){
  e.preventDefault();
  const b=document.getElementById('submit-btn');
- const data=Object.fromEntries(new FormData(form).entries());
- if(!window.requestIdempotencyKey)window.requestIdempotencyKey=crypto.randomUUID();
+ const entered=Object.fromEntries(new FormData(form).entries());
+ let pending=null;
+ try{pending=JSON.parse(sessionStorage.getItem('avtoy_pending_request')||'null')}catch{}
+ if(pending&&pending.key&&pending.payload){
+  window.requestIdempotencyKey=pending.key;
+ }else{
+  window.requestIdempotencyKey=crypto.randomUUID();
+  pending={key:window.requestIdempotencyKey,payload:entered};
+  try{sessionStorage.setItem('avtoy_pending_request',JSON.stringify(pending))}catch{}
+ }
+ const data=pending.payload||entered;
  if(!String(data.name||'').trim()||!String(data.contact||'').trim()){
   showFormStatus('Заполните имя и телефон или Telegram для связи.',true);
   return;
@@ -866,6 +875,7 @@ form.addEventListener('submit',async function(e){
    showFormStatus('Заявка доставлена администраторам. Спасибо! Свяжемся с вами по указанному контакту.',false);
    form.reset();
    window.requestIdempotencyKey=null;
+   try{sessionStorage.removeItem('avtoy_pending_request')}catch{}
    if(x.botLink){
     const a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';
     statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a);
