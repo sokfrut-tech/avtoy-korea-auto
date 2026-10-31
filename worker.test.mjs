@@ -139,6 +139,65 @@ test("forwarding the same channel post twice does not create duplicate moderatio
   });
 });
 
+test("forwarded channel post first asks admin to choose car or review; no immediate publication", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(webhookUpdate({ message: {
+      message_id: 190, chat: { id: 111111111, type: "private" }, from: { id: 111111111 },
+      forward_origin: { type: "channel", date: 1790000000, chat: { id: -100555, username: "avtoYkorea", type: "channel" }, message_id: 142 },
+      caption: "Отличная машина и обслуживание", photo: [{ file_id: "PHOTO" }]
+    }}), reviewEnv(kv));
+    assert.equal(response.status, 200);
+    assert.ok(await kv.get("import_pending:-100555_142"));
+    assert.equal((await kv.list({prefix:"car_pending:"})).keys.length,0);
+    assert.equal((await kv.list({prefix:"pending:"})).keys.length,0);
+    assert.ok(calls.some(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[1]?.callback_data === "imp:review:-100555_142"));
+  });
+});
+
+test("admin choosing review imports an old post regardless of its date", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await kv.put("import_pending:-100555_42", JSON.stringify({
+      chat:{id:-100555,username:"avtoYkorea"},message_id:42,sourceDate:1500000000,
+      caption:"Спасибо за помощь!",photo:[{file_id:"REVIEW_PHOTO"}]
+    }));
+    await worker.fetch(webhookUpdate(callback(111111111,"imp:review:-100555_42")),reviewEnv(kv));
+    const review=JSON.parse(await kv.get("pending:-100555_42"));
+    assert.equal(review.text,"Спасибо за помощь!");
+    assert.equal(review.fileId,"REVIEW_PHOTO");
+    assert.equal((await kv.list({prefix:"approved:"})).keys.length,0);
+    assert.ok(calls.some(c=>c.method==="sendPhoto" && c.payload.photo==="REVIEW_PHOTO"));
+  });
+});
+
+test("admin choosing car rejects posts before 2026-01-01 and accepts boundary date", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const oldDate=Math.floor(Date.UTC(2025,11,31,23,59,59)/1000);
+    await kv.put("import_pending:-100555_50",JSON.stringify({chat:{id:-100555,username:"avtoYkorea"},message_id:50,sourceDate:oldDate,caption:"Старая машина"}));
+    await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_50")),reviewEnv(kv));
+    assert.equal((await kv.list({prefix:"car_pending:"})).keys.length,0);
+    const boundary=Math.floor(Date.UTC(2026,0,1)/1000);
+    await kv.put("import_pending:-100555_51",JSON.stringify({chat:{id:-100555,username:"avtoYkorea"},message_id:51,sourceDate:boundary,caption:"Kia 2026"}));
+    await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_51")),reviewEnv(kv));
+    assert.ok(await kv.get("car_pending:car_100555_51"));
+    assert.equal((await kv.list({prefix:"car_approved:"})).keys.length,0);
+    assert.ok(calls.some(c=>c.method==="sendMessage" && c.payload.text.includes("до 1 января 2026")));
+  });
+});
+
+test("non-admin cannot choose import category", async () => {
+  const kv=memoryKV();
+  await withTelegramMock(async calls=>{
+    await kv.put("import_pending:-100555_52",JSON.stringify({chat:{id:-100555,username:"avtoYkorea"},message_id:52,sourceDate:1790000000,caption:"Test"}));
+    await worker.fetch(webhookUpdate(callback(999999999,"imp:review:-100555_52")),reviewEnv(kv));
+    assert.ok(await kv.get("import_pending:-100555_52"));
+    assert.equal((await kv.list({prefix:"pending:"})).keys.length,0);
+    assert.equal(calls.filter(c=>c.method==="answerCallbackQuery").pop().payload.text,"Нет доступа");
+  });
+});
+
 test("legacy negative group ID is rejected instead of used as an admin destination", async () => {
   await withTelegramMock(async calls => {
     const legacyGroupEnv = {
