@@ -1089,3 +1089,44 @@ test("failed order acceptance notification is retried on the next callback", asy
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("admin can edit a pending review before publishing; original text is retained", async () => {
+ const kv = memoryKV();
+ const id = "-100123_901";
+ await kv.put("pending:" + id, JSON.stringify({id,kind:"video",text:"Старый текст",name:"Клиент",fileId:"VIDEO",hasPhoto:false,anonymous:false}));
+ await withTelegramMock(async calls => {
+  const started = await worker.fetch(webhookUpdate(callback(111111111,"edit:" + id)), reviewEnv(kv));
+  assert.equal(started.status,200);
+  const prompt = calls.find(c=>c.method==="sendMessage" && String(c.payload.text||"").startsWith("✏️ РЕДАКТИРОВАНИЕ"));
+  assert.ok(prompt);
+  assert.ok(await kv.get("moderation_edit:111111111"), "callback must persist the admin edit session");
+  const response = await worker.fetch(webhookUpdate({message:{message_id:902,chat:{id:111111111,type:"private"},from:{id:111111111},text:"Новый текст отзыва",reply_to_message:{text:prompt.payload.text}}}),reviewEnv(kv));
+  assert.equal(response.status,200);
+  const saved=JSON.parse(await kv.get("pending:"+id));
+  assert.equal(saved.text,"Новый текст отзыва");
+  assert.equal(saved.originalText,"Старый текст");
+  assert.ok(calls.some(c=>c.method==="sendMessage" && String(c.payload.text||"").includes("Текст обновлён")));
+ });
+});
+
+test("admin can edit a pending car caption and the public API uses only the edited caption", async () => {
+ const kv=memoryKV();
+ const id="car_100555_902";
+ await kv.put("car_pending:"+id,JSON.stringify({id,caption:"Старое описание",fileId:"PHOTO",photos:[{file_id:"PHOTO"}],mediaType:"photo"}));
+ await withTelegramMock(async calls=>{
+  const started=await worker.fetch(webhookUpdate(callback(111111111,"caredit:"+id)),reviewEnv(kv));
+  assert.equal(started.status,200);
+  const prompt=calls.find(c=>c.method==="sendMessage" && String(c.payload.text||"").startsWith("✏️ РЕДАКТИРОВАНИЕ"));
+  assert.ok(prompt);
+  const response=await worker.fetch(webhookUpdate({message:{message_id:903,chat:{id:111111111,type:"private"},from:{id:111111111},text:"Kia Sorento 2022\nПробег 20 000 км\nТелефон: +79991234567",reply_to_message:{text:prompt.payload.text}}}),reviewEnv(kv));
+  assert.equal(response.status,200);
+  const saved=JSON.parse(await kv.get("car_pending:"+id));
+  assert.equal(saved.caption,"Kia Sorento 2022\nПробег 20 000 км");
+  assert.equal(saved.originalCaption,"Старое описание");
+  await worker.fetch(webhookUpdate(callback(111111111,"carpub:"+id)),reviewEnv(kv));
+  const cars=await (await worker.fetch(new Request("https://worker.test/api/cars"),reviewEnv(kv))).json();
+  assert.equal(cars.cars[0].caption,"Kia Sorento 2022\nПробег 20 000 км");
+  assert.doesNotMatch(JSON.stringify(cars),/79991234567/);
+ });
+});
