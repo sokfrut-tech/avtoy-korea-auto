@@ -459,11 +459,12 @@ test("Telegram binding token is one-time and cannot bind a second chat", async (
   const created=await (await worker.fetch(siteRequest({name:"Анна",contact:"@anna"}),orderEnv(kv))).json();
   const token=new URL(created.botLink).searchParams.get("start").slice("order_".length);
   assert.match(token,/^[0-9a-f]{64}$/);
-  await worker.fetch(webhookUpdate({message:{chat:{id:444444444,type:"private"},text:"/start order_"+token}}),orderEnv(kv));
+  await worker.fetch(webhookUpdate({message:{chat:{id:444444444,type:"private"},from:{id:444444444,first_name:"Anna"},text:"/start order_"+token}}),orderEnv(kv));
   assert.equal(await kv.get("bind_token:"+token),null);
   await worker.fetch(webhookUpdate({message:{chat:{id:555555555,type:"private"},text:"/start order_"+token}}),orderEnv(kv));
   const order=JSON.parse(await kv.get("order:"+created.orderId));
   assert.equal(String(order.chatId),"444444444");
+  assert.equal(String(order.telegramId),"444444444");
   assert.ok(calls.some(c=>String(c.payload.chat_id)==="555555555"&&c.payload.text.includes("недействительна")));
  });
 });
