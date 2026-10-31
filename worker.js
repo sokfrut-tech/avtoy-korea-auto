@@ -211,28 +211,35 @@ async function handleCarCallback(callback, env, adminIds) {
  return answer("Автомобиль опубликован на сайте");
 }
 // --- Заявки с сайта: карточка администраторам, кнопка «Принять в работу», ответ клиенту в Telegram ---
+function formatOrderPrivate(order) {
+ return ["🔐 Данные заявки №"+order.number,"Статус: "+order.status,"Имя: "+order.name,"Контакт: "+order.contact,"Telegram ID: "+(order.telegramId||"не привязан"),"Telegram: "+(order.username?"@"+order.username:"не указан"),"Марка / модель: "+(order.model||"не указано"),"Бюджет: "+(order.budget||"не указан"),"Страна: "+(order.country||"не указана"),"Год от: "+(order.year||"не указан"),"Тема: "+(order.purpose||"Подбор автомобиля"),"Пожелания: "+(order.details||"нет"),"Создана: "+order.createdAt].join("\\n");
+}
 async function handleOrderCallback(callback, env, adminIds) {
- const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
- const fromId = String((callback.from && callback.from.id) || "");
- if (!adminIds.includes(fromId)) return answer("Нет доступа", true);
- const match = String(callback.data || "").match(/^ord:([0-9a-f]{16})$/);
- if (!match || !env.REVIEWS) return answer("Заявка не найдена", true);
- const raw = await env.REVIEWS.get(`order:${match[1]}`);
- if (!raw) return answer("Заявка не найдена", true);
- const order = JSON.parse(raw);
- if (order.status === "in_work") return answer("Заявка уже принята в работу");
- order.status = "in_work";
- order.acceptedBy = fromId;
- order.acceptedAt = new Date().toISOString();
- await env.REVIEWS.put(`order:${order.id}`, JSON.stringify(order));
- if (callback.message) {
-  await callTelegram(env, "editMessageReplyMarkup", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => null);
- }
- if (order.chatId) {
-  await callTelegram(env, "sendMessage", { chat_id: order.chatId, text: "Ваша заявка принята в работу. С вами свяжутся в этом чате." });
-  return answer("Принято. Клиент получил сообщение.");
- }
- return answer("Принято. Клиент ещё не открыл бота по ссылке с сайта, поэтому сообщение не отправлено.", true);
+ const answer=(text,alert=false)=>callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
+ const fromId=String((callback.from&&callback.from.id)||"");
+ if(!adminIds.includes(fromId))return answer("Нет доступа",true);
+ const data=String(callback.data||""),match=data.match(/^ord:(\\d+)$/),detail=data.match(/^ordinfo:(\\d+)$/);
+ if((!match&&!detail)||!env.REVIEWS)return answer("Заявка не найдена",true);
+ const number=(match||detail)[1],raw=await env.REVIEWS.get("order_no:"+number);
+ if(!raw)return answer("Заявка не найдена",true);
+ const order=JSON.parse(raw);
+ if(detail){await callTelegram(env,"sendMessage",{chat_id:callback.message.chat.id,text:formatOrderPrivate(order)});return answer("Данные отправлены только вам");}
+ if(order.status!=="new")return answer("Заявка уже не новая");
+ order.status="in_work";order.acceptedBy=fromId;order.acceptedAt=new Date().toISOString();
+ await env.REVIEWS.put("order_no:"+number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
+ if(callback.message)await callTelegram(env,"editMessageReplyMarkup",{chat_id:callback.message.chat.id,message_id:callback.message.message_id,reply_markup:{inline_keyboard:[[{text:"🔐 Данные клиента",callback_data:"ordinfo:"+number},{text:"🏁 Завершить",callback_data:"orddone:"+number}]]}});
+ if(order.chatId)await callTelegram(env,"sendMessage",{chat_id:order.chatId,text:"Ваша заявка №"+number+" принята в работу. С вами свяжутся в этом чате."});
+ return answer("Заявка принята в работу");
+}
+async function handleOrderDoneCallback(callback,env,adminIds){
+ const answer=(text,alert=false)=>callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
+ const fromId=String((callback.from&&callback.from.id)||"");if(!adminIds.includes(fromId))return answer("Нет доступа",true);
+ const m=String(callback.data||"").match(/^orddone:(\\d+)$/);if(!m||!env.REVIEWS)return answer("Заявка не найдена",true);
+ const raw=await env.REVIEWS.get("order_no:"+m[1]);if(!raw)return answer("Заявка не найдена",true);
+ const order=JSON.parse(raw);order.status="done";order.completedAt=new Date().toISOString();
+ await env.REVIEWS.put("order_no:"+order.number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
+ if(callback.message)await callTelegram(env,"editMessageReplyMarkup",{chat_id:callback.message.chat.id,message_id:callback.message.message_id,reply_markup:{inline_keyboard:[]}});
+ return answer("Заявка завершена");
 }
 
 export default {
@@ -265,7 +272,8 @@ export default {
    if (update.callback_query) {
     const cb = update.callback_query;
     try {
-     if (String(cb.data || "").startsWith("ord:")) await handleOrderCallback(cb, env, adminIds);
+     if (String(cb.data || "").startsWith("ord:") || String(cb.data || "").startsWith("ordinfo:")) await handleOrderCallback(cb, env, adminIds);
+      else if (String(cb.data || "").startsWith("orddone:")) await handleOrderDoneCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("imp:")) await handleImportChoice(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("car")) await handleCarCallback(cb, env, adminIds);
      else await handleReviewCallback(cb, env, adminIds);
@@ -382,7 +390,7 @@ export default {
    const f = {name:clean(d.name,100),contact:clean(d.contact,150),model:clean(d.model,150),budget:clean(d.budget,100),country:clean(d.country,80),year:clean(d.year,30),purpose:clean(d.purpose,100),details:clean(d.details,1000)};
    if (!f.name || !f.contact) return Response.json({ok:false,error:"Укажите имя и контакт для связи."},{status:400});
    const message = ["🚘 Новая заявка AVTOY KOREA","",`Имя: ${f.name}`,`Контакт: ${f.contact}`,`Марка / модель: ${f.model||"не указано"}`,`Бюджет: ${f.budget||"не указан"}`,`Страна: ${f.country||"не указана"}`,`Год от: ${f.year||"не указан"}`,`Тема обращения: ${f.purpose||"Подбор автомобиля"}`,`Пожелания: ${f.details||"нет"}`].join("\n");
-   if (!env.TELEGRAM_BOT_TOKEN || adminIds.length < 0 || !env.REVIEWS) {
+   if (!env.TELEGRAM_BOT_TOKEN || adminIds.length < 1 || !env.REVIEWS) {
     return Response.json({ok:false,error:"Система учёта заявок временно недоступна. Попробуйте позже."},{status:503});
    }
    const orderId=crypto.randomUUID().replace(/-/g,"").slice(0,16);
