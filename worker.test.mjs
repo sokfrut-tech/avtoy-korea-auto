@@ -618,6 +618,31 @@ test("Telegram binding token is one-time and cannot bind a second chat", async (
   assert.ok(calls.some(c=>String(c.payload.chat_id)==="555555555"&&c.payload.text.includes("недействительна")));
  });
 });
+test("failed KV write during Telegram binding keeps the one-time token for retry", async () => {
+ const kv=memoryKV(),created=await worker.fetch(siteRequest({name:"Иван",contact:"@ivan"}),orderEnv(kv));
+ const body=await created.json(),token=new URL(body.botLink).searchParams.get("start").slice("order_".length);
+ let failOnce=true;
+ const flakyKV={
+  async get(k){return kv.get(k);},
+  async put(k,v,options){if(k==="order_no:"+body.orderNumber&&failOnce){failOnce=false;throw new Error("temporary KV failure");}return kv.put(k,v,options);},
+  async delete(k){return kv.delete(k);},
+  async list(args){return kv.list(args);}
+ };
+ const update={update_id:9901,message:{chat:{id:444444444,type:"private"},from:{id:444444444,first_name:"Ivan"},text:"/start order_"+token}};
+ await withTelegramMock(async calls=>{
+  const first=await worker.fetch(webhookUpdate(update),orderEnv(flakyKV));
+  assert.equal(first.status,502);
+  assert.ok(await kv.get("bind_token:"+token),"token remains available after partial KV failure");
+  const second=await worker.fetch(webhookUpdate(update),orderEnv(flakyKV));
+  assert.equal(second.status,200);
+  assert.equal(await kv.get("bind_token:"+token),null);
+  const order=JSON.parse(await kv.get("order:"+body.orderId));
+  assert.equal(String(order.chatId),"444444444");
+  assert.equal(String(order.telegramId),"444444444");
+  assert.ok(calls.some(c=>String(c.payload.chat_id)==="444444444"&&c.payload.text.includes("Telegram подключён к заявке")));
+ });
+});
+
 test("client opens the link, admin accepts, client gets the confirmation", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
