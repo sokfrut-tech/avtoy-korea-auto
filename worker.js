@@ -477,19 +477,41 @@ export default {
    if (!env.TELEGRAM_BOT_TOKEN || adminIds.length < 1 || !env.REVIEWS) {
     return Response.json({ok:false,error:"Система учёта заявок временно недоступна. Попробуйте позже."},{status:503});
    }
-   const orderId=crypto.randomUUID().replace(/-/g,"").slice(0,16);
-   const bindToken=crypto.randomUUID().replace(/-/g,"")+crypto.randomUUID().replace(/-/g,"");
-   // Timestamp plus cryptographically random suffix avoids same-millisecond collisions in ordinary KV usage.
-   // KV has no atomic compare-and-set, so this is collision-resistant, not a formal uniqueness lock.
-   const orderNumber=String(Date.now())+String(crypto.getRandomValues(new Uint32Array(1))[0]).padStart(10,"0");
-   const order={id:orderId,number:orderNumber,...f,status:"new",chatId:null,telegramId:null,username:null,createdAt:new Date().toISOString()};
-   await env.REVIEWS.put("order:"+orderId,JSON.stringify(order));
-   await env.REVIEWS.put("order_no:"+orderNumber,JSON.stringify(order));
-   await env.REVIEWS.put("bind_token:"+bindToken,orderId,{expirationTtl:604800});
-   const cardText=["🚘 Новая заявка №"+orderNumber,"Модель: "+(f.model||"не указано"),"Бюджет: "+(f.budget||"не указан"),"Страна: "+(f.country||"не указана"),"Тема: "+(f.purpose||"Подбор автомобиля"),"Статус: новая","","Личные данные доступны администратору по кнопке.", "Заявка: " + orderId].join("\n");
+   const requestKey=String(request.headers.get("idempotency-key")||"").trim();
+   if(!/^[a-f0-9-]{36}$/i.test(requestKey))return fail(400,"Не удалось проверить повторную отправку. Обновите страницу и попробуйте ещё раз.");
+   const idemKey="request_idem:"+requestKey;
+   let idemRaw=await env.REVIEWS.get(idemKey);
+   let idem=idemRaw?JSON.parse(idemRaw):null;
+   let order,orderId,orderNumber,bindToken;
+   if(idem){
+    orderId=idem.orderId;orderNumber=idem.orderNumber;bindToken=idem.bindToken;
+    const saved=await env.REVIEWS.get("order:"+orderId);
+    if(!saved)return fail(409,"Состояние заявки не удалось восстановить. Свяжитесь с менеджером.");
+    order=JSON.parse(saved);
+    if(idem.payloadHash!==JSON.stringify(f))return fail(409,"Ключ отправки уже использован для другой заявки. Обновите страницу.");
+   }else{
+    orderId=crypto.randomUUID().replace(/-/g,"").slice(0,16);
+    bindToken=crypto.randomUUID().replace(/-/g,"")+crypto.randomUUID().replace(/-/g,"");
+    // Random suffix reduces collisions; KV is not an atomic lock.
+    orderNumber=String(Date.now())+String(crypto.getRandomValues(new Uint32Array(1))[0]).padStart(10,"0");
+    order={id:orderId,number:orderNumber,...f,status:"new",chatId:null,telegramId:null,username:null,createdAt:new Date().toISOString()};
+    idem={orderId,orderNumber,bindToken,payloadHash:JSON.stringify(f),deliveredAdminIds:[]};
+    await env.REVIEWS.put("order:"+orderId,JSON.stringify(order));
+    await env.REVIEWS.put("order_no:"+orderNumber,JSON.stringify(order));
+    await env.REVIEWS.put("bind_token:"+bindToken,orderId,{expirationTtl:604800});
+    await env.REVIEWS.put(idemKey,JSON.stringify(idem),{expirationTtl:604800});
+   }
+   const cardText=["🚘 Новая заявка №"+orderNumber,"Модель: "+(f.model||"не указано"),"Бюджет: "+(f.budget||"не указан"),"Страна: "+(f.country||"не указана"),"Тема: "+(f.purpose||"Подбор автомобиля"),"Статус: "+order.status,"","Личные данные доступны администратору по кнопке.", "Заявка: " + orderId].join("\n");
    const keyboard={inline_keyboard:[[{text:"✅ Принять в работу",callback_data:"ord:"+orderNumber},{text:"🔐 Данные клиента",callback_data:"ordinfo:"+orderNumber}]]};
-   const deliveries=await Promise.all(adminIds.map(async chat_id=>{try{const payload=await callTelegram(env,"sendMessage",{chat_id,text:cardText,reply_markup:keyboard});return Boolean(payload&&payload.ok===true);}catch{return false;}}));
-   if(deliveries.some(ok=>!ok))return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
+   const delivered=new Set((idem.deliveredAdminIds||[]).map(String));
+   for(const chat_id of adminIds){
+    if(delivered.has(String(chat_id)))continue;
+    try{
+     const payload=await callTelegram(env,"sendMessage",{chat_id,text:cardText,reply_markup:keyboard});
+     if(payload&&payload.ok===true){delivered.add(String(chat_id));idem.deliveredAdminIds=[...delivered];await env.REVIEWS.put(idemKey,JSON.stringify(idem),{expirationTtl:604800});}
+    }catch{}
+   }
+   if(adminIds.some(id=>!delivered.has(String(id))))return fail(503,"Заявка №"+orderNumber+" сохранена. Уведомление доставлено не всем администраторам. Нажмите «Отправить заявку» ещё раз — повторно отправим только недоставленные уведомления.");
    const botUser=String(env.TELEGRAM_BOT_USERNAME||"").replace(/^@/,"");
    return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+bindToken:null},{headers});
   }
@@ -823,6 +845,7 @@ form.addEventListener('submit',async function(e){
  e.preventDefault();
  const b=document.getElementById('submit-btn');
  const data=Object.fromEntries(new FormData(form).entries());
+ if(!window.requestIdempotencyKey)window.requestIdempotencyKey=crypto.randomUUID();
  if(!String(data.name||'').trim()||!String(data.contact||'').trim()){
   showFormStatus('Заполните имя и телефон или Telegram для связи.',true);
   return;
@@ -831,7 +854,7 @@ form.addEventListener('submit',async function(e){
  b.textContent='Отправляем…';
  showFormStatus('Отправляем заявку администраторам…',false);
  try{
-  const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify(data)});
+  const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json','accept':'application/json','idempotency-key':window.requestIdempotencyKey},body:JSON.stringify(data)});
   const raw=await r.text();
   let x;
   try{x=JSON.parse(raw)}catch{x={ok:false,error:'Сервер вернул некорректный ответ. Попробуйте позже.'}}
@@ -842,6 +865,7 @@ form.addEventListener('submit',async function(e){
   }else{
    showFormStatus('Заявка доставлена администраторам. Спасибо! Свяжемся с вами по указанному контакту.',false);
    form.reset();
+   window.requestIdempotencyKey=null;
    if(x.botLink){
     const a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';
     statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a);
