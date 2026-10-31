@@ -169,7 +169,7 @@ async function handleCarPost(post, env, adminIds) {
   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Это объявление уже импортировано или находится на модерации: https://t.me/" + chat.username + "/" + post.message_id})));
   return;
  }
- const car = {id,caption,fileId,photos,sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id,createdAt:new Date().toISOString(),sourceDate:created};
+ const car = {id,caption,fileId,photos,mediaType:post.video ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id,createdAt:new Date().toISOString(),sourceDate:created};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
@@ -665,7 +665,7 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photos = Array.isArray(car.photos) && car.photos.length ? car.photos.map((_,index)=>"/api/car-media/"+car.id+"/"+index) : (car.fileId ? ["/api/car-media/"+car.id+"/0"] : []); cars.push({id:car.id,caption:car.caption,media:photos[0] || null,mediaItems:photos,sourceUrl:car.sourceUrl || "",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photos = Array.isArray(car.photos) && car.photos.length ? car.photos.map((_,index)=>"/api/car-media/"+car.id+"/"+index) : (car.fileId ? ["/api/car-media/"+car.id+"/0"] : []); cars.push({id:car.id,caption:car.caption,media:photos[0] || null,mediaItems:photos,mediaType:car.mediaType || "photo",sourceUrl:car.sourceUrl || "",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
@@ -1157,7 +1157,7 @@ fetch('/api/cars',{cache:'no-store'}).then(r=>r.json()).then(data=>{
  const list=document.getElementById('cars-list'); if(!list || !data.cars || !data.cars.length)return; list.textContent='';
  data.cars.forEach(car=>{
   const article=document.createElement('article'); article.className='card car-card';
-  (Array.isArray(car.mediaItems)&&car.mediaItems.length?car.mediaItems:(car.media?[car.media]:[])).forEach(function(mediaUrl,index){const img=document.createElement('img');img.className='review-media';img.src=mediaUrl;img.alt='Фотография автомобиля '+(index+1);img.loading='lazy';article.appendChild(img)});
+  (Array.isArray(car.mediaItems)&&car.mediaItems.length?car.mediaItems:(car.media?[car.media]:[])).forEach(function(mediaUrl,index){if(car.mediaType==='video'){const video=document.createElement('video');video.className='review-media';video.src=mediaUrl;video.controls=true;video.playsInline=true;video.preload='metadata';article.appendChild(video)}else{const img=document.createElement('img');img.className='review-media';img.src=mediaUrl;img.alt='Фотография автомобиля '+(index+1);img.loading='lazy';article.appendChild(img)}});
   const body=document.createElement('div');body.className='car-body';
   const title=document.createElement('h3');title.textContent=(car.caption||'Автомобиль из объявления').split('\\n')[0].slice(0,120);
   const desc=document.createElement('div');desc.className='car-specs';desc.style.display='block';desc.style.whiteSpace='pre-line';desc.textContent=car.caption||'Описание не указано';
