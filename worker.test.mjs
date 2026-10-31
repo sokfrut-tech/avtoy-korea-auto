@@ -404,7 +404,7 @@ test("site order goes to every admin with an accept button and returns a bot lin
     assert.equal(body.botLink, `https://t.me/avtoy_test_bot?start=order_${body.orderId}`);
     const cards = calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup);
     assert.equal(cards.length, 2);
-    assert.equal(cards[0].payload.reply_markup.inline_keyboard[0][0].callback_data, `ord:${body.orderId}`);
+    assert.equal(cards[0].payload.reply_markup.inline_keyboard[0][0].callback_data, `ord:${body.orderNumber}`);
   });
 });
 
@@ -470,7 +470,7 @@ test("website form can temporarily deliver a phone-only lead to one configured a
     const body = await response.json();
     assert.equal(response.status, 200);
     assert.equal(body.ok, true);
-    const notices = calls.filter(c => c.method === "sendMessage" && c.payload.text.includes("+79991234567"));
+    const notices = calls.filter(c => c.method === "sendMessage" && c.payload.text.includes("Заявка №"));
     assert.equal(notices.length, 1);
     assert.equal(String(notices[0].payload.chat_id), "1095575236");
   });
@@ -486,7 +486,7 @@ test("website form accepts a phone-only contact and sends the lead privately to 
     const notices = calls.filter(c => c.method === "sendMessage" && c.payload.text.includes("+79991234567"));
     assert.equal(notices.length, 2);
     assert.ok(notices.every(c => !String(c.payload.chat_id).startsWith("-")));
-    assert.ok(notices.every(c => c.payload.text.includes("Заявка: " + body.orderId)));
+    assert.ok(notices.every(c => c.payload.text.includes("Заявка №" + body.orderNumber)));
   });
 });
 
