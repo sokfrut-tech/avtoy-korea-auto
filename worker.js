@@ -218,7 +218,7 @@ async function handleOrderCallback(callback, env, adminIds) {
  const answer=(text,alert=false)=>callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
  const fromId=String((callback.from&&callback.from.id)||"");
  if(!adminIds.includes(fromId))return answer("Нет доступа",true);
- const data=String(callback.data||""),match=data.match(/^ord:(\d+)$/),detail=data.match(/^ordinfo:(\d+)$/);
+ const data=String(callback.data||""),match=data.match(/^ord:(\d+|[0-9a-f]{16})$/i),detail=data.match(/^ordinfo:(\d+|[0-9a-f]{16})$/i);
  if((!match&&!detail)||!env.REVIEWS)return answer("Заявка не найдена",true);
  const number=(match||detail)[1],raw=await env.REVIEWS.get((/^[0-9a-f]{16}$/i.test(number)?"order:":"order_no:")+number);
  if(!raw)return answer("Заявка не найдена",true);
