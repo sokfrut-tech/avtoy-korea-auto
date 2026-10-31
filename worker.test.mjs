@@ -39,6 +39,21 @@ async function withTelegramMock(run) {
   }
 }
 
+test("/myid returns the private sender numeric ID and does not notify admins", async () => {
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(webhook({
+      chat: { id: 333333333, type: "private" },
+      from: { id: 333333333, first_name: "Tester" },
+      text: "/myid",
+    }), env);
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(String(calls[0].payload.chat_id), "333333333");
+    assert.match(calls[0].payload.text, /333333333/);
+    assert.ok(!calls.some(call => ["111111111", "222222222"].includes(String(call.payload.chat_id))));
+  });
+});
+
 test("private client messages go to each personal admin, not a group", async () => {
   await withTelegramMock(async calls => {
     const response = await worker.fetch(webhook({
