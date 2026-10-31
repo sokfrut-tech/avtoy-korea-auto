@@ -313,7 +313,7 @@ export default {
        }
       } else await send(chatId, "Заявка не найдена в хранилище.");
      } else {
-      const chatMatch = repliedText.match(/Chat ID:\s*(-?\\d+)/i);
+      const chatMatch = repliedText.match(/Chat ID:\s*(-?\d+)/i);
       if (chatMatch && text) {
        await send(chatMatch[1], text);
        await send(chatId, "Ответ отправлен клиенту.");
