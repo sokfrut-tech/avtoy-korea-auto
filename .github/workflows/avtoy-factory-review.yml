@@ -53,7 +53,7 @@ jobs:
       - name: Verify private delivery, admin-only actions and review media boundaries
         run: >-
           node --test
-          --test-name-pattern='private client messages|group messages are ignored|only an admin can request private order details|order details are never sent to a group|callbacks from non-admins|admin import buttons are rejected outside the admin private chat|configured group media sent by an admin|admin can upload review photo directly|group media notification retries|review import keeps staged media'
+          --test-name-pattern='private client messages|group messages are ignored|only an admin can request private order details|order details are never sent to a group|callbacks from non-admins|admin import buttons are rejected outside the admin private chat|configured group media sent by an admin|admin can upload review photo directly|group media notification retries|review import keeps staged media|private admin upload retries moderation card|non-admin private media upload'
           worker.test.mjs
 
   director:
