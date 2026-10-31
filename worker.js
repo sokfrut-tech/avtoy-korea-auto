@@ -181,6 +181,86 @@ function addPhotoToReview(review, photoItem) {
  return review;
 }
 
+// Отправка карточки отзыва администраторам: все фото и видео, кнопки модерации.
+async function sendReviewCardTo(env, adminIds, review, id, lead) {
+ const photos = uniqueFileItems(review.photos && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []));
+ const videos = uniqueFileItems(review.videos && review.videos.length ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : []));
+ const keyboard = { inline_keyboard: [
+  [{ text: "✅ Опубликовать", callback_data: `pub:${id}` }, { text: "❌ Не публиковать", callback_data: `rej:${id}` }],
+  [{ text: "🙈 Скрыть имя", callback_data: `anon:${id}` }, { text: "✏️ Редактировать текст", callback_data: `edit:${id}` }]
+ ] };
+ await Promise.all(adminIds.map(async adminId => {
+  await sendChannelMedia(env, adminId, photos, videos, review.text ? String(review.text).slice(0, 1024) : "");
+  await callTelegram(env, "sendMessage", { chat_id: adminId, text: (lead ? lead + "\n\n" : "") + formatReviewCard(review) + (photos.length + videos.length > 1 ? "\nФотографий: " + photos.length + (videos.length ? ", видео: " + videos.length : "") : ""), reply_markup: keyboard });
+ }));
+}
+
+// Пост из группы отзывов, пересланный администратором в личку. Запись определяется исходным
+// сообщением группы, а не сообщением бота: после очистки истории бота карточки могут пропасть,
+// но записи в хранилище остаются. Поэтому:
+//  - уже опубликован — сообщаем, повторно не публикуем;
+//  - ожидает модерации — заново присылаем карточку с кнопками;
+//  - отклонён или не было — новая попытка модерации.
+async function handleForwardedGroupPost(msg, env, adminIds) {
+ const reviewGroupId = String(env.TELEGRAM_REVIEW_GROUP_ID || "").trim();
+ const origin = msg.forward_origin || null;
+ if (!reviewGroupId || !origin || origin.type !== "chat" || String(origin.chat && origin.chat.id) !== reviewGroupId) return false;
+ const chatId = String(msg.chat && msg.chat.id || "");
+ if (!adminIds.includes(chatId)) return false;
+ if (!env.REVIEWS) {
+  await callTelegram(env, "sendMessage", { chat_id: chatId, text: "Хранилище REVIEWS не настроено. Пост не принят." });
+  return true;
+ }
+ const ownId = reviewGroupId + "_" + String(origin.message_id);
+ // Части альбома (общий media_group_id бота) сводятся к одной записи.
+ const batchKey = msg.media_group_id ? "fwd_batch:" + chatId + "_" + String(msg.media_group_id) : null;
+ const batchRaw = batchKey ? await env.REVIEWS.get(batchKey) : null;
+ const batch = batchRaw ? JSON.parse(batchRaw) : null;
+ const privateId = String(msg.message_id);
+ const id = (await env.REVIEWS.get("fwd_origin:" + ownId)) || (batch && batch.id) || ownId;
+ const batchStart = !batch || batch.start === privateId;
+ if (batchKey && !batch) await env.REVIEWS.put(batchKey, JSON.stringify({ id, start: privateId }), { expirationTtl: 2592000 });
+ await env.REVIEWS.put("fwd_origin:" + ownId, id, { expirationTtl: 2592000 });
+ const photos = largestPhotoOf(msg.photo);
+ const videos = msg.video && msg.video.file_id ? [{ file_id: msg.video.file_id }] : [];
+ const text = String(msg.caption || msg.text || "").trim().replace(/^\/review(@\w+)?/i, "").trim().slice(0, 1000);
+ if (!batchStart) {
+  const raw = await env.REVIEWS.get("pending:" + id);
+  if (raw) {
+   const review = JSON.parse(raw);
+   review.photos = uniqueFileItems([...(Array.isArray(review.photos) ? review.photos : []), ...photos]);
+   review.videos = uniqueFileItems([...(Array.isArray(review.videos) ? review.videos : []), ...videos]);
+   review.hasPhoto = review.photos.length > 0;
+   if (!review.fileId) review.fileId = (review.photos[0] || review.videos[0] || {}).file_id || null;
+   if (!review.text && text) review.text = text;
+   await env.REVIEWS.put("pending:" + id, JSON.stringify(review));
+  }
+  return true;
+ }
+ if (await env.REVIEWS.get("approved:" + id)) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env, "sendMessage", { chat_id: adminId, text: "✅ Этот отзыв уже опубликован на сайте. Повторная публикация не создана." })));
+  return true;
+ }
+ const pendingRaw = await env.REVIEWS.get("pending:" + id);
+ if (pendingRaw) {
+  await sendReviewCardTo(env, adminIds, JSON.parse(pendingRaw), id, "🔁 Повторная пересылка: отзыв ещё ожидает решения модератора.");
+  return true;
+ }
+ if (!text && !photos.length && !videos.length) {
+  await callTelegram(env, "sendMessage", { chat_id: chatId, text: "Отзыв не принят: в посте нет текста, фото или видео." });
+  return true;
+ }
+ const review = {
+  id, kind: videos.length ? "video" : "text", text, name: "Клиент",
+  fileId: videos[0] ? videos[0].file_id : (photos[0] ? photos[0].file_id : null),
+  photos, videos, hasPhoto: photos.length > 0, hasThanks: THANKS_PATTERN.test(text), anonymous: false,
+  createdAt: new Date().toISOString(), sourceUrl: "Пересылка из группы отзывов"
+ };
+ await env.REVIEWS.put("pending:" + id, JSON.stringify(review));
+ await sendReviewCardTo(env, adminIds, review, id, "");
+ return true;
+}
+
 async function handleAdminMediaUpload(msg, env, adminIds) {
  const adminId = String(msg.chat && msg.chat.id || "");
  if (!adminIds.includes(adminId) || (msg.forward_origin && msg.forward_origin.type === "channel")) return false;
@@ -828,6 +908,7 @@ export default {
     chat_id: target, text: body, disable_web_page_preview: true
    });
    try {
+    if (await handleForwardedGroupPost(msg, env, adminIds)) return Response.json({ok:true});
     if (await handleAdminMediaUpload(msg, env, adminIds)) return Response.json({ok:true});
     if (await handleAdminModerationEditReply(msg, env, adminIds)) return Response.json({ok:true});
     // /myid returns only the sender's own numeric Telegram ID for safe admin configuration.

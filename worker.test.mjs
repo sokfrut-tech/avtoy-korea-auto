@@ -1474,3 +1474,107 @@ test("forwarded album chosen as review then re-forwarded: one resent card with e
     assert.ok(calls.some(c => c.method === "sendMessage" && /Фотографий: 2/.test(c.payload.text || "")), "moderation card shows all photos");
   });
 });
+
+// ---- Посты из группы отзывов, пересланные администратором в личку ----
+function forwardedGroupPart(privateMessageId, groupMessageId, extra = {}) {
+  return { message_id: privateMessageId, chat: { id: 111111111, type: "private" }, from: { id: 111111111, first_name: "Admin" },
+    forward_origin: { type: "chat", date: 1790000000, chat: { id: Number(REVIEW_GROUP), type: "supergroup", title: "Отзывы" }, message_id: groupMessageId },
+    ...extra };
+}
+function reviewCardCount(calls) {
+  return calls.filter(c => c.method === "sendMessage" && /Новый отзыв|Повторная пересылка: отзыв/.test(c.payload.text || "") && String(c.payload.chat_id) === "111111111").length;
+}
+
+test("group review re-forwarded to the bot resends its pending card instead of staying silent", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: groupReview(950, { caption: "/review Спасибо за быструю доставку", photo: [{ file_id: "G1" }] }) }), reviewEnv(kv));
+    assert.equal((await kv.list({ prefix: "pending:" })).keys.length, 1);
+    calls.length = 0;
+    await worker.fetch(webhookUpdate({ message: forwardedGroupPart(960, 950, { photo: [{ file_id: "G1" }], caption: "/review Спасибо за быструю доставку" }) }), reviewEnv(kv));
+    assert.equal((await kv.list({ prefix: "pending:" })).keys.length, 1, "no second record for the same group post");
+    assert.ok(reviewCardCount(calls) >= 1, "admin gets the pending card again");
+    assert.ok(calls.some(c => c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "pub:" + REVIEW_GROUP + "_950"));
+  });
+});
+
+test("group review already published is reported, not published again", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: groupReview(951, { caption: "/review Отличный автомобиль, спасибо", photo: [{ file_id: "G2" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "pub:" + REVIEW_GROUP + "_951")), reviewEnv(kv));
+    calls.length = 0;
+    await worker.fetch(webhookUpdate({ message: forwardedGroupPart(961, 951, { photo: [{ file_id: "G2" }], caption: "/review Отличный автомобиль, спасибо" }) }), reviewEnv(kv));
+    assert.equal((await kv.list({ prefix: "pending:" })).keys.length, 0, "no new moderation record");
+    assert.ok(calls.some(c => /уже опубликован/.test(c.payload.text || "")));
+  });
+});
+
+test("group review rejected earlier gets a fresh moderation attempt when forwarded again", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: groupReview(952, { caption: "/review Текст без фото" }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "rej:" + REVIEW_GROUP + "_952")), reviewEnv(kv));
+    assert.equal((await kv.list({ prefix: "pending:" })).keys.length, 0);
+    calls.length = 0;
+    await worker.fetch(webhookUpdate({ message: forwardedGroupPart(962, 952, { photo: [{ file_id: "G3" }], caption: "/review Текст с фото" }) }), reviewEnv(kv));
+    const review = JSON.parse(await kv.get("pending:" + REVIEW_GROUP + "_952"));
+    assert.deepEqual(review.photos.map(p => p.file_id), ["G3"]);
+    assert.ok(reviewCardCount(calls) >= 1, "new moderation card is sent");
+  });
+});
+
+test("group post forwarded to the bot for the first time is put into moderation with its photos", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(webhookUpdate({ message: forwardedGroupPart(970, 953, { caption: "Спасибо, всё супер", photo: [{ file_id: "S1" }, { file_id: "S1L" }] }) }), reviewEnv(kv));
+    assert.equal(response.status, 200);
+    const review = JSON.parse(await kv.get("pending:" + REVIEW_GROUP + "_953"));
+    assert.equal(review.text, "Спасибо, всё супер");
+    assert.deepEqual(review.photos.map(p => p.file_id), ["S1L"]);
+    assert.ok(reviewCardCount(calls) >= 1);
+  });
+});
+
+test("album forwarded from the group keeps every photo; re-forwarding after lost history resends one card", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: forwardedGroupPart(971, 954, { media_group_id: "pm-1", caption: "Отзыв, спасибо", photo: [{ file_id: "A1" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedGroupPart(972, 955, { media_group_id: "pm-1", photo: [{ file_id: "A2" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedGroupPart(973, 956, { media_group_id: "pm-1", photo: [{ file_id: "A3" }] }) }), reviewEnv(kv));
+    const id = REVIEW_GROUP + "_954";
+    assert.deepEqual(JSON.parse(await kv.get("pending:" + id)).photos.map(p => p.file_id), ["A1", "A2", "A3"]);
+    calls.length = 0;
+    await worker.fetch(webhookUpdate({ message: forwardedGroupPart(981, 954, { media_group_id: "pm-2", caption: "Отзыв, спасибо", photo: [{ file_id: "A1" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedGroupPart(982, 955, { media_group_id: "pm-2", photo: [{ file_id: "A2" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedGroupPart(983, 956, { media_group_id: "pm-2", photo: [{ file_id: "A3" }] }) }), reviewEnv(kv));
+    assert.equal((await kv.list({ prefix: "pending:" })).keys.length, 1, "still one record for the album");
+    assert.equal(reviewCardCount(calls), 1, "one resent card for this admin, not one per album part");
+    assert.equal(calls.filter(c => c.method === "sendMessage" && /Повторная пересылка: отзыв/.test(c.payload.text || "") && String(c.payload.chat_id) === "222222222").length, 1, "the second admin also gets exactly one card");
+    assert.deepEqual(JSON.parse(await kv.get("pending:" + id)).photos.map(p => p.file_id), ["A1", "A2", "A3"]);
+  });
+});
+
+test("forwarded group post retry after a failed admin delivery is delivered on retry", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  let fail = true;
+  const deliveries = [];
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const payload = JSON.parse(init.body || "{}");
+      deliveries.push({ chat: String(payload.chat_id), text: String(payload.text || "") });
+      if (String(payload.chat_id) === "222222222" && fail && payload.text) return Response.json({ ok: false, description: "temporary failure" });
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const update = { message: forwardedGroupPart(990, 957, { caption: "Спасибо", photo: [{ file_id: "R1" }] }) };
+    assert.equal((await worker.fetch(webhookUpdate(update), reviewEnv(kv))).status, 502);
+    fail = false;
+    deliveries.length = 0;
+    assert.equal((await worker.fetch(webhookUpdate(update), reviewEnv(kv))).status, 200);
+    assert.ok(deliveries.some(d => d.chat === "222222222" && /Новый отзыв|Повторная пересылка: отзыв/.test(d.text)));
+  } finally { globalThis.fetch = originalFetch; }
+});
