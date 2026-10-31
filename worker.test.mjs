@@ -39,6 +39,29 @@ async function withTelegramMock(run) {
   }
 }
 
+test("Telegram HTTP 200 with ok:false is treated as a failed send", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      calls.push(new URL(String(input)).pathname.split("/").pop());
+      return Response.json({ ok: false, description: "bot was blocked by the user" });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const response = await worker.fetch(webhook({
+      chat: { id: 333333333, type: "private" },
+      from: { id: 333333333, first_name: "Tester" },
+      text: "/start",
+    }), env);
+    assert.equal(response.status, 502);
+    assert.deepEqual(calls, ["sendMessage"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("/myid returns the private sender numeric ID and does not notify admins", async () => {
   await withTelegramMock(async calls => {
     const response = await worker.fetch(webhook({
