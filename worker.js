@@ -1,6 +1,21 @@
 // --- Отзывы: модерация администратором через кнопки в личке с ботом ---
 const THANKS_PATTERN = /спасибо|благодар/i;
 
+// Убираем рекламный хвост канала из описаний, оставляя полезный текст публикации.
+function cleanPublicationText(value) {
+ return String(value || "")
+  .replace(/\r/g, "")
+  .replace(/(?:^|\n)\s*Для заказа аналогичного автомобиля обращайтесь\s*:?[^]*$/i, "")
+  .replace(/^\s*Источник:\s*https?:\/\/\S+\s*$/gim, "")
+  .replace(/^\s*(?:📞|☎️?|тел(?:ефон)?\s*[:：]?|владимир\s*[:：]?|whats?app\s*[:：]?|telegram\s*[:：]?|контакт\s*[:：]?|имя\s*[:：]?).*$/gim, "")
+  .replace(/^\s*Видео\s*$/gim, "")
+  .replace(/(?:https?:\/\/)?t\.me\/[\w+/?=&%-]+/gi, "")
+  .replace(/\+?\d[\d\s().-]{7,}\d/g, "")
+  .replace(/^\s*[-–—|,;:]+\s*$/gm, "")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+}
+
 async function callTelegram(env, method, payload) {
  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
   method: "POST",
@@ -158,7 +173,7 @@ async function handleCarPost(post, env, adminIds) {
   })));
   return;
  }
- const caption = String(post.caption || post.text || "").trim().slice(0, 3000);
+ const caption = cleanPublicationText(post.caption || post.text).slice(0, 3000);
  const photos = Array.isArray(post.photo) ? post.photo : [];
  const fileId = photos.length ? photos[photos.length - 1].file_id : (post.video ? post.video.file_id : null);
  if (!caption && !fileId) return;
@@ -186,7 +201,7 @@ async function handleCarPost(post, env, adminIds) {
 async function handleImportedReview(post, env, adminIds) {
  const chat = post.chat || {};
  if ((String(chat.username || "").toLowerCase() !== "avtoykorea" && post.sourceType !== "group") || !env.REVIEWS) return;
- const text = String(post.caption || post.text || "").trim().slice(0, 1000);
+ const text = cleanPublicationText(post.caption || post.text).slice(0, 1000);
  const photos = Array.isArray(post.photo) ? post.photo : [];
  const photo = photos.length ? photos[photos.length - 1].file_id : null;
  const video = post.video && post.video.file_id ? post.video.file_id : null;
@@ -665,7 +680,7 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photos = Array.isArray(car.photos) && car.photos.length ? car.photos.map((_,index)=>"/api/car-media/"+car.id+"/"+index) : (car.fileId ? ["/api/car-media/"+car.id+"/0"] : []); cars.push({id:car.id,caption:car.caption,media:photos[0] || null,mediaItems:photos,mediaType:car.mediaType || "photo",sourceUrl:car.sourceUrl || "",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photos = Array.isArray(car.photos) && car.photos.length ? car.photos.map((_,index)=>"/api/car-media/"+car.id+"/"+index) : (car.fileId ? ["/api/car-media/"+car.id+"/0"] : []); cars.push({id:car.id,caption:cleanPublicationText(car.caption),media:photos[0] || null,mediaItems:photos,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
@@ -697,7 +712,7 @@ export default {
       const raw = await env.REVIEWS.get(key.name);
       if (!raw) continue;
       const r = JSON.parse(raw);
-      reviews.push({id:r.id,kind:r.kind,text:r.text,name:r.name || "Клиент",media:r.fileId ? `/api/review-media/${r.id}` : null});
+      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media:r.fileId ? `/api/review-media/${r.id}` : null});
      }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
@@ -1208,7 +1223,7 @@ fetch('/api/cars',{cache:'no-store'}).then(r=>r.json()).then(data=>{
   const title=document.createElement('h3');title.textContent=(car.caption||'Автомобиль из объявления').split('\\n')[0].slice(0,120);
   const desc=document.createElement('div');desc.className='car-specs';desc.style.display='block';desc.style.whiteSpace='pre-line';desc.textContent=car.caption||'Описание не указано';
   body.appendChild(title);body.appendChild(desc);
-  if(car.sourceUrl){const a=document.createElement('a');a.className='car-link';a.href=car.sourceUrl;a.target='_blank';a.rel='noopener';a.textContent='Исходная публикация →';body.appendChild(a)}
+
   article.appendChild(body);list.appendChild(article);
  });
 }).catch(()=>{});

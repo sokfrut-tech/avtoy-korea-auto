@@ -500,7 +500,7 @@ test("video review with thanks is published and appears on the site API", async 
     const response = await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv));
     const body = await response.json();
     assert.equal(body.reviews.length, 1);
-    assert.equal(body.reviews[0].name, "Ivan");
+    assert.ok(!Object.hasOwn(body.reviews[0], "name"), "public reviews must not expose author names");
     assert.equal(body.reviews[0].kind, "video");
     assert.equal(body.reviews[0].media, "/api/review-media/" + REVIEW_GROUP + "_11");
     assert.ok(!JSON.stringify(body).includes("test-token"), "bot token never reaches the site");
@@ -520,7 +520,7 @@ test("text review needs a car photo; with photo it is published and name can be 
     await worker.fetch(webhookUpdate(callback(111111111, "pub:" + REVIEW_GROUP + "_21")), reviewEnv(kv));
     const body = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
     assert.equal(body.reviews.length, 1);
-    assert.equal(body.reviews[0].name, "Клиент");
+    assert.ok(!Object.hasOwn(body.reviews[0], "name"), "anonymous public reviews must not expose author names");
   });
 });
 
@@ -836,6 +836,19 @@ test("channel album imports one vehicle with all photos", async () => {
   });
 });
 
+test("public car and review APIs remove Telegram promotional footer and source links", async () => {
+ const kv=memoryKV();
+ await kv.put("car_approved:car_100555_3383",JSON.stringify({id:"car_100555_3383",caption:"Kia Sorento 2022\nПробег 20 000 км\n\nДля заказа аналогичного автомобиля обращайтесь:\n📞 Владимир: +79537477230\n📲 WhatsApp / Telegram\nhttps://t.me/avtoYkorea\nВидео\n\nИсточник: https://t.me/avtoYkorea/3383",sourceUrl:"https://t.me/avtoYkorea/3383",fileId:"CAR_MEDIA",publishedAt:"2026-10-31"}));
+ await kv.put("approved:-100555_3383",JSON.stringify({id:"-100555_3383",kind:"video",text:"Отличный автомобиль!\n\nДля заказа аналогичного автомобиля обращайтесь:\n📞 Владимир: +79537477230\n📲 WhatsApp / Telegram\nhttps://t.me/avtoYkorea\nВидео\n\nИсточник: https://t.me/avtoYkorea/3383",name:"Клиент",fileId:"REVIEW_MEDIA"}));
+ const siteEnv=reviewEnv(kv);
+ const cars=await (await worker.fetch(new Request("https://worker.test/api/cars"),siteEnv)).json();
+ assert.equal(cars.cars[0].caption,"Kia Sorento 2022\nПробег 20 000 км");
+ assert.equal(Object.hasOwn(cars.cars[0],"sourceUrl"),false);
+ const reviews=await (await worker.fetch(new Request("https://worker.test/api/reviews"),siteEnv)).json();
+ assert.equal(reviews.reviews[0].text,"Отличный автомобиль!");
+ assert.equal(Object.hasOwn(reviews.reviews[0],"name"),false);
+ assert.doesNotMatch(JSON.stringify({cars,reviews}),/Владимир|79537477230|WhatsApp|avtoYkorea|Источник:|Видео/);
+});
 test("homepage inline JavaScript parses before deployment", async () => {
   const vm = await import("node:vm");
   const response = await worker.fetch(new Request("https://worker.test/"), env);
