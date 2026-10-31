@@ -75,6 +75,7 @@ function cleanPublicationText(value) {
   .replace(/(?<!\d)(?:\+?7|8)[\s().-]*\d(?:[\s().-]*\d){9}(?!\d)|(?<!\d)9(?:[\s().-]*\d){9}(?!\d)/g, "")
   .replace(/(?:^|\n)\s*Для заказа аналогичного автомобиля обращайтесь\s*:?[^]*$/i, "")
   .replace(/^\s*Источник:\s*https?:\/\/\S+\s*$/gim, "")
+  .replace(/^\s*(?:📲\s*)?(?:тел(?:ефон)?\s*[:：]?|whats?app\s*\/\s*telegram|whats?app|telegram)\s*$/gim, "")
   .replace(/^\s*Видео\s*$/gim, "")
   .replace(/(?:https?:\/\/)?t\.me\/[\w+/?=&%-]+/gi, "")
   .replace(/^\s*[-–—|,;:]+\s*$/gm, "")
