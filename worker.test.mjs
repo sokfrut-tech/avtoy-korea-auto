@@ -339,6 +339,23 @@ test("only the configured review group is read, and only /review messages", asyn
   });
 });
 
+test("configured group media sent by an admin is routed privately to review moderation", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(webhookUpdate({ message: {
+      message_id: 81, chat: { id: Number(REVIEW_GROUP), type: "supergroup" },
+      from: { id: 111111111, first_name: "Admin" },
+      caption: "Фото автомобиля клиента", photo: [{ file_id: "SMALL" }, { file_id: "GROUP_PHOTO" }]
+    }}), reviewEnv(kv));
+    assert.equal(response.status, 200);
+    assert.ok(await kv.get("import_pending:" + REVIEW_GROUP + "_81"));
+    assert.ok(calls.some(c => c.method === "sendPhoto" && String(c.payload.chat_id) === "111111111" && c.payload.photo === "GROUP_PHOTO"));
+    assert.ok(calls.some(c => c.method === "sendMessage" && String(c.payload.chat_id) === "111111111" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:review:" + REVIEW_GROUP + "_81"));
+    assert.equal(calls.some(c => String(c.payload.chat_id) === REVIEW_GROUP), false);
+    assert.equal(calls.some(c => c.method === "sendMessage" && String(c.payload.chat_id) === "222222222" && c.payload.reply_markup), true);
+  });
+});
+
 test("video review without thanks can be published after admin approval", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
