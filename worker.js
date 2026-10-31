@@ -377,11 +377,16 @@ export default {
       await send(chatId, "Ссылка недействительна или уже использована. Оставьте заявку на сайте ещё раз.");
      } else {
       const order = JSON.parse(raw);
-      if (order.chatId && String(order.chatId) !== chatId) {
-       await send(chatId, "К заявке уже привязан другой Telegram-чат. Свяжитесь с менеджером.");
+      const senderId = String((msg.from && msg.from.id) || "");
+      if (!senderId || senderId !== chatId) {
+       await send(chatId, "Не удалось подтвердить личный Telegram-чат. Откройте ссылку из личного чата с ботом.");
+      } else if (order.telegramId && String(order.telegramId) !== senderId) {
+       await send(chatId, "К заявке уже привязан другой Telegram-аккаунт. Свяжитесь с менеджером.");
       } else {
        await env.REVIEWS.delete(tokenKey);
        order.chatId = chatId;
+       order.telegramId = senderId;
+       order.username = msg.from && msg.from.username ? String(msg.from.username).slice(0, 64) : null;
        await env.REVIEWS.put(`order:${orderId}`, JSON.stringify(order));
        await env.REVIEWS.put(`order_no:${order.number}`, JSON.stringify(order));
        await send(chatId, "Спасибо! Ваш Telegram подключён к заявке. С вами свяжутся в этом чате.");
