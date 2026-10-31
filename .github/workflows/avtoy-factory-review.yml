@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'worker.js'
+      - 'wrangler.toml'
       - 'worker.test.mjs'
       - 'README.md'
       - 'AGENTS.md'
