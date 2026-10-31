@@ -413,15 +413,43 @@ test("callbacks from non-admins are refused", async () => {
 });
 
 // --- Заявки с сайта ---
-function siteRequest(body) {
+function siteRequest(body, key = crypto.randomUUID()) {
   return new Request("https://worker.test/api/request", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "idempotency-key": key },
     body: JSON.stringify(body),
   });
 }
 
 const orderEnv = (kv) => ({ ...env, TELEGRAM_BOT_USERNAME: "@avtoy_test_bot", REVIEWS: kv });
+
+
+test("repeating the same website submission key reuses one order and does not resend delivered admin cards", async () => {
+  const kv = memoryKV();
+  const key = "11111111-2222-4333-8444-555555555555";
+  await withTelegramMock(async calls => {
+    const first = await worker.fetch(siteRequest({ name: "Иван", contact: "@ivan" }, key), orderEnv(kv));
+    const firstBody = await first.json();
+    assert.equal(first.status, 200);
+    const second = await worker.fetch(siteRequest({ name: "Иван", contact: "@ivan" }, key), orderEnv(kv));
+    const secondBody = await second.json();
+    assert.equal(second.status, 200);
+    assert.equal(secondBody.orderNumber, firstBody.orderNumber);
+    assert.equal((await kv.list({ prefix: "order:" })).keys.length, 1);
+    assert.equal(calls.filter(c => c.method === "sendMessage" && /заявка №/i.test(c.payload.text)).length, 2);
+  });
+});
+
+test("same website idempotency key cannot be reused for different customer data", async () => {
+  const kv = memoryKV();
+  const key = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  await withTelegramMock(async () => {
+    await worker.fetch(siteRequest({ name: "Иван", contact: "@ivan" }, key), orderEnv(kv));
+    const conflict = await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }, key), orderEnv(kv));
+    assert.equal(conflict.status, 409);
+    assert.equal((await kv.list({ prefix: "order:" })).keys.length, 1);
+  });
+});
 
 test("website lead rejects non-JSON bodies before storing or notifying", async () => {
  const kv=memoryKV();
