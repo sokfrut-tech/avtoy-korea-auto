@@ -158,7 +158,14 @@ function formatReviewCard(review) {
 function largestPhotoItem(photos) {
  if (!Array.isArray(photos) || !photos.length) return null;
  const last = photos[photos.length - 1];
- return last && last.file_id ? { file_id: last.file_id } : null;
+ return last && last.file_id ? photoItemFrom(last) : null;
+}
+
+// Telegram отдаёт один и тот же снимок под разными file_id, но с одним file_unique_id.
+function photoItemFrom(raw) {
+ const item = { file_id: String(raw.file_id) };
+ if (raw.file_unique_id) item.file_unique_id = String(raw.file_unique_id);
+ return item;
 }
 
 // Идентификатор отзыва для альбома: один отзыв на весь media_group_id, иначе — по сообщению.
@@ -175,7 +182,7 @@ function groupReviewPhotoIds(review) {
 // Добавляет фото к отзыву без дублей; возвращает обновлённый отзыв.
 function addPhotoToReview(review, photoItem) {
  review.photos = Array.isArray(review.photos) ? review.photos : [];
- if (photoItem && !review.photos.some(item => item.file_id === photoItem.file_id)) review.photos.push(photoItem);
+ review.photos = uniqueFileItems([...review.photos, ...(photoItem ? [photoItem] : [])]);
  review.hasPhoto = review.photos.length > 0;
  if (!review.fileId && review.photos.length) review.fileId = review.photos[0].file_id;
  return review;
@@ -367,11 +374,16 @@ async function handleReviewSubmission(msg, env, adminIds) {
   const ids = groupReviewPhotoIds(review);
   if (review.kind === "video" && review.fileId) {
    await callTelegram(env, "sendVideo", { chat_id: adminId, video: review.fileId });
-  } else if (ids.length > 1) {
-   const media = ids.slice(0, 10).map((file_id, index) => ({ type: "photo", media: file_id, ...(index === 0 && text ? { caption: text.slice(0, 1024) } : {}) }));
-   await callTelegram(env, "sendMediaGroup", { chat_id: adminId, media });
-  } else if (ids.length === 1) {
-   await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: ids[0] });
+  } else {
+   for (let offset = 0; offset < ids.length; offset += 10) {
+    const chunk = ids.slice(offset, offset + 10);
+    if (chunk.length > 1) {
+     const media = chunk.map((file_id, index) => ({ type: "photo", media: file_id, ...(offset === 0 && index === 0 && text ? { caption: text.slice(0, 1024) } : {}) }));
+     await callTelegram(env, "sendMediaGroup", { chat_id: adminId, media });
+    } else {
+     await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: chunk[0], ...(offset === 0 && text ? { caption: text.slice(0, 1024) } : {}) });
+    }
+   }
   }
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: formatReviewCard(review) + (ids.length > 1 ? "\nФотографий: " + ids.length : ""), reply_markup: keyboard });
  }));
@@ -439,11 +451,12 @@ function uniqueFileItems(list) {
  const seen = new Set();
  const out = [];
  for (const item of Array.isArray(list) ? list : []) {
-  const fileId = item && typeof item === "object" ? item.file_id : item;
-  if (fileId && !seen.has(String(fileId))) {
-   seen.add(String(fileId));
-   out.push({ file_id: String(fileId) });
-  }
+  const raw = item && typeof item === "object" ? item : { file_id: item };
+  if (!raw.file_id) continue;
+  const key = raw.file_unique_id ? "u:" + String(raw.file_unique_id) : "f:" + String(raw.file_id);
+  if (seen.has(key)) continue;
+  seen.add(key);
+  out.push(photoItemFrom(raw));
  }
  return out;
 }
@@ -460,17 +473,21 @@ function postVideos(post) {
 // Фото одного сообщения Telegram приходят несколькими размерами: берём самый большой.
 function largestPhotoOf(photo) {
  return Array.isArray(photo) && photo.length && photo[photo.length - 1] && photo[photo.length - 1].file_id
-  ? [{ file_id: photo[photo.length - 1].file_id }]
+  ? [photoItemFrom(photo[photo.length - 1])]
   : [];
 }
 
 // Отправка всех фото и видео записи администратору.
 async function sendChannelMedia(env, adminId, photos, videos, caption) {
- if (photos.length > 1) {
-  const media = photos.slice(0, 10).map((photo, index) => ({ type: "photo", media: photo.file_id, ...(index === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) }));
-  await callTelegram(env, "sendMediaGroup", { chat_id: adminId, media });
- } else if (photos.length === 1) {
-  await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: photos[0].file_id, ...(caption ? { caption: caption.slice(0, 1024) } : {}) });
+ // Telegram принимает не больше 10 медиа в одной группе: отправляем все фото пачками.
+ for (let offset = 0; offset < photos.length; offset += 10) {
+  const chunk = photos.slice(offset, offset + 10);
+  if (chunk.length > 1) {
+   const media = chunk.map((photo, index) => ({ type: "photo", media: photo.file_id, ...(offset === 0 && index === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) }));
+   await callTelegram(env, "sendMediaGroup", { chat_id: adminId, media });
+  } else {
+   await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: chunk[0].file_id, ...(offset === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
+  }
  }
  for (const video of videos) await callTelegram(env, "sendVideo", { chat_id: adminId, video: video.file_id });
 }

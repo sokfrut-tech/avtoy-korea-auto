@@ -1578,3 +1578,36 @@ test("forwarded group post retry after a failed admin delivery is delivered on r
     assert.ok(deliveries.some(d => d.chat === "222222222" && /Новый отзыв|Повторная пересылка: отзыв/.test(d.text)));
   } finally { globalThis.fetch = originalFetch; }
 });
+
+// ---- Много фото в одном посте и повторы одной и той же картинки ----
+function forwardedChannelPhotoPart(privateId, originId, groupId, photo, extra = {}) {
+  return forwardedPart(privateId, originId, groupId, { photo: [photo], ...extra });
+}
+
+test("every photo of a large channel post reaches the admin, in media groups of up to 10", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    for (let i = 0; i < 14; i++) {
+      await worker.fetch(webhookUpdate({ message: forwardedChannelPhotoPart(1200 + i, 1300 + i, "big-1", { file_id: "BIG" + i, file_unique_id: "UBIG" + i }, i === 0 ? { caption: "Большой пост" } : {}) }), reviewEnv(kv));
+    }
+    const entry = JSON.parse(await kv.get("import_pending:-100555_1300"));
+    assert.equal((entry.post || entry).photo.length, 14, "all 14 photos stored");
+    calls.length = 0;
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_1300")), reviewEnv(kv));
+    const sent = calls.filter(c => c.method === "sendMediaGroup" && String(c.payload.chat_id) === "111111111").flatMap(c => c.payload.media.map(m => m.media));
+    const singles = calls.filter(c => c.method === "sendPhoto" && String(c.payload.chat_id) === "111111111").map(c => c.payload.photo);
+    assert.equal(new Set([...sent, ...singles]).size, 14, "all 14 photos reach the admin");
+    assert.equal(calls.filter(c => c.method === "sendMediaGroup" && String(c.payload.chat_id) === "111111111").length, 2, "14 photos go out as two media groups (10 + 4)");
+  });
+});
+
+test("the same picture sent under different file_ids is stored once", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate({ message: forwardedChannelPhotoPart(1400, 1500, "dup-1", { file_id: "COPY_A", file_unique_id: "SAME_PIC" }, { caption: "Один снимок" }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedChannelPhotoPart(1401, 1501, "dup-1", { file_id: "COPY_B", file_unique_id: "SAME_PIC" }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedChannelPhotoPart(1402, 1502, "dup-1", { file_id: "COPY_C", file_unique_id: "SAME_PIC" }) }), reviewEnv(kv));
+    const entry = JSON.parse(await kv.get("import_pending:-100555_1500"));
+    assert.equal((entry.post || entry).photo.length, 1, "one stored photo for one picture");
+  });
+});
