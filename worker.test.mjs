@@ -1188,6 +1188,6 @@ test("failed fragment edit leaves review text unchanged and allows a later edit"
   await worker.fetch(webhookUpdate({message:reply}),reviewEnv(kv));
   assert.equal(JSON.parse(await kv.get("pending:"+REVIEW_GROUP+"_903")).text,"Исходный текст отзыва");
   await worker.fetch(webhookUpdate({message:{...reply,message_id:905,text:"ДОБАВИТЬ В КОНЕЦ: Дополнение"}}),reviewEnv(kv));
-  assert.equal(JSON.parse(await kv.get("pending:"+REVIEW_GROUP+"_903")).text,"Исходный текст отзыва");
+  assert.equal(JSON.parse(await kv.get("pending:"+REVIEW_GROUP+"_903")).text,"Исходный текст отзыва\n\nДополнение");
  });
 });
