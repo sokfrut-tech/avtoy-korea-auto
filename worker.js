@@ -425,6 +425,9 @@ async function handleImportedReview(post, env, adminIds) {
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id},{text:"✏️ Редактировать текст",callback_data:"edit:" + id}]]};
  const deliveryKey = "review_delivery:" + id;
  const delivery = JSON.parse(await env.REVIEWS.get(deliveryKey) || "{}");
+ // A new moderation attempt after rejection must not inherit the previous
+ // attempt's "card already sent" flags.
+ if (!existingReview) delivery.admins = {};
  delivery.admins = delivery.admins || {};
  for (const adminId of adminIds) {
   const status = delivery.admins[String(adminId)] || {mediaSent:!review.fileId && !(review.photos && review.photos.length),cardSent:false};
