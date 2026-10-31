@@ -78,3 +78,23 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 4. Fix and test review-media retry loss; decide whether direct private admin media upload is required and implement it if so.
 5. Replace the placeholder security job with meaningful privacy/security regression tests.
 6. Keep PR #12 open until these checks and the independent review are complete. No merge or new production deploy has been performed.
+
+
+## Follow-up fixes and verification — 2026-10-31 15:28 UTC
+- Source branch changes through commit `b5cab88d5b88db985f04ea0cf7af1fcfa404b6ee`:
+  - Group review-media notifications now persist per-admin media/card delivery state and retry missing sends.
+  - Import choice keeps the staged source until moderation conversion and admin notifications complete.
+  - Imported review moderation stores per-admin delivery progress and resumes missing sends after failure.
+  - Admins can send photo/video directly to the bot in a private chat; the bot creates a private moderation card. Forwarded channel posts continue through the separate channel-import flow.
+  - One-time Telegram bind token is deleted only after both order indexes are saved and the confirmation message succeeds, allowing Telegram retries after partial failures.
+- Added regression tests for group media retry, import retry, direct admin upload, non-admin upload rejection, and binding retry after partial KV failure.
+- Latest Worker checks [#105](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41215004691): syntax passed; full suite reports 56 tests, 56 passed, 0 failed.
+- Factory Review workflow has been upgraded: the security/privacy job now runs targeted regression tests for private delivery, admin-only callbacks, review media boundaries and retry behavior rather than only checking source file presence. Latest Factory Review for this branch head is still pending at time of update.
+- Transient CI failures during development were corrected: forwarded channel media is explicitly excluded from the direct-upload handler; the bind-token regression test now creates the initial order under Telegram API mocks. The latest full suite is green.
+- Claude was tagged in PR #12 for an independent review; no Claude reply was visible as of this update.
+
+## Remaining release checks
+- Live HTTP verification of the Worker/AppDeploy origins was blocked by DNS/network resolution from this execution environment; no conclusion about user-side availability can be drawn from that failure.
+- Cloudflare runtime Worker secrets and the `REVIEWS` KV binding are not visible through GitHub Actions. The deploy workflow confirmed only that its GitHub Cloudflare deploy credentials were present.
+- Telegram webhook URL/secret registration, actual `/start` delivery, controlled form submission and admin inbox delivery remain unverified. Do not change webhook or send admin test notifications without explicit user approval.
+- PR #12 remains open. No merge, production deployment, secret change, or webhook mutation has been performed.
