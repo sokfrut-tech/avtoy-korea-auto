@@ -500,7 +500,7 @@ test("video review with thanks is published and appears on the site API", async 
     const response = await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv));
     const body = await response.json();
     assert.equal(body.reviews.length, 1);
-    assert.equal(body.reviews[0].name, "Ivan");
+    assert.ok(!Object.hasOwn(body.reviews[0], "name"), "public reviews must not expose author names");
     assert.equal(body.reviews[0].kind, "video");
     assert.equal(body.reviews[0].media, "/api/review-media/" + REVIEW_GROUP + "_11");
     assert.ok(!JSON.stringify(body).includes("test-token"), "bot token never reaches the site");
@@ -520,7 +520,7 @@ test("text review needs a car photo; with photo it is published and name can be 
     await worker.fetch(webhookUpdate(callback(111111111, "pub:" + REVIEW_GROUP + "_21")), reviewEnv(kv));
     const body = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
     assert.equal(body.reviews.length, 1);
-    assert.equal(body.reviews[0].name, "Клиент");
+    assert.ok(!Object.hasOwn(body.reviews[0], "name"), "anonymous public reviews must not expose author names");
   });
 });
 
