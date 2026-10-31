@@ -357,7 +357,9 @@ export default {
      body: JSON.stringify(payload)
     });
     if (!response.ok) throw new Error("Telegram API request failed");
-    return response.json();
+    const result = await response.json();
+    if (!result || result.ok !== true) throw new Error("Telegram API rejected the request");
+    return result;
    };
    const send = (target, body) => api("sendMessage", {
     chat_id: target, text: body, disable_web_page_preview: true
