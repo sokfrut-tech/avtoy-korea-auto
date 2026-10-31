@@ -43,15 +43,18 @@ jobs:
         run: node --test worker.test.mjs
 
   security:
-    name: Security / privacy baseline
+    name: Security / privacy regression tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate source files are present
-        run: |
-          test -s worker.js
-          test -s worker.test.mjs
-          echo "Required source files are present."
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify private delivery, admin-only actions and review media boundaries
+        run: >-
+          node --test
+          --test-name-pattern='private client messages|group messages are ignored|only an admin can request private order details|order details are never sent to a group|callbacks from non-admins|admin import buttons are rejected outside the admin private chat|configured group media sent by an admin|admin can upload review photo directly|group media notification retries|review import keeps staged media'
+          worker.test.mjs
 
   director:
     name: Director / release evidence
