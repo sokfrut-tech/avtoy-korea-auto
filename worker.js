@@ -160,7 +160,7 @@ async function handleCarPost(post, env, adminIds) {
  }
  const caption = String(post.caption || post.text || "").trim().slice(0, 3000);
  const photos = Array.isArray(post.photo) ? post.photo : [];
- const fileId = photos.length ? photos[photos.length - 1].file_id : null;
+ const fileId = photos.length ? photos[photos.length - 1].file_id : (post.video ? post.video.file_id : null);
  if (!caption && !fileId) return;
  if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return; }
  const id = "car_" + String(chat.id).replace(/-/g,"") + "_" + String(post.message_id);
@@ -169,12 +169,17 @@ async function handleCarPost(post, env, adminIds) {
   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Это объявление уже импортировано или находится на модерации: https://t.me/" + chat.username + "/" + post.message_id})));
   return;
  }
- const car = {id,caption,fileId,sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id,createdAt:new Date().toISOString(),sourceDate:created};
+ const car = {id,caption,fileId,photos,mediaType:post.video ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id,createdAt:new Date().toISOString(),sourceDate:created};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
-  if (fileId) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:fileId});
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 Автомобиль из канала AVTOY KOREA\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
+  if (photos.length > 1) {
+   const media = photos.slice(0,10).map((photo,index)=>({type:"photo",media:photo.file_id,...(index===0 && caption ? {caption:caption.slice(0,1024)} : {})}));
+   await callTelegram(env,"sendMediaGroup",{chat_id:adminId,media});
+  } else if (fileId) {
+   await callTelegram(env,post.video ? "sendVideo" : "sendPhoto",{chat_id:adminId,[post.video ? "video" : "photo"]:fileId, ...(caption ? {caption:caption.slice(0,1024)} : {})});
+  }
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 Один автомобиль из канала AVTOY KOREA\nФотографий: " + photos.length + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
  }));
 }
 
@@ -238,17 +243,44 @@ async function handleImportChoice(callback, env, adminIds) {
 async function stageChannelPost(post, env, adminIds) {
  const chat = post.chat || {};
  if (String(chat.username || "").toLowerCase() !== "avtoykorea" || !env.REVIEWS) return;
- const id = String(chat.id) + "_" + String(post.message_id);
- if (await env.REVIEWS.get("import_pending:" + id) || await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id) || await env.REVIEWS.get("car_pending:car_" + String(chat.id).replace(/-/g,"") + "_" + post.message_id) || await env.REVIEWS.get("car_approved:car_" + String(chat.id).replace(/-/g,"") + "_" + post.message_id)) {
-  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Эта публикация уже импортирована или ожидает выбора/модерации."})));
-  return;
+ // Telegram sends each album photo as a separate channel_post update.
+ // Keep the normal numeric callback ID, and map the album ID to that record.
+ const albumId = String(post.media_group_id || "");
+ const albumPointer = albumId ? "import_album:" + String(chat.id) + "_" + albumId : null;
+ let id = String(chat.id) + "_" + String(post.message_id);
+ let key = "import_pending:" + id;
+ if (albumPointer) {
+  const linkedId = await env.REVIEWS.get(albumPointer);
+  if (linkedId) {
+   id = linkedId;
+   key = "import_pending:" + id;
+   const raw = await env.REVIEWS.get(key);
+   if (raw) {
+    const entry = JSON.parse(raw);
+    const saved = entry.post || entry;
+    const all = Array.isArray(saved.photo) ? saved.photo : [];
+    const fileId = Array.isArray(post.photo) && post.photo.length ? post.photo[post.photo.length-1].file_id : null;
+    if (fileId && !all.some(p => p.file_id === fileId)) all.push({file_id:fileId});
+    saved.photo = all;
+    if (!saved.caption && post.caption) saved.caption = post.caption;
+    entry.post = saved;
+    entry.photo = saved.photo;
+    entry.caption = saved.caption;
+    await env.REVIEWS.put(key,JSON.stringify(entry),{expirationTtl:2592000});
+   }
+   return;
+  }
  }
- await env.REVIEWS.put("import_pending:" + id,JSON.stringify(post));
+ const duplicateCarId = "car_" + String(chat.id).replace(/-/g,"") + "_" + String(post.message_id);
+ if (await env.REVIEWS.get(key) || await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id) || await env.REVIEWS.get("car_pending:" + duplicateCarId) || await env.REVIEWS.get("car_approved:" + duplicateCarId)) return;
+ const stored = {...post,chat,message_id:Number(post.message_id),albumId};
+ await env.REVIEWS.put(key,JSON.stringify({...stored,post:stored,albumId}),{expirationTtl:2592000});
+ if (albumPointer) await env.REVIEWS.put(albumPointer,id,{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
   if (post.video) await callTelegram(env,"sendVideo",{chat_id:adminId,video:post.video.file_id});
   else if (Array.isArray(post.photo) && post.photo.length) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:post.photo[post.photo.length-1].file_id});
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Новая публикация из @avtoYkorea. Выберите раздел для импорта.\n\n" + String(post.caption || post.text || "Без текста").slice(0,2500) + "\n\nДата оригинала: " + (post.sourceDate ? new Date(post.sourceDate*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow"}) : "не определена"),reply_markup:keyboard});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Новая публикация из @avtoYkorea. Выберите раздел для импорта.\n\n" + String(post.caption || post.text || "Без текста").slice(0,2500) + "\n\nСнимки одного альбома объединяются в одну карточку.\nДата оригинала: " + (post.sourceDate ? new Date(post.sourceDate*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow"}) : "не определена"),reply_markup:keyboard});
  }));
 }
 
@@ -633,23 +665,27 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); cars.push({id:car.id,caption:car.caption,media:car.fileId ? "/api/car-media/" + car.id : null,sourceUrl:car.sourceUrl || "",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photos = Array.isArray(car.photos) && car.photos.length ? car.photos.map((_,index)=>"/api/car-media/"+car.id+"/"+index) : (car.fileId ? ["/api/car-media/"+car.id+"/0"] : []); cars.push({id:car.id,caption:car.caption,media:photos[0] || null,mediaItems:photos,mediaType:car.mediaType || "photo",sourceUrl:car.sourceUrl || "",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
    cars.sort((a,b)=>String(b.publishedAt||"").localeCompare(String(a.publishedAt||"")));
    return Response.json({cars},{headers:{"cache-control":"no-store"}});
   }
-  const carMediaId = url.pathname.startsWith("/api/car-media/") ? url.pathname.slice("/api/car-media/".length) : "";
-  const carMediaMatch = /^car_-?[0-9]+_[0-9]+$/.test(carMediaId) ? [null, carMediaId] : null;
+  const carMediaPath = url.pathname.startsWith("/api/car-media/") ? url.pathname.slice("/api/car-media/".length) : "";
+  const carMediaMatch = carMediaPath.match(/^(car_-?[0-9]+_[0-9]+)(?:\/(\d+))?$/);
   if (request.method === "GET" && carMediaMatch) {
    if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found",{status:404});
    const raw = await env.REVIEWS.get("car_approved:" + carMediaMatch[1]); if (!raw) return new Response("Not found",{status:404});
-   const car = JSON.parse(raw); if (!car.fileId) return new Response("Not found",{status:404});
-   const info = await callTelegram(env,"getFile",{file_id:car.fileId}).catch(()=>null); const path = info && info.result && info.result.file_path;
+   const car = JSON.parse(raw); const index = Number(carMediaMatch[2] || 0);
+   const photos = Array.isArray(car.photos) ? car.photos : [];
+   const selected = photos[index]; const fileId = selected && selected.file_id ? selected.file_id : (!photos.length && index === 0 ? car.fileId : null);
+   if (!fileId) return new Response("Not found",{status:404});
+   const info = await callTelegram(env,"getFile",{file_id:fileId}).catch(()=>null); const path = info && info.result && info.result.file_path;
    if (!path) return new Response("Not found",{status:404});
    const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path); if (!upstream.ok) return new Response("Bad Gateway",{status:502});
-   return new Response(upstream.body,{headers:{"content-type":"image/jpeg","cache-control":"public, max-age=3600","x-content-type-options":"nosniff"}});
+   const contentType = /\.(mp4|webm)$/i.test(path) ? "video/mp4" : "image/jpeg";
+   return new Response(upstream.body,{headers:{"content-type":contentType,"cache-control":"public, max-age=3600","x-content-type-options":"nosniff"}});
   }
   if (request.method === "GET" && url.pathname === "/api/reviews") {
    const reviews = [];
@@ -1121,7 +1157,7 @@ fetch('/api/cars',{cache:'no-store'}).then(r=>r.json()).then(data=>{
  const list=document.getElementById('cars-list'); if(!list || !data.cars || !data.cars.length)return; list.textContent='';
  data.cars.forEach(car=>{
   const article=document.createElement('article'); article.className='card car-card';
-  if(car.media){const img=document.createElement('img');img.className='review-media';img.src=car.media;img.alt='Фотография автомобиля';img.loading='lazy';article.appendChild(img)}
+  (Array.isArray(car.mediaItems)&&car.mediaItems.length?car.mediaItems:(car.media?[car.media]:[])).forEach(function(mediaUrl,index){if(car.mediaType==='video'){const video=document.createElement('video');video.className='review-media';video.src=mediaUrl;video.controls=true;video.playsInline=true;video.preload='metadata';article.appendChild(video)}else{const img=document.createElement('img');img.className='review-media';img.src=mediaUrl;img.alt='Фотография автомобиля '+(index+1);img.loading='lazy';article.appendChild(img)}});
   const body=document.createElement('div');body.className='car-body';
   const title=document.createElement('h3');title.textContent=(car.caption||'Автомобиль из объявления').split('\\n')[0].slice(0,120);
   const desc=document.createElement('div');desc.className='car-specs';desc.style.display='block';desc.style.whiteSpace='pre-line';desc.textContent=car.caption||'Описание не указано';
