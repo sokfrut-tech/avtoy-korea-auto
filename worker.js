@@ -384,8 +384,23 @@ export default {
    return Response.json({ ok: true });
   }
   if (request.method === "POST" && url.pathname === "/api/request") {
+   const headers = {"cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"no-referrer"};
+   const fail = (status,error) => Response.json({ok:false,error},{status,headers});
+   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
+   if (!contentType.startsWith("application/json")) return fail(415,"Ожидается JSON");
+   const declaredLength = Number(request.headers.get("content-length") || 0);
+   if (declaredLength > 12000) return fail(413,"Слишком большой запрос");
+   let raw;
+   try { raw = await request.text(); } catch { return fail(400,"Некорректные данные"); }
+   if (new TextEncoder().encode(raw).byteLength > 12000) return fail(413,"Слишком большой запрос");
    let d;
-   try { d = await request.json(); } catch { return Response.json({ok:false,error:"Некорректные данные"},{status:400}); }
+   try { d = JSON.parse(raw); } catch { return fail(400,"Некорректные данные"); }
+   if (!d || typeof d !== "object" || Array.isArray(d)) return fail(400,"Некорректный формат данных");
+   const limits = {name:100,contact:150,model:150,budget:100,country:80,year:30,purpose:100,details:1000};
+   for (const [key,limit] of Object.entries(limits)) {
+    if (d[key] !== undefined && d[key] !== null && typeof d[key] !== "string") return fail(400,"Некорректное поле: "+key);
+    if (typeof d[key] === "string" && d[key].length > limit * 4) return fail(400,"Слишком длинное поле: "+key);
+   }
    const clean = (v,n=500) => String(v||"").replace(/[<>]/g,"").trim().slice(0,n);
    const f = {name:clean(d.name,100),contact:clean(d.contact,150),model:clean(d.model,150),budget:clean(d.budget,100),country:clean(d.country,80),year:clean(d.year,30),purpose:clean(d.purpose,100),details:clean(d.details,1000)};
    if (!f.name || !f.contact) return Response.json({ok:false,error:"Укажите имя и контакт для связи."},{status:400});
@@ -403,7 +418,7 @@ export default {
    const deliveries=await Promise.all(adminIds.map(async chat_id=>{try{const payload=await callTelegram(env,"sendMessage",{chat_id,text:cardText,reply_markup:keyboard});return Boolean(payload&&payload.ok===true);}catch{return false;}}));
    if(deliveries.some(ok=>!ok))return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
    const botUser=String(env.TELEGRAM_BOT_USERNAME||"").replace(/^@/,"");
-   return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+orderId:null});
+   return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+orderId:null},{headers});
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
    const cars = [];
