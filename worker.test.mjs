@@ -1611,3 +1611,21 @@ test("the same picture sent under different file_ids is stored once", async () =
     assert.equal((entry.post || entry).photo.length, 1, "one stored photo for one picture");
   });
 });
+
+test("car flow end to end: forwarded post -> Автомобиль -> Опубликовать -> site list", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 1600, chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, forward_origin: { type: "channel", date: 1790000000, chat: { id: -100555, username: "avtoYkorea", type: "channel" }, message_id: 1601 }, caption: "Kia K5 2021, пробег 40 000 км", photo: [{ file_id: "CAR1", file_unique_id: "CU1" }] } }), reviewEnv(kv));
+    const choice = calls.find(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_1601");
+    assert.ok(choice, "admin sees the choice card");
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_1601")), reviewEnv(kv));
+    const cars = await kv.list({ prefix: "car_pending:" });
+    assert.equal(cars.keys.length, 1, "car is in moderation");
+    const carId = cars.keys[0].name.replace("car_pending:", "");
+    const publishButton = calls.some(c => c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "carpub:" + carId);
+    assert.ok(publishButton, "moderation card has the publish button");
+    await worker.fetch(webhookUpdate(callback(111111111, "carpub:" + carId)), reviewEnv(kv));
+    const body = await (await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv))).json();
+    assert.equal(body.cars.length, 1, "published car is listed on the site");
+  });
+});
