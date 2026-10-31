@@ -571,7 +571,7 @@ test("non-admin private media upload is not staged or forwarded to administrator
  });
 });
 
-test("video review without thanks can be published after admin approval", async () => {
+test("forwarded video review without thanks can be published after admin approval", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate({ message: groupReview(10, { caption: "/review Машина нормальная", video: { file_id: "VID10" } }) }), reviewEnv(kv));
@@ -584,7 +584,7 @@ test("video review without thanks can be published after admin approval", async 
   });
 });
 
-test("video review with thanks is published and appears on the site API", async () => {
+test("forwarded video review with thanks is published and appears on the site API", async () => {
   const kv = memoryKV();
   await withTelegramMock(async () => {
     await worker.fetch(webhookUpdate({ message: groupReview(11, { caption: "/review Спасибо большое за помощь!", video: { file_id: "VID11" } }) }), reviewEnv(kv));
@@ -1339,5 +1339,138 @@ test("admin album uploaded in the private chat keeps every photo in one review",
     assert.deepEqual(saved.photos.map(p => p.file_id), ["X1_L", "X2_L"]);
     assert.equal(saved.text, "Отзыв клиента, спасибо");
     assert.equal(await kv.get("pending:111111111_501"), null);
+  });
+});
+
+// ---- PR #27 probes: retries of forwarded channel albums ----
+function forwardedPart(privateMessageId, originId, groupId, extra = {}) {
+  return { message_id: privateMessageId, chat: { id: 111111111, type: "private" }, from: { id: 111111111, first_name: "Admin" },
+    ...(groupId ? { media_group_id: groupId } : {}),
+    forward_origin: { type: "channel", date: 1790000000, chat: { id: -100555, username: "avtoYkorea", type: "channel" }, message_id: originId },
+    ...extra };
+}
+function countChoiceCards(calls) {
+  return calls.filter(c => c.method === "sendMessage" && /(Новая публикация|Повторная пересылка) из @avtoYkorea/.test(c.payload.text || "") && String(c.payload.chat_id) === "111111111").length;
+}
+
+test("forwarded album not chosen: re-forwarding the album resends one choice card with all photos", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: forwardedPart(301, 601, "fw-1", { caption: "Kia Sorento 2022", photo: [{ file_id: "A1" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(302, 602, "fw-1", { photo: [{ file_id: "A2" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(303, 603, "fw-1", { photo: [{ file_id: "A3" }] }) }), reviewEnv(kv));
+    assert.equal(countChoiceCards(calls), 1, "first forward: one choice card");
+    const before = countChoiceCards(calls);
+    await worker.fetch(webhookUpdate({ message: forwardedPart(311, 601, "fw-2", { caption: "Kia Sorento 2022", photo: [{ file_id: "A1" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(312, 602, "fw-2", { photo: [{ file_id: "A2" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(313, 603, "fw-2", { photo: [{ file_id: "A3" }] }) }), reviewEnv(kv));
+    assert.equal(countChoiceCards(calls) - before, 1, "re-forward: exactly one resent card, not one per part");
+    const entry = JSON.parse(await kv.get("import_pending:-100555_601"));
+    assert.deepEqual((entry.post || entry).photo.map(p => p.file_id), ["A1", "A2", "A3"]);
+  });
+});
+
+test("forwarded album chosen as car then re-forwarded: reports already published, creates nothing", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: forwardedPart(401, 701, "fw-3", { caption: "Kia K5 2021 Пробег 40 000 км", photo: [{ file_id: "B1" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(402, 702, "fw-3", { photo: [{ file_id: "B2" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_701")), reviewEnv(kv));
+    const carId = (await kv.list({ prefix: "car_pending:" })).keys[0].name.replace("car_pending:", "");
+    await worker.fetch(webhookUpdate(callback(111111111, "carpub:" + carId)), reviewEnv(kv));
+    assert.ok(await kv.get("car_approved:" + carId), "car published");
+    calls.length = 0;
+    await worker.fetch(webhookUpdate({ message: forwardedPart(411, 701, "fw-4", { caption: "Kia K5 2021", photo: [{ file_id: "B1" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(412, 702, "fw-4", { photo: [{ file_id: "B2" }] }) }), reviewEnv(kv));
+    assert.equal(countChoiceCards(calls), 0, "no new choice card for a published car");
+    assert.equal((await kv.list({ prefix: "car_pending:" })).keys.length, 0, "no new car pending");
+    assert.ok(calls.some(c => /уже опубликован/.test(c.payload.text || "")), "admin is told it is already published");
+  });
+});
+
+test("forwarded video album: every video is kept and re-delivered when the album is forwarded again", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: forwardedPart(501, 801, "fw-5", { caption: "Видео отзыв, спасибо", video: { file_id: "V1" } }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(502, 802, "fw-5", { video: { file_id: "V2" } }) }), reviewEnv(kv));
+    const entry = JSON.parse(await kv.get("import_pending:-100555_801"));
+    const post = entry.post || entry;
+    assert.deepEqual((post.videos || []).map(v => v.file_id), ["V1", "V2"], "both videos stored");
+    calls.length = 0;
+    await worker.fetch(webhookUpdate({ message: forwardedPart(511, 801, "fw-6", { video: { file_id: "V1" } }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(512, 802, "fw-6", { video: { file_id: "V2" } }) }), reviewEnv(kv));
+    assert.equal(calls.filter(c => c.method === "sendVideo" && String(c.payload.chat_id) === "111111111").length, 2, "re-forward delivers both videos to admin");
+    assert.equal(countChoiceCards(calls), 1, "one choice card for the whole album");
+  });
+});
+
+test("forwarded channel post: a failed admin delivery is restored by Telegram's retry of the same update", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  const deliveries = [];
+  let failAdminTwo = true;
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const payload = JSON.parse(init.body || "{}");
+      deliveries.push({ chat: String(payload.chat_id), text: String(payload.text || "") });
+      if (String(payload.chat_id) === "222222222" && failAdminTwo && payload.text) return Response.json({ ok: false, description: "temporary failure" });
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const update = { message: forwardedPart(601, 901, "fw-7", { caption: "Kia Sorento 2022", photo: [{ file_id: "P1" }] }) };
+    const first = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(first.status, 502);
+    failAdminTwo = false;
+    deliveries.length = 0;
+    const retry = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(retry.status, 200);
+    assert.ok(deliveries.some(d => d.chat === "222222222" && /(Новая публикация|Повторная пересылка) из @avtoYkorea/.test(d.text)), "admin who missed the card gets it on retry");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("forwarded car album: all photos are shown on the site after publishing", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: forwardedPart(701, 1001, "fw-8", { caption: "Kia K5 2021", photo: [{ file_id: "C1" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(702, 1002, "fw-8", { photo: [{ file_id: "C2" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(703, 1003, "fw-8", { photo: [{ file_id: "C3" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_1001")), reviewEnv(kv));
+    const carId = (await kv.list({ prefix: "car_pending:" })).keys[0].name.replace("car_pending:", "");
+    await worker.fetch(webhookUpdate(callback(111111111, "carpub:" + carId)), reviewEnv(kv));
+    const body = await (await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv))).json();
+    const car = body.cars.find(c => c.id === carId);
+    assert.ok(car, "published car is on the site");
+    assert.equal(car.mediaItems.length, 3, "all three album photos are shown");
+  });
+});
+
+test("forwarded double publish click does not duplicate the review on the site", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 920, chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, caption: "Отзыв, спасибо", photo: [{ file_id: "R1" }, { file_id: "R1B" }] } }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "pub:111111111_920")), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "pub:111111111_920")), reviewEnv(kv));
+    const body = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
+    assert.equal(body.reviews.filter(r => r.id === "111111111_920").length, 1);
+  });
+});
+
+test("forwarded album chosen as review then re-forwarded: one resent card with every photo, no new moderation record", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: forwardedPart(801, 1101, "fw-9", { caption: "Спасибо за автомобиль", photo: [{ file_id: "E1" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(802, 1102, "fw-9", { photo: [{ file_id: "E2" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:review:-100555_1101")), reviewEnv(kv));
+    assert.ok(await kv.get("pending:-100555_1101"));
+    const before = countChoiceCards(calls);
+    await worker.fetch(webhookUpdate({ message: forwardedPart(811, 1101, "fw-10", { caption: "Спасибо за автомобиль", photo: [{ file_id: "E1" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(812, 1102, "fw-10", { photo: [{ file_id: "E2" }] }) }), reviewEnv(kv));
+    assert.equal(countChoiceCards(calls) - before, 0, "no new choice card for an album already in moderation");
+    assert.equal((await kv.list({ prefix: "import_pending:" })).keys.length, 0, "no new import record");
+    const review = JSON.parse(await kv.get("pending:-100555_1101"));
+    assert.deepEqual(review.photos.map(p => p.file_id), ["E1", "E2"]);
+    assert.ok(calls.some(c => c.method === "sendMessage" && /Фотографий: 2/.test(c.payload.text || "")), "moderation card shows all photos");
   });
 });
