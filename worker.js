@@ -108,6 +108,11 @@ async function handleCarPost(post, env, adminIds) {
  if (!caption && !fileId) return;
  if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return; }
  const id = "car_" + String(chat.id).replace(/-/g,"") + "_" + String(post.message_id);
+ const existing = await env.REVIEWS.get("car_pending:" + id) || await env.REVIEWS.get("car_approved:" + id);
+ if (existing) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Это объявление уже импортировано или находится на модерации: https://t.me/" + chat.username + "/" + post.message_id})));
+  return;
+ }
  const car = {id,caption,fileId,sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id,createdAt:new Date().toISOString()};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}]]};
@@ -217,7 +222,15 @@ export default {
     chat_id: target, text: body, disable_web_page_preview: true
    });
    try {
-    if (text.startsWith("/reply") && adminIds.includes(chatId)) {
+    const origin = msg.forward_origin;
+    if (adminIds.includes(chatId) && origin && origin.type === "channel") {
+     const sourceChat = origin.chat || {};
+     if (String(sourceChat.username || "").toLowerCase() !== "avtoykorea") {
+      await send(chatId, "Переслано сообщение не из канала @avtoYkorea. Для импорта перешлите публикацию именно из этого канала, не копируйте её текст.");
+     } else {
+      await handleCarPost({...msg, chat: sourceChat, message_id: origin.message_id}, env, adminIds);
+     }
+    } else if (text.startsWith("/reply") && adminIds.includes(chatId)) {
      const match = text.match(/^\/reply\s+(-?\d+)\s+([\s\S]+)$/);
      if (!match) {
       await send(chatId, "Формат ответа: /reply CHAT_ID текст сообщения");
