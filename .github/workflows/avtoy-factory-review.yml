@@ -1,0 +1,84 @@
+name: AVTOY Korea — Factory Review
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker.js'
+      - 'worker.test.mjs'
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'docs/**'
+      - '.github/workflows/**'
+  push:
+    branches: [feature/numbered-private-order-workflow]
+    paths:
+      - 'worker.js'
+      - 'worker.test.mjs'
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'docs/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avtoy-factory-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  functional:
+    name: Functional / regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: node --check worker.js
+      - name: Full test suite
+        run: node --test worker.test.mjs
+
+  security:
+    name: Security / privacy regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify private delivery, admin-only actions and review media boundaries
+        run: >-
+          node --test
+          --test-name-pattern='private client messages|group messages are ignored|only an admin can request private order details|order details are never sent to a group|callbacks from non-admins|admin import buttons are rejected outside the admin private chat|configured group media sent by an admin|admin can upload review photo directly|group media notification retries|review import keeps staged media|private admin upload retries moderation card|non-admin private media upload'
+          worker.test.mjs
+
+  director:
+    name: Director / release evidence
+    needs: [functional, security]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write factory handoff
+        env:
+          TEST_RESULT: ${{ needs.functional.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+        run: |
+          mkdir -p build/factory
+          cat > build/factory/AVTOY_HANDOFF.md <<EOF
+          # AVTOY Korea factory handoff
+          - commit: ${GITHUB_SHA}
+          - functional_tests: ${TEST_RESULT}
+          - security_review: ${SECURITY_RESULT}
+          - scope: Cloudflare Worker, Telegram webhook, private order delivery, review moderation
+          - production_deploy: NOT AUTHORIZED BY THIS WORKFLOW
+          - release_rule: passing CI is not proof of live Telegram or website operation
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avtoy-factory-handoff
+          path: build/factory/AVTOY_HANDOFF.md

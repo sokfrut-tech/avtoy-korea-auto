@@ -7,8 +7,11 @@ async function callTelegram(env, method, payload) {
   headers: { "content-type": "application/json" },
   body: JSON.stringify(payload)
  });
- if (!response.ok) throw new Error("Telegram API request failed");
- return response.json();
+ if (!response.ok) throw new Error("Telegram HTTP request failed");
+ const result = await response.json();
+ // Telegram may return HTTP 200 with { ok: false }; treat that as a failed delivery.
+ if (!result || result.ok !== true) throw new Error("Telegram API rejected the request");
+ return result;
 }
 
 // Правило публикации: текстовый отзыв — только с фото автомобиля; видео публикуется по решению администратора.
@@ -26,6 +29,41 @@ function formatReviewCard(review) {
 }
 
 // Бот читает только одну группу (TELEGRAM_REVIEW_GROUP_ID) и только сообщения с командой /review.
+
+async function handleAdminMediaUpload(msg, env, adminIds) {
+ const adminId = String(msg.chat && msg.chat.id || "");
+ if (!adminIds.includes(adminId) || msg.forward_origin) return false;
+ const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
+ const video = msg.video || null;
+ if (!photo && !video) return false;
+ if (!env.REVIEWS) {
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Хранилище REVIEWS не настроено. Медиа не принято."});
+  return true;
+ }
+ const id = adminId + "_" + String(msg.message_id);
+ const uploadKey = "admin_upload:" + id;
+ let state = JSON.parse(await env.REVIEWS.get(uploadKey) || "null");
+ if (state && ["approved","rejected"].includes(state.status)) {
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Это медиа уже обработано."});
+  return true;
+ }
+ if (!state) {
+  const caption = String(msg.caption || "").trim().slice(0,1000);
+  const review = {id,kind:video ? "video" : "text",text:caption,name:"Администратор загрузил",fileId:video ? video.file_id : photo.file_id,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(caption),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"Загрузка администратора"};
+  state = {review,cardSent:false,status:"pending"};
+  await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
+  await env.REVIEWS.put(uploadKey,JSON.stringify(state),{expirationTtl:2592000});
+ }
+ if (!state.cardSent) {
+  const review = state.review;
+  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}]]};
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nМедиа загружено вами в личный чат с ботом. Проверьте и выберите действие.",reply_markup:keyboard});
+  state.cardSent = true;
+  await env.REVIEWS.put(uploadKey,JSON.stringify(state),{expirationTtl:2592000});
+ }
+ return true;
+}
+
 async function handleReviewSubmission(msg, env, adminIds) {
  const reviewGroupId = String(env.TELEGRAM_REVIEW_GROUP_ID || "").trim();
  if (!reviewGroupId || String(msg.chat.id) !== reviewGroupId) return;
@@ -81,6 +119,8 @@ async function handleReviewCallback(callback, env, adminIds) {
  }
  if (action === "rej") {
   await env.REVIEWS.delete(`pending:${id}`);
+  const uploadRaw = await env.REVIEWS.get("admin_upload:" + id);
+  if (uploadRaw) { const uploadState = JSON.parse(uploadRaw); uploadState.status = "rejected"; await env.REVIEWS.put("admin_upload:" + id,JSON.stringify(uploadState),{expirationTtl:2592000}); }
   return answer("Не публикуется");
  }
  const problem = reviewRuleProblem(review);
@@ -95,6 +135,8 @@ async function handleReviewCallback(callback, env, adminIds) {
  };
  await env.REVIEWS.put(`approved:${id}`, JSON.stringify(published));
  await env.REVIEWS.delete(`pending:${id}`);
+ const uploadRaw = await env.REVIEWS.get("admin_upload:" + id);
+ if (uploadRaw) { const uploadState = JSON.parse(uploadRaw); uploadState.status = "approved"; await env.REVIEWS.put("admin_upload:" + id,JSON.stringify(uploadState),{expirationTtl:2592000}); }
  return answer("Опубликовано на сайте");
 }
 
@@ -138,7 +180,7 @@ async function handleCarPost(post, env, adminIds) {
 
 async function handleImportedReview(post, env, adminIds) {
  const chat = post.chat || {};
- if (String(chat.username || "").toLowerCase() !== "avtoykorea" || !env.REVIEWS) return;
+ if ((String(chat.username || "").toLowerCase() !== "avtoykorea" && post.sourceType !== "group") || !env.REVIEWS) return;
  const text = String(post.caption || post.text || "").trim().slice(0, 1000);
  const photos = Array.isArray(post.photo) ? post.photo : [];
  const photo = photos.length ? photos[photos.length - 1].file_id : null;
@@ -148,18 +190,31 @@ async function handleImportedReview(post, env, adminIds) {
   return;
  }
  const id = String(chat.id) + "_" + String(post.message_id);
- if (await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) {
-  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"ℹ️ Этот отзыв уже импортирован или находится на модерации."})));
-  return;
- }
- const review = {id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"https://t.me/" + chat.username + "/" + post.message_id};
- await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
+ if (await env.REVIEWS.get("approved:" + id)) return;
+ const existingReview = await env.REVIEWS.get("pending:" + id);
+ const review = existingReview ? JSON.parse(existingReview) : {
+  id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + post.message_id : "Сообщение из закрытой группы")
+ };
+ if (!existingReview) await env.REVIEWS.put("pending:" + id,JSON.stringify(review));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}]]};
- await Promise.all(adminIds.map(async adminId => {
-  if (video) await callTelegram(env,"sendVideo",{chat_id:adminId,video});
-  else if (photo) await callTelegram(env,"sendPhoto",{chat_id:adminId,photo});
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nИсточник: " + review.sourceUrl,reply_markup:keyboard});
- }));
+ const deliveryKey = "review_delivery:" + id;
+ const delivery = JSON.parse(await env.REVIEWS.get(deliveryKey) || "{}");
+ delivery.admins = delivery.admins || {};
+ for (const adminId of adminIds) {
+  const status = delivery.admins[String(adminId)] || {mediaSent:!review.fileId,cardSent:false};
+  if (review.fileId && !status.mediaSent) {
+   await callTelegram(env,review.kind === "video" ? "sendVideo" : "sendPhoto",{chat_id:adminId,[review.kind === "video" ? "video" : "photo"]:review.fileId});
+   status.mediaSent = true;
+   delivery.admins[String(adminId)] = status;
+   await env.REVIEWS.put(deliveryKey,JSON.stringify(delivery),{expirationTtl:2592000});
+  }
+  if (!status.cardSent) {
+   await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nИсточник: " + review.sourceUrl,reply_markup:keyboard});
+   status.cardSent = true;
+   delivery.admins[String(adminId)] = status;
+   await env.REVIEWS.put(deliveryKey,JSON.stringify(delivery),{expirationTtl:2592000});
+  }
+ }
 }
 
 async function handleImportChoice(callback, env, adminIds) {
@@ -169,12 +224,14 @@ async function handleImportChoice(callback, env, adminIds) {
  const match = String(callback.data || "").match(/^imp:(car|review):(-?\d+_\d+)$/);
  if (!match || !env.REVIEWS) return answer("Импорт не найден",true);
  const [,kind,id] = match;
- const raw = await env.REVIEWS.get("import_pending:" + id);
+ const key = "import_pending:" + id;
+ const raw = await env.REVIEWS.get(key);
  if (!raw) return answer("Публикация уже обработана или не найдена",true);
- const post = JSON.parse(raw);
- await env.REVIEWS.delete("import_pending:" + id);
+ const entry = JSON.parse(raw);
+ const post = entry && entry.post ? entry.post : entry;
  if (kind === "car") await handleCarPost(post,env,adminIds);
  else await handleImportedReview(post,env,adminIds);
+ await env.REVIEWS.delete(key);
  return answer(kind === "car" ? "Передано в модерацию автомобилей" : "Передано в модерацию отзывов");
 }
 
@@ -195,6 +252,39 @@ async function stageChannelPost(post, env, adminIds) {
  }));
 }
 
+// Администратор может отправить фото/видео в настроенную группу отзывов; публикация всё равно проходит личную модерацию.
+async function stageGroupMedia(msg, env, adminIds) {
+ const groupId = String(env.TELEGRAM_REVIEW_GROUP_ID || "").trim();
+ if (!groupId || String(msg.chat && msg.chat.id) !== groupId || !env.REVIEWS) return;
+ const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
+ const video = msg.video || null;
+ if (!photo && !video) return;
+ const id = String(msg.chat.id) + "_" + String(msg.message_id);
+ if (await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) return;
+ const key = "import_pending:" + id;
+ let state = JSON.parse(await env.REVIEWS.get(key) || "null");
+ if (!state || !state.post) {
+  state = {type:"group_media",post:{...msg,sourceType:"group"},notified:{}};
+  await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
+ }
+ const keyboard = {inline_keyboard:[[{text:"⭐ Передать в модерацию отзывов",callback_data:"imp:review:" + id}]]};
+ for (const adminId of adminIds) {
+  const status = state.notified[String(adminId)] || {mediaSent:false,cardSent:false};
+  if (!status.mediaSent) {
+   await callTelegram(env,video ? "sendVideo" : "sendPhoto",{chat_id:adminId,[video ? "video" : "photo"]:(video ? video.file_id : photo.file_id)});
+   status.mediaSent = true;
+   state.notified[String(adminId)] = status;
+   await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
+  }
+  if (!status.cardSent) {
+   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Медиа из группы отзывов. Выберите, передавать ли его на модерацию сайта.\n\n" + String(msg.caption || "").slice(0,1000),reply_markup:keyboard});
+   status.cardSent = true;
+   state.notified[String(adminId)] = status;
+   await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
+  }
+ }
+}
+
 async function handleCarCallback(callback, env, adminIds) {
  const answer = (text, alert=false) => callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
  const fromId = String((callback.from && callback.from.id) || "");
@@ -211,30 +301,63 @@ async function handleCarCallback(callback, env, adminIds) {
  return answer("Автомобиль опубликован на сайте");
 }
 // --- Заявки с сайта: карточка администраторам, кнопка «Принять в работу», ответ клиенту в Telegram ---
+function formatOrderPrivate(order) {
+ return ["🔐 Данные заявки №"+order.number,"Статус: "+order.status,"Имя: "+order.name,"Контакт: "+order.contact,"Telegram ID: "+(order.telegramId||"не привязан"),"Telegram: "+(order.username?"@"+order.username:"не указан"),"Марка / модель: "+(order.model||"не указано"),"Бюджет: "+(order.budget||"не указан"),"Страна: "+(order.country||"не указана"),"Год от: "+(order.year||"не указан"),"Тема: "+(order.purpose||"Подбор автомобиля"),"Пожелания: "+(order.details||"нет"),"Создана: "+order.createdAt].join("\n");
+}
 async function handleOrderCallback(callback, env, adminIds) {
- const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
- const fromId = String((callback.from && callback.from.id) || "");
- if (!adminIds.includes(fromId)) return answer("Нет доступа", true);
- const match = String(callback.data || "").match(/^ord:([0-9a-f]{16})$/);
- if (!match || !env.REVIEWS) return answer("Заявка не найдена", true);
- const raw = await env.REVIEWS.get(`order:${match[1]}`);
- if (!raw) return answer("Заявка не найдена", true);
- const order = JSON.parse(raw);
- if (order.status === "in_work") return answer("Заявка уже принята в работу");
- order.status = "in_work";
- order.acceptedBy = fromId;
- order.acceptedAt = new Date().toISOString();
- await env.REVIEWS.put(`order:${order.id}`, JSON.stringify(order));
- if (callback.message) {
-  await callTelegram(env, "editMessageReplyMarkup", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => null);
+ const answer=(text,alert=false)=>callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
+ const fromId=String((callback.from&&callback.from.id)||"");
+ if(!adminIds.includes(fromId))return answer("Нет доступа",true);
+ const data=String(callback.data||""),match=data.match(/^ord:(\d+|[0-9a-f]{16}|[0-9a-f]{32})$/i),detail=data.match(/^ordinfo:(\d+|[0-9a-f]{16}|[0-9a-f]{32})$/i);
+ if((!match&&!detail)||!env.REVIEWS)return answer("Заявка не найдена",true);
+ const number=(match||detail)[1],raw=await env.REVIEWS.get((/^[0-9a-f]{16}$/i.test(number)?"order:":"order_no:")+number);
+ if(!raw)return answer("Заявка не найдена",true);
+ const order=JSON.parse(raw);
+ const targetChat=callback.message&&callback.message.chat;
+ if(!targetChat||targetChat.type!=="private"||String(targetChat.id)!==fromId)return answer("Откройте карточку в личном чате с ботом. Данные не отправлены.",true);
+ if(detail){await callTelegram(env,"sendMessage",{chat_id:fromId,text:formatOrderPrivate(order)});return answer("Данные отправлены только вам");}
+ if(order.status==="done")return answer("Заявка уже завершена");
+ if(order.status!=="in_work"){
+  order.status="in_work";order.acceptedBy=fromId;order.acceptedAt=new Date().toISOString();
+  await env.REVIEWS.put("order_no:"+number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
+  if(callback.message)await callTelegram(env,"editMessageReplyMarkup",{chat_id:callback.message.chat.id,message_id:callback.message.message_id,reply_markup:{inline_keyboard:[[{text:"🔐 Данные клиента",callback_data:"ordinfo:"+number},{text:"🏁 Завершить",callback_data:"orddone:"+number}]]}});
  }
- if (order.chatId) {
-  await callTelegram(env, "sendMessage", { chat_id: order.chatId, text: "Ваша заявка принята в работу. С вами свяжутся в этом чате." });
-  return answer("Принято. Клиент получил сообщение.");
+ // If Telegram failed after the status was saved, a repeated callback retries this notification.
+ if(order.chatId&&!order.acceptanceNotifiedAt){
+  await callTelegram(env,"sendMessage",{chat_id:order.chatId,text:"Ваша заявка №"+(order.number||number)+" принята в работу. С вами свяжутся в этом чате."});
+  order.acceptanceNotifiedAt=new Date().toISOString();
+  await env.REVIEWS.put("order_no:"+number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
  }
- return answer("Принято. Клиент ещё не открыл бота по ссылке с сайта, поэтому сообщение не отправлено.", true);
+ return answer(order.acceptanceNotifiedAt?"Заявка принята в работу":"Заявка принята; Telegram клиента ещё не подключён");
+}
+async function handleOrderDoneCallback(callback,env,adminIds){
+ const answer=(text,alert=false)=>callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
+ const fromId=String((callback.from&&callback.from.id)||"");if(!adminIds.includes(fromId))return answer("Нет доступа",true);
+ const m=String(callback.data||"").match(/^orddone:(\d+)$/);if(!m||!env.REVIEWS)return answer("Заявка не найдена",true);
+ const raw=await env.REVIEWS.get("order_no:"+m[1]);if(!raw)return answer("Заявка не найдена",true);
+ const targetChat=callback.message&&callback.message.chat;if(!targetChat||targetChat.type!=="private"||String(targetChat.id)!==fromId)return answer("Откройте карточку в личном чате с ботом. Статус не изменён.",true);const order=JSON.parse(raw);if(order.status==="done")return answer("Заявка уже завершена");order.status="done";order.completedAt=new Date().toISOString();
+ await env.REVIEWS.put("order_no:"+order.number,JSON.stringify(order));await env.REVIEWS.put("order:"+order.id,JSON.stringify(order));
+ if(callback.message)await callTelegram(env,"editMessageReplyMarkup",{chat_id:callback.message.chat.id,message_id:callback.message.message_id,reply_markup:{inline_keyboard:[]}});
+ return answer("Заявка завершена");
 }
 
+async function readBodyLimited(request, maxBytes) {
+ const reader = request.body && request.body.getReader ? request.body.getReader() : null;
+ if (!reader) return "";
+ const chunks = []; let total = 0;
+ try {
+  while (true) {
+   const part = await reader.read();
+   if (part.done) break;
+   total += part.value.byteLength;
+   if (total > maxBytes) { await reader.cancel(); throw new Error("BODY_TOO_LARGE"); }
+   chunks.push(part.value);
+  }
+ } finally { try { reader.releaseLock(); } catch {} }
+ const merged = new Uint8Array(total); let offset = 0;
+ for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.byteLength; }
+ return new TextDecoder("utf-8", {fatal:true}).decode(merged);
+}
 export default {
  async fetch(request, env) {
   const url = new URL(request.url);
@@ -258,14 +381,31 @@ export default {
    if (!env.TELEGRAM_BOT_TOKEN || adminIds.length === 0) {
     return new Response("Bot configuration missing", { status: 503 });
    }
+   const webhookLength = Number(request.headers.get("content-length") || 0);
+   if (webhookLength > 65536) return new Response("Payload Too Large", { status: 413 });
+   let webhookRaw;
+   try { webhookRaw = await readBodyLimited(request,65536); } catch (e) { return new Response(e && e.message === "BODY_TOO_LARGE" ? "Payload Too Large" : "Bad Request", { status: e && e.message === "BODY_TOO_LARGE" ? 413 : 400 }); }
+   if (new TextEncoder().encode(webhookRaw).byteLength > 65536) return new Response("Payload Too Large", { status: 413 });
    let update;
-   try { update = await request.json(); } catch {
+   try { update = JSON.parse(webhookRaw); } catch {
     return new Response("Bad Request", { status: 400 });
    }
+   if (!update || typeof update !== "object" || Array.isArray(update)) return new Response("Bad Request", { status: 400 });
    if (update.callback_query) {
     const cb = update.callback_query;
+    const callbackChat = cb.message && cb.message.chat;
+    const callbackUserId = String((cb.from && cb.from.id) || "");
+    if (!adminIds.includes(callbackUserId)) {
+     try { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "Нет доступа", show_alert: true }); } catch {}
+     return Response.json({ ok: true });
+    }
+    if (!callbackChat || callbackChat.type !== "private" || String(callbackChat.id) !== callbackUserId) {
+     try { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "Административные кнопки доступны только в личном чате с ботом.", show_alert: true }); } catch {}
+     return Response.json({ ok: true });
+    }
     try {
-     if (String(cb.data || "").startsWith("ord:")) await handleOrderCallback(cb, env, adminIds);
+     if (String(cb.data || "").startsWith("ord:") || String(cb.data || "").startsWith("ordinfo:")) await handleOrderCallback(cb, env, adminIds);
+      else if (String(cb.data || "").startsWith("orddone:")) await handleOrderDoneCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("imp:")) await handleImportChoice(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("car")) await handleCarCallback(cb, env, adminIds);
      else await handleReviewCallback(cb, env, adminIds);
@@ -278,7 +418,10 @@ export default {
    if (!msg || !msg.chat || !msg.chat.id) return Response.json({ ok: true });
    // Groups/channels: only the one review group, only /review messages. Everything else is ignored.
    if (msg.chat.type !== "private") {
-    try { await handleReviewSubmission(msg, env, adminIds); } catch { return new Response("Telegram processing failed", { status: 502 }); }
+    try {
+     if (adminIds.includes(String((msg.from && msg.from.id) || ""))) await stageGroupMedia(msg, env, adminIds);
+     await handleReviewSubmission(msg, env, adminIds);
+    } catch { return new Response("Telegram processing failed", { status: 502 }); }
     return Response.json({ ok: true });
    }
    const chatId = String(msg.chat.id);
@@ -291,25 +434,33 @@ export default {
      body: JSON.stringify(payload)
     });
     if (!response.ok) throw new Error("Telegram API request failed");
-    return response.json();
+    const result = await response.json();
+    if (!result || result.ok !== true) throw new Error("Telegram API rejected the request");
+    return result;
    };
    const send = (target, body) => api("sendMessage", {
     chat_id: target, text: body, disable_web_page_preview: true
    });
    try {
+    if (await handleAdminMediaUpload(msg, env, adminIds)) return Response.json({ok:true});
     // /myid returns only the sender's own numeric Telegram ID for safe admin configuration.
     if (/^\/myid(?:@\w+)?$/i.test(text)) {
      await send(chatId, "Ваш Telegram ID: " + chatId + "\nПередайте этот номер владельцу настройки TELEGRAM_ADMIN_IDS. Не отправляйте токен бота.");
     } else if (adminIds.includes(chatId) && msg.reply_to_message) {
      const repliedText = String(msg.reply_to_message.text || msg.reply_to_message.caption || "");
      const orderMatch = repliedText.match(/Заявка:\s*([0-9a-f]{16})/i);
-     if (orderMatch && env.REVIEWS) {
-      const rawOrder = await env.REVIEWS.get("order:" + orderMatch[1]);
+     const orderNumberMatch = repliedText.match(/Заявка\s*№\s*(\d+)/i);
+     if ((orderMatch || orderNumberMatch) && env.REVIEWS) {
+      const rawOrder = await env.REVIEWS.get(orderNumberMatch ? "order_no:" + orderNumberMatch[1] : "order:" + orderMatch[1]);
       if (rawOrder) {
        const order = JSON.parse(rawOrder);
        if (order.chatId) {
-        await send(order.chatId, text || " ");
-        await send(chatId, "Ответ отправлен клиенту по заявке " + order.id + ".");
+        if (!text.trim()) {
+         await send(chatId, "Ответ пустой. Напишите текст сообщения клиенту и отправьте его ещё раз.");
+        } else {
+         await send(order.chatId, text.trim());
+         await send(chatId, "Ответ отправлен клиенту по заявке " + order.id + ".");
+        }
        } else {
         await send(chatId, "У клиента нет подключённого Telegram. Свяжитесь с ним по контакту из заявки: " + order.contact);
        }
@@ -336,17 +487,32 @@ export default {
       await send(match[1], match[2]);
       await send(chatId, "Ответ отправлен.");
      }
-    } else if (/^\/start order_[0-9a-f]{16}$/.test(text)) {
-     // Клиент открыл бота по ссылке с сайта: привязываем его чат к заявке.
-     const orderId = text.slice("/start order_".length);
-     const raw = env.REVIEWS ? await env.REVIEWS.get(`order:${orderId}`) : null;
+    } else if (/^\/start order_[0-9a-f]{64}$/.test(text)) {
+     // Одноразовый bearer-токен: 256 бит случайности, срок действия 7 дней.
+     const bindToken = text.slice("/start order_".length);
+     const tokenKey = `bind_token:${bindToken}`;
+     const orderId = env.REVIEWS ? await env.REVIEWS.get(tokenKey) : null;
+     const raw = orderId ? await env.REVIEWS.get(`order:${orderId}`) : null;
      if (!raw) {
-      await send(chatId, "Заявка не найдена. Оставьте её на сайте ещё раз.");
+      await send(chatId, "Ссылка недействительна или уже использована. Оставьте заявку на сайте ещё раз.");
      } else {
       const order = JSON.parse(raw);
-      order.chatId = chatId;
-      await env.REVIEWS.put(`order:${orderId}`, JSON.stringify(order));
-      await send(chatId, "Спасибо! Ваша заявка получена. С вами свяжутся в этом чате.");
+      const senderId = String((msg.from && msg.from.id) || "");
+      if (!senderId || senderId !== chatId) {
+       await send(chatId, "Не удалось подтвердить личный Telegram-чат. Откройте ссылку из личного чата с ботом.");
+      } else if (order.telegramId && String(order.telegramId) !== senderId) {
+       await send(chatId, "К заявке уже привязан другой Telegram-аккаунт. Свяжитесь с менеджером.");
+      } else {
+       order.chatId = chatId;
+       order.telegramId = senderId;
+       order.username = msg.from && msg.from.username ? String(msg.from.username).slice(0, 64) : null;
+       await env.REVIEWS.put(`order:${orderId}`, JSON.stringify(order));
+       await env.REVIEWS.put(`order_no:${order.number}`, JSON.stringify(order));
+       // Keep the one-time token until both order indexes are saved and the confirmation is sent.
+       // If a KV write or Telegram send fails, Telegram can retry this update using the same token.
+       await send(chatId, "Спасибо! Ваш Telegram подключён к заявке. С вами свяжутся в этом чате.");
+       await env.REVIEWS.delete(tokenKey);
+      }
      }
     } else if (text === "/start" || text.startsWith("/start ")) {
      await send(chatId, "Здравствуйте! Это AVTOY KOREA 🚘\n\nПомогаем с подбором автомобилей из Кореи, Китая и ОАЭ.\n\nКоманды:\n/countries — страны покупки\n/catalog — как проходит подбор\n/contact — оставить заявку\n/help — помощь\n\nНапишите, какой автомобиль ищете, и мы передадим запрос менеджеру.");
@@ -365,8 +531,31 @@ export default {
     } else if (text && !adminIds.includes(chatId)) {
      const who = String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано");
      const notice = "📩 Сообщение боту AVTOY KOREA\nОт: " + who + "\nChat ID: " + chatId + "\n\n" + text.slice(0, 3500) + "\n\nОтветить: /reply " + chatId + " текст сообщения";
-     await Promise.all(adminIds.map(id => send(id, notice)));
-     await send(chatId, "Спасибо! Ваше сообщение передано менеджеру. Мы ответим, как только сможем.");
+     // Persist each successful admin delivery so webhook retries skip completed recipients.
+     // Without update_id and message_id there is no safe key: deliver without deduplication instead of dropping later messages.
+     const hasUpdateId = update.update_id !== undefined && update.update_id !== null;
+     const hasMessageId = msg.message_id !== undefined && msg.message_id !== null;
+     const deliveryId = hasUpdateId ? String(update.update_id) : (hasMessageId ? chatId + "_" + String(msg.message_id) : null);
+     const deliveryKey = deliveryId ? "webhook_delivery:" + deliveryId : null;
+     const canPersist = Boolean(deliveryKey && env.REVIEWS);
+     let deliveryState = canPersist ? await env.REVIEWS.get(deliveryKey) : null;
+     deliveryState = deliveryState ? JSON.parse(deliveryState) : { deliveredAdminIds: [], clientThanked: false };
+     const deliveredAdmins = new Set((deliveryState.deliveredAdminIds || []).map(String));
+     for (const id of adminIds) {
+      if (deliveredAdmins.has(String(id))) continue;
+      await send(id, notice);
+      deliveredAdmins.add(String(id));
+      if (canPersist) {
+       deliveryState.deliveredAdminIds = [...deliveredAdmins];
+       await env.REVIEWS.put(deliveryKey, JSON.stringify(deliveryState), { expirationTtl: 604800 });
+      }
+     }
+     // Thank-you is sent once per update: a retry after a failed admin delivery must not repeat it.
+     if (!deliveryState.clientThanked) {
+      await send(chatId, "Спасибо! Ваше сообщение передано менеджеру. Мы ответим, как только сможем.");
+      deliveryState.clientThanked = true;
+      if (canPersist) await env.REVIEWS.put(deliveryKey, JSON.stringify(deliveryState), { expirationTtl: 604800 });
+     }
     } else if (text && adminIds.includes(chatId)) {
      await send(chatId, "Для ответа клиенту используйте: /reply CHAT_ID текст сообщения\nChat ID клиента указан в уведомлении.");
     }
@@ -376,46 +565,67 @@ export default {
    return Response.json({ ok: true });
   }
   if (request.method === "POST" && url.pathname === "/api/request") {
+   const headers = {"cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"no-referrer"};
+   const fail = (status,error) => Response.json({ok:false,error},{status,headers});
+   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
+   if (!contentType.startsWith("application/json")) return fail(415,"Ожидается JSON");
+   const declaredLength = Number(request.headers.get("content-length") || 0);
+   if (declaredLength > 12000) return fail(413,"Слишком большой запрос");
+   let raw;
+   try { raw = await readBodyLimited(request,12000); } catch (e) { return e && e.message === "BODY_TOO_LARGE" ? fail(413,"Слишком большой запрос") : fail(400,"Некорректные данные"); }
+   if (new TextEncoder().encode(raw).byteLength > 12000) return fail(413,"Слишком большой запрос");
    let d;
-   try { d = await request.json(); } catch { return Response.json({ok:false,error:"Некорректные данные"},{status:400}); }
+   try { d = JSON.parse(raw); } catch { return fail(400,"Некорректные данные"); }
+   if (!d || typeof d !== "object" || Array.isArray(d)) return fail(400,"Некорректный формат данных");
+   const limits = {name:100,contact:150,model:150,budget:100,country:80,year:30,purpose:100,details:1000};
+   for (const [key,limit] of Object.entries(limits)) {
+    if (d[key] !== undefined && d[key] !== null && typeof d[key] !== "string") return fail(400,"Некорректное поле: "+key);
+    if (typeof d[key] === "string" && d[key].length > limit * 4) return fail(400,"Слишком длинное поле: "+key);
+   }
    const clean = (v,n=500) => String(v||"").replace(/[<>]/g,"").trim().slice(0,n);
    const f = {name:clean(d.name,100),contact:clean(d.contact,150),model:clean(d.model,150),budget:clean(d.budget,100),country:clean(d.country,80),year:clean(d.year,30),purpose:clean(d.purpose,100),details:clean(d.details,1000)};
    if (!f.name || !f.contact) return Response.json({ok:false,error:"Укажите имя и контакт для связи."},{status:400});
    const message = ["🚘 Новая заявка AVTOY KOREA","",`Имя: ${f.name}`,`Контакт: ${f.contact}`,`Марка / модель: ${f.model||"не указано"}`,`Бюджет: ${f.budget||"не указан"}`,`Страна: ${f.country||"не указана"}`,`Год от: ${f.year||"не указан"}`,`Тема обращения: ${f.purpose||"Подбор автомобиля"}`,`Пожелания: ${f.details||"нет"}`].join("\n");
-   if (!env.TELEGRAM_BOT_TOKEN || adminIds.length < 1) {
-    return Response.json({ok:false,error:"Не настроен получатель заявок. Сообщите администратору сайта."},{status:503});
+   if (!env.TELEGRAM_BOT_TOKEN || adminIds.length < 1 || !env.REVIEWS) {
+    return Response.json({ok:false,error:"Система учёта заявок временно недоступна. Попробуйте позже."},{status:503});
    }
-   if (env.REVIEWS) {
-    const orderId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    await env.REVIEWS.put(`order:${orderId}`, JSON.stringify({ id: orderId, ...f, status: "new", chatId: null, createdAt: new Date().toISOString() }));
-    const cardText = message + "\n\nЗаявка: " + orderId;
-    const keyboard = { inline_keyboard: [[{ text: "✅ Принять в работу", callback_data: `ord:${orderId}` }]] };
-    const deliveries = await Promise.all(adminIds.map(async chat_id => {
-     try {
-      const payload = await callTelegram(env, "sendMessage", { chat_id, text: cardText, reply_markup: keyboard });
-      return Boolean(payload && payload.ok === true);
-     } catch {
-      return false;
-     }
-    }));
-    if (deliveries.some(ok => !ok)) return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
-    const botUser = String(env.TELEGRAM_BOT_USERNAME || "").replace(/^@/, "");
-    return Response.json({ok:true, orderId, botLink: botUser ? `https://t.me/${botUser}?start=order_${orderId}` : null});
+   const requestKey=String(request.headers.get("idempotency-key")||"").trim();
+   if(!/^[a-f0-9-]{36}$/i.test(requestKey))return fail(400,"Не удалось проверить повторную отправку. Обновите страницу и попробуйте ещё раз.");
+   const idemKey="request_idem:"+requestKey;
+   let idemRaw=await env.REVIEWS.get(idemKey);
+   let idem=idemRaw?JSON.parse(idemRaw):null;
+   let order,orderId,orderNumber,bindToken;
+   if(idem){
+    orderId=idem.orderId;orderNumber=idem.orderNumber;bindToken=idem.bindToken;
+    const saved=await env.REVIEWS.get("order:"+orderId);
+    if(!saved)return fail(409,"Состояние заявки не удалось восстановить. Свяжитесь с менеджером.");
+    order=JSON.parse(saved);
+    if(idem.payloadHash!==JSON.stringify(f))return fail(409,"Ключ отправки уже использован для другой заявки. Обновите страницу.");
+   }else{
+    orderId=crypto.randomUUID().replace(/-/g,"").slice(0,16);
+    bindToken=crypto.randomUUID().replace(/-/g,"")+crypto.randomUUID().replace(/-/g,"");
+    // Random suffix reduces collisions; KV is not an atomic lock.
+    orderNumber=String(Date.now())+String(crypto.getRandomValues(new Uint32Array(1))[0]).padStart(10,"0");
+    order={id:orderId,number:orderNumber,...f,status:"new",chatId:null,telegramId:null,username:null,createdAt:new Date().toISOString()};
+    idem={orderId,orderNumber,bindToken,payloadHash:JSON.stringify(f),deliveredAdminIds:[]};
+    await env.REVIEWS.put("order:"+orderId,JSON.stringify(order));
+    await env.REVIEWS.put("order_no:"+orderNumber,JSON.stringify(order));
+    await env.REVIEWS.put("bind_token:"+bindToken,orderId,{expirationTtl:604800});
+    await env.REVIEWS.put(idemKey,JSON.stringify(idem),{expirationTtl:604800});
    }
-   if (env.TELEGRAM_BOT_TOKEN && adminIds.length) {
-    const deliveries = await Promise.all(adminIds.map(async chat_id => {
-     try {
-      const r = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id,text:message})});
-      const payload = await r.json().catch(() => null);
-      return r.ok && payload && payload.ok === true;
-     } catch {
-      return false;
-     }
-    }));
-    if (deliveries.some(ok => !ok)) return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
-    return Response.json({ok:true});
+   const cardText=["🚘 Новая заявка №"+orderNumber,"Модель: "+(f.model||"не указано"),"Бюджет: "+(f.budget||"не указан"),"Страна: "+(f.country||"не указана"),"Тема: "+(f.purpose||"Подбор автомобиля"),"Статус: "+order.status,"","Личные данные доступны администратору по кнопке.", "Заявка: " + orderId].join("\n");
+   const keyboard={inline_keyboard:[[{text:"✅ Принять в работу",callback_data:"ord:"+orderNumber},{text:"🔐 Данные клиента",callback_data:"ordinfo:"+orderNumber}]]};
+   const delivered=new Set((idem.deliveredAdminIds||[]).map(String));
+   for(const chat_id of adminIds){
+    if(delivered.has(String(chat_id)))continue;
+    try{
+     const payload=await callTelegram(env,"sendMessage",{chat_id,text:cardText,reply_markup:keyboard});
+     if(payload&&payload.ok===true){delivered.add(String(chat_id));idem.deliveredAdminIds=[...delivered];await env.REVIEWS.put(idemKey,JSON.stringify(idem),{expirationTtl:604800});}
+    }catch{}
    }
-   return Response.json({ok:false,error:"Не настроена доставка заявок. Сообщите администратору сайта."},{status:503});
+   if(adminIds.some(id=>!delivered.has(String(id))))return fail(503,"Заявка №"+orderNumber+" сохранена. Уведомление доставлено не всем администраторам. Нажмите «Отправить заявку» ещё раз — повторно отправим только недоставленные уведомления.");
+   const botUser=String(env.TELEGRAM_BOT_USERNAME||"").replace(/^@/,"");
+   return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+bindToken:null},{headers});
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
    const cars = [];
@@ -604,6 +814,110 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
   .field.full{grid-column:auto}
   .form-foot .btn{width:100%}
 }
+
+/* AVTOY KOREA responsive tile refresh — phone, tablet and desktop */
+:root{--max:1240px;--surface:#11151c;--surface-2:#171c25;--line:#2a303b;--muted:#aeb6c3}
+body{background:radial-gradient(ellipse at 82% 5%,#1c2734 0,transparent 34%),var(--bg)}
+.wrap{width:min(var(--max),calc(100% - 48px))}
+.topbar{background:rgba(8,10,14,.92);border-bottom-color:#ffffff18}
+.nav{min-height:76px}
+.brand{font-size:20px;letter-spacing:.14em}
+.nav-links{gap:22px}
+.hero{grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);gap:clamp(28px,5vw,72px);padding:clamp(48px,7vw,92px) 0 70px}
+.hero h1{font-size:clamp(48px,6vw,82px);line-height:.99}
+.photo{aspect-ratio:16/11;min-height:0;border-radius:30px;border-color:#ffffff20;box-shadow:0 28px 90px #0009}
+.section{padding:76px 0}
+.steps,.cars,.reviews{gap:18px}
+.card{background:linear-gradient(145deg,#171c25,#101319);border-color:#ffffff16;border-radius:22px;box-shadow:0 12px 34px #0002;transition:transform .2s,border-color .2s,box-shadow .2s}
+.card:hover{transform:translateY(-3px);border-color:#ff654d70;box-shadow:0 18px 42px #0005}
+.steps .card{min-height:194px;padding:25px}
+.steps .card h3{font-size:19px;line-height:1.25}
+.steps .card p{font-size:14px}
+.get{background:linear-gradient(120deg,#151b24,#101319);border-color:#ffffff18;border-radius:22px}
+.form-card{background:linear-gradient(145deg,#171c25,#101319);border-color:#ffffff1c;box-shadow:0 22px 70px #0005}
+.field input,.field textarea,.field select{background:#0b0e13;border-color:#343c49;min-height:50px}
+.field textarea{min-height:110px}
+.telegram-promo{background:linear-gradient(125deg,#0c1d2c,#111b29 65%,#191d27);border-color:#ffffff20}
+footer{border-top-color:#ffffff18}
+:focus-visible{outline:3px solid #ff735e;outline-offset:3px}
+@media(min-width:781px) and (max-width:1100px){
+ .wrap{width:calc(100% - 40px)}
+ .nav-links{gap:14px;font-size:14px}
+ .pill{padding:11px 15px;font-size:14px}
+ .hero{gap:28px;padding:58px 0}
+ .hero h1{font-size:clamp(44px,5.5vw,64px)}
+ .steps{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .cars,.reviews{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .form-card{gap:28px;padding:34px}
+}
+@media(max-width:780px){
+ .wrap{width:calc(100% - 32px)}
+ .nav{min-height:66px;gap:10px}
+ .brand{font-size:16px;letter-spacing:.11em}
+ .brand small{letter-spacing:.18em}
+ .nav-links{gap:0}
+ .pill{padding:10px 13px;font-size:12px;white-space:nowrap}
+ .hero{grid-template-columns:minmax(0,1fr);gap:22px;padding:30px 0 28px}
+ .hero h1{font-size:clamp(42px,10vw,58px);margin:14px 0 16px}
+ .intro{font-size:16px;line-height:1.55}
+ .photo{width:100%;aspect-ratio:16/10;min-height:0;border-radius:22px}
+ .hero-caption{left:16px;right:16px;bottom:16px;font-size:14px}
+ .hero-dots{right:17px;bottom:21px}
+ .actions{display:grid;grid-template-columns:1fr;gap:10px;margin-top:22px}
+ .btn{width:100%;min-height:50px;padding:14px 18px;border-radius:14px;font-size:15px}
+ .section{padding:48px 0}
+ h2{font-size:clamp(25px,6.5vw,34px);line-height:1.12}
+ .sub{font-size:14px;line-height:1.55;margin-bottom:22px}
+ .steps{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+ .steps .card{min-height:0;padding:16px 14px;border-radius:17px}
+ .steps .card .num{font-size:22px}
+ .steps .card h3{font-size:15px;line-height:1.25;margin:9px 0 6px}
+ .steps .card p{font-size:12px;line-height:1.48}
+ .get{grid-template-columns:1fr;padding:18px;border-radius:18px;gap:12px;margin-top:12px}
+ .get-title{font-size:16px}
+ .get ul{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:0;list-style:none;font-size:12px;line-height:1.4}
+ .get li{background:#0b0e13;border:1px solid var(--line);border-radius:12px;padding:11px}
+ .cars,.reviews{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+ .car-card{padding:0;min-height:0}
+ .car-body{padding:13px}
+ .car-body h3{font-size:14px;line-height:1.3;margin:0 0 7px}
+ .car-specs{display:block!important;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+ .car-link{display:inline-block;margin-top:10px;font-size:12px}
+ .review-media{height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:12px}
+ .reviews>article{padding:13px;border-radius:17px}
+ .review-name{font-size:12px;margin-top:9px}
+ .review-text{font-size:12px;line-height:1.5}
+ .form-card{grid-template-columns:minmax(0,1fr);gap:18px;padding:20px;border-radius:21px}
+ .form-card h2{font-size:28px}
+ .form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+ .field.full{grid-column:1/-1}
+ .field{font-size:12px}
+ .field input,.field textarea,.field select{padding:13px;font-size:16px;min-height:48px}
+ .form-foot{display:grid;grid-template-columns:1fr;gap:10px}
+ .form-foot .btn{width:100%}
+ .telegram-promo{grid-template-columns:minmax(0,1fr);text-align:center;padding:22px 18px;gap:17px;border-radius:21px}
+ .telegram-promo-qr{width:164px;grid-row:1}
+ .footer-row{justify-content:center;text-align:center}
+}
+@media(max-width:420px){
+ .wrap{width:calc(100% - 26px)}
+ .brand{font-size:14px}
+ .brand small{font-size:7px}
+ .pill{font-size:11px;padding:9px 10px}
+ .steps,.cars,.reviews{gap:8px}
+ .steps .card{padding:14px 11px}
+ .steps .card h3{font-size:14px}
+ .steps .card p{font-size:11px}
+ .get ul{font-size:11px}
+ .form-grid{grid-template-columns:minmax(0,1fr)}
+ .field.full{grid-column:auto}
+ .telegram-promo-qr{width:148px}
+}
+@media(max-width:340px){
+ .steps,.cars,.reviews{grid-template-columns:minmax(0,1fr)}
+ .nav .pill{white-space:normal;text-align:center}
+}
+
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 </style>
 </head>
@@ -746,7 +1060,17 @@ function showFormStatus(message,isError){
 form.addEventListener('submit',async function(e){
  e.preventDefault();
  const b=document.getElementById('submit-btn');
- const data=Object.fromEntries(new FormData(form).entries());
+ const entered=Object.fromEntries(new FormData(form).entries());
+ let pending=null;
+ try{pending=JSON.parse(sessionStorage.getItem('avtoy_pending_request')||'null')}catch{}
+ if(pending&&pending.key&&pending.payload&&JSON.stringify(pending.payload)===JSON.stringify(entered)){
+  window.requestIdempotencyKey=pending.key;
+ }else{
+  window.requestIdempotencyKey=crypto.randomUUID();
+  pending={key:window.requestIdempotencyKey,payload:entered};
+  try{sessionStorage.setItem('avtoy_pending_request',JSON.stringify(pending))}catch{}
+ }
+ const data=pending.payload||entered;
  if(!String(data.name||'').trim()||!String(data.contact||'').trim()){
   showFormStatus('Заполните имя и телефон или Telegram для связи.',true);
   return;
@@ -755,7 +1079,7 @@ form.addEventListener('submit',async function(e){
  b.textContent='Отправляем…';
  showFormStatus('Отправляем заявку администраторам…',false);
  try{
-  const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify(data)});
+  const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json','accept':'application/json','idempotency-key':window.requestIdempotencyKey},body:JSON.stringify(data)});
   const raw=await r.text();
   let x;
   try{x=JSON.parse(raw)}catch{x={ok:false,error:'Сервер вернул некорректный ответ. Попробуйте позже.'}}
@@ -766,6 +1090,8 @@ form.addEventListener('submit',async function(e){
   }else{
    showFormStatus('Заявка доставлена администраторам. Спасибо! Свяжемся с вами по указанному контакту.',false);
    form.reset();
+   window.requestIdempotencyKey=null;
+   try{sessionStorage.removeItem('avtoy_pending_request')}catch{}
    if(x.botLink){
     const a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';
     statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a);

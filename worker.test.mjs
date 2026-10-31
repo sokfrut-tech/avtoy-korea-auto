@@ -39,6 +39,29 @@ async function withTelegramMock(run) {
   }
 }
 
+test("Telegram HTTP 200 with ok:false is treated as a failed send", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      calls.push(new URL(String(input)).pathname.split("/").pop());
+      return Response.json({ ok: false, description: "bot was blocked by the user" });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const response = await worker.fetch(webhook({
+      chat: { id: 333333333, type: "private" },
+      from: { id: 333333333, first_name: "Tester" },
+      text: "/start",
+    }), env);
+    assert.equal(response.status, 502);
+    assert.deepEqual(calls, ["sendMessage"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("/myid returns the private sender numeric ID and does not notify admins", async () => {
   await withTelegramMock(async calls => {
     const response = await worker.fetch(webhook({
@@ -89,10 +112,10 @@ test("website requests are delivered to every personal admin ID", async () => {
   await withTelegramMock(async calls => {
     const request = new Request("https://worker.test/api/request", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "idempotency-key": "11111111-2222-4333-8444-555555555555" },
       body: JSON.stringify({ name: "Тест", contact: "@test", model: "Kia" }),
     });
-    const response = await worker.fetch(request, env);
+    const response = await worker.fetch(request, reviewEnv(memoryKV()));
     assert.equal(response.status, 200);
     assert.deepEqual(
       calls.map(call => String(call.payload.chat_id)).sort(),
@@ -101,6 +124,61 @@ test("website requests are delivered to every personal admin ID", async () => {
   });
 });
 
+
+
+test("website order receives a number and sends a privacy-safe card with admin controls", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const response=await worker.fetch(new Request("https://worker.test/api/request",{method:"POST",headers:{"content-type":"application/json","idempotency-key":"22222222-2222-4222-8222-222222222222"},body:JSON.stringify({name:"Client Name",contact:"+79990000000",model:"Kia"})}),reviewEnv(kv));
+  assert.equal(response.status,200);
+  const body=await response.json();
+  assert.ok(body.orderNumber);
+  const saved=JSON.parse(await kv.get("order_no:"+body.orderNumber));
+  assert.equal(saved.contact,"+79990000000");
+  const cards=calls.filter(c=>c.method==="sendMessage" && ["111111111","222222222"].includes(String(c.payload.chat_id)));
+  assert.equal(cards.length,2);
+  assert.ok(cards[0].payload.text.includes("заявка №"+body.orderNumber));
+  assert.ok(!cards[0].payload.text.includes("+79990000000"));
+  assert.ok(cards[0].payload.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="ord:"+body.orderNumber));
+  assert.ok(cards[0].payload.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="ordinfo:"+body.orderNumber));
+ });
+});
+
+test("only an admin can request private order details; admin can accept and finish", async()=>{
+ const kv=memoryKV(), order={id:"abc123",number:"123456",name:"Private Name",contact:"+79990000000",status:"new",createdAt:"now"};
+ await kv.put("order_no:123456",JSON.stringify(order)); await kv.put("order:abc123",JSON.stringify(order));
+ await withTelegramMock(async calls=>{
+  await worker.fetch(webhookUpdate(callback(999999999,"ordinfo:123456")),reviewEnv(kv));
+  assert.ok(calls.some(c=>c.method==="answerCallbackQuery"&&c.payload.text==="Нет доступа"));
+  assert.ok(!calls.some(c=>c.method==="sendMessage"&&String(c.payload.chat_id)==="999999999"));
+  await worker.fetch(webhookUpdate(callback(111111111,"ordinfo:123456")),reviewEnv(kv));
+  assert.ok(calls.some(c=>c.method==="sendMessage"&&c.payload.text.includes("+79990000000")));
+  await worker.fetch(webhookUpdate(callback(111111111,"ord:123456")),reviewEnv(kv));
+  assert.equal(JSON.parse(await kv.get("order_no:123456")).status,"in_work");
+  await worker.fetch(webhookUpdate(callback(111111111,"orddone:123456")),reviewEnv(kv));
+  assert.equal(JSON.parse(await kv.get("order_no:123456")).status,"done");
+ });
+});
+
+
+test("order details are never sent to a group even when an admin clicks a forwarded card", async()=>{
+ const kv=memoryKV(), order={id:"abc123",number:"123456",name:"Private Name",contact:"+79990000000",status:"new",createdAt:"now"};
+ await kv.put("order_no:123456",JSON.stringify(order));
+ await withTelegramMock(async calls=>{
+  await worker.fetch(webhookUpdate(callback(111111111,"ordinfo:123456",{id:-1009876543210,type:"supergroup"})),reviewEnv(kv));
+  assert.ok(calls.some(c=>c.method==="answerCallbackQuery"&&/личном чате/.test(c.payload.text)));
+  assert.ok(!calls.some(c=>c.method==="sendMessage"&&String(c.payload.chat_id)==="-1009876543210"));
+  assert.ok(!calls.some(c=>c.method==="sendMessage"&&String(c.payload.chat_id)==="111111111"&&c.payload.text.includes("+79990000000")));
+ });
+});
+
+test("website refuses order registration when durable KV is unavailable",async()=>{
+ await withTelegramMock(async calls=>{
+  const response=await worker.fetch(new Request("https://worker.test/api/request",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:"Test",contact:"@test"})}),env);
+  assert.equal(response.status,503);
+  assert.equal(calls.length,0);
+ });
+});
 
 test("admin forwarding a channel post stages it for category choice before moderation", async () => {
   const kv = memoryKV();
@@ -262,8 +340,8 @@ function groupReview(messageId, extra) {
   return { message_id: messageId, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { first_name: "Ivan" }, ...extra };
 }
 
-function callback(fromId, data) {
-  return { callback_query: { id: "cb" + data, from: { id: fromId }, data } };
+function callback(fromId, data, chat = { id: fromId, type: "private" }) {
+  return { callback_query: { id: "cb" + data, from: { id: fromId }, data, message: { message_id: 77, chat } } };
 }
 
 test("group messages are ignored when no review group is configured", async () => {
@@ -282,6 +360,123 @@ test("only the configured review group is read, and only /review messages", asyn
     assert.equal(calls.length, 0);
     assert.equal((await kv.list({ prefix: "pending:" })).keys.length, 0);
   });
+});
+
+test("configured group media sent by an admin is routed privately to review moderation", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(webhookUpdate({ message: {
+      message_id: 81, chat: { id: Number(REVIEW_GROUP), type: "supergroup" },
+      from: { id: 111111111, first_name: "Admin" },
+      caption: "Фото автомобиля клиента", photo: [{ file_id: "SMALL" }, { file_id: "GROUP_PHOTO" }]
+    }}), reviewEnv(kv));
+    assert.equal(response.status, 200);
+    assert.ok(await kv.get("import_pending:" + REVIEW_GROUP + "_81"));
+    assert.ok(calls.some(c => c.method === "sendPhoto" && String(c.payload.chat_id) === "111111111" && c.payload.photo === "GROUP_PHOTO"));
+    assert.ok(calls.some(c => c.method === "sendMessage" && String(c.payload.chat_id) === "111111111" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:review:" + REVIEW_GROUP + "_81"));
+    assert.equal(calls.some(c => String(c.payload.chat_id) === REVIEW_GROUP), false);
+    assert.equal(calls.some(c => c.method === "sendMessage" && String(c.payload.chat_id) === "222222222" && c.payload.reply_markup), true);
+  });
+});
+
+test("group media notification retries missing admin delivery without duplicating completed sends", async () => {
+ const kv=memoryKV(), originalFetch=globalThis.fetch, calls=[];
+ let failOnce=true;
+ globalThis.fetch=async(input,init={})=>{
+  if(String(input).startsWith("https://api.telegram.org/")){
+   const method=new URL(String(input)).pathname.split("/").pop(),payload=JSON.parse(init.body||"{}");
+   if(method==="sendMessage"&&String(payload.chat_id)==="222222222"&&failOnce){failOnce=false;return Response.json({ok:false,description:"temporary failure"});}
+   calls.push({method,payload});return Response.json({ok:true,result:{}});
+  }
+  return originalFetch(input,init);
+ };
+ const update={update_id:9001,message:{message_id:82,chat:{id:Number(REVIEW_GROUP),type:"supergroup"},from:{id:111111111,first_name:"Admin"},caption:"Фото для отзыва",photo:[{file_id:"GROUP_PHOTO_RETRY"}]}};
+ try{
+  const first=await worker.fetch(webhookUpdate(update),reviewEnv(kv));
+  assert.equal(first.status,502);
+  assert.ok(await kv.get("import_pending:"+REVIEW_GROUP+"_82"));
+  const second=await worker.fetch(webhookUpdate(update),reviewEnv(kv));
+  assert.equal(second.status,200);
+  for(const adminId of ["111111111","222222222"]){
+   assert.equal(calls.filter(c=>c.method==="sendPhoto"&&String(c.payload.chat_id)===adminId&&c.payload.photo==="GROUP_PHOTO_RETRY").length,1);
+   assert.equal(calls.filter(c=>c.method==="sendMessage"&&String(c.payload.chat_id)===adminId&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="imp:review:"+REVIEW_GROUP+"_82").length,1);
+  }
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("review import keeps staged media and resumes missing admin delivery after failure", async () => {
+ const kv=memoryKV(),originalFetch=globalThis.fetch,calls=[];
+ let failOnce=true;
+ await kv.put("import_pending:"+REVIEW_GROUP+"_83",JSON.stringify({chat:{id:Number(REVIEW_GROUP),type:"supergroup"},message_id:83,sourceType:"group",caption:"Отзыв с фото",photo:[{file_id:"IMPORT_RETRY_PHOTO"}]}));
+ globalThis.fetch=async(input,init={})=>{
+  if(String(input).startsWith("https://api.telegram.org/")){
+   const method=new URL(String(input)).pathname.split("/").pop(),payload=JSON.parse(init.body||"{}");
+   if(method==="sendPhoto"&&String(payload.chat_id)==="222222222"&&failOnce){failOnce=false;return Response.json({ok:false,description:"temporary failure"});}
+   calls.push({method,payload});return Response.json({ok:true,result:{}});
+  }
+  return originalFetch(input,init);
+ };
+ try{
+  const update=webhookUpdate(callback(111111111,"imp:review:"+REVIEW_GROUP+"_83"));
+  const first=await worker.fetch(update,reviewEnv(kv));
+  assert.equal(first.status,502);
+  assert.ok(await kv.get("import_pending:"+REVIEW_GROUP+"_83"));
+  assert.ok(await kv.get("pending:"+REVIEW_GROUP+"_83"));
+  const second=await worker.fetch(webhookUpdate(callback(111111111,"imp:review:"+REVIEW_GROUP+"_83")),reviewEnv(kv));
+  assert.equal(second.status,200);
+  assert.equal(await kv.get("import_pending:"+REVIEW_GROUP+"_83"),null);
+  for(const adminId of ["111111111","222222222"]){
+   assert.equal(calls.filter(c=>c.method==="sendPhoto"&&String(c.payload.chat_id)===adminId&&c.payload.photo==="IMPORT_RETRY_PHOTO").length,1);
+   assert.equal(calls.filter(c=>c.method==="sendMessage"&&String(c.payload.chat_id)===adminId&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:"+REVIEW_GROUP+"_83").length,1);
+  }
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("admin can upload review photo directly in private bot chat for moderation", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const response=await worker.fetch(webhookUpdate({message:{message_id:88,chat:{id:111111111,type:"private"},from:{id:111111111,first_name:"Admin"},caption:"Отзыв клиента",photo:[{file_id:"SMALL"},{file_id:"DIRECT_UPLOAD"}]}}),reviewEnv(kv));
+  assert.equal(response.status,200);
+  const review=JSON.parse(await kv.get("pending:111111111_88"));
+  assert.equal(review.fileId,"DIRECT_UPLOAD");
+  assert.equal(review.text,"Отзыв клиента");
+  assert.ok(calls.some(c=>c.method==="sendMessage"&&String(c.payload.chat_id)==="111111111"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:111111111_88"));
+  await worker.fetch(webhookUpdate(callback(111111111,"pub:111111111_88")),reviewEnv(kv));
+  assert.ok(await kv.get("approved:111111111_88"));
+ });
+});
+
+test("private admin upload retries moderation card after Telegram send failure", async () => {
+ const kv=memoryKV(),originalFetch=globalThis.fetch,calls=[];
+ let failOnce=true;
+ globalThis.fetch=async(input,init={})=>{
+  if(String(input).startsWith("https://api.telegram.org/")){
+   const method=new URL(String(input)).pathname.split("/").pop(),payload=JSON.parse(init.body||"{}");
+   if(method==="sendMessage"&&failOnce){failOnce=false;return Response.json({ok:false,description:"temporary failure"});}
+   calls.push({method,payload});return Response.json({ok:true,result:{}});
+  }
+  return originalFetch(input,init);
+ };
+ const update={update_id:9902,message:{message_id:89,chat:{id:111111111,type:"private"},from:{id:111111111},photo:[{file_id:"DIRECT_RETRY"}]}};
+ try{
+  const first=await worker.fetch(webhookUpdate(update),reviewEnv(kv));
+  assert.equal(first.status,502);
+  assert.equal(JSON.parse(await kv.get("admin_upload:111111111_89")).cardSent,false);
+  const second=await worker.fetch(webhookUpdate(update),reviewEnv(kv));
+  assert.equal(second.status,200);
+  assert.equal(calls.filter(c=>c.method==="sendMessage"&&c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data==="pub:111111111_89").length,1);
+  assert.equal(JSON.parse(await kv.get("admin_upload:111111111_89")).cardSent,true);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("non-admin private media upload is not staged or forwarded to administrators", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const response=await worker.fetch(webhookUpdate({message:{message_id:90,chat:{id:333333333,type:"private"},from:{id:333333333},photo:[{file_id:"UNTRUSTED_UPLOAD"}]}}),reviewEnv(kv));
+  assert.equal(response.status,200);
+  assert.equal(await kv.get("pending:333333333_90"),null);
+  assert.equal(calls.length,0);
+ });
 });
 
 test("video review without thanks can be published after admin approval", async () => {
@@ -341,16 +536,77 @@ test("callbacks from non-admins are refused", async () => {
 });
 
 // --- Заявки с сайта ---
-function siteRequest(body) {
+function siteRequest(body, key = crypto.randomUUID()) {
   return new Request("https://worker.test/api/request", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "idempotency-key": key },
     body: JSON.stringify(body),
   });
 }
 
 const orderEnv = (kv) => ({ ...env, TELEGRAM_BOT_USERNAME: "@avtoy_test_bot", REVIEWS: kv });
 
+
+test("repeating the same website submission key reuses one order and does not resend delivered admin cards", async () => {
+  const kv = memoryKV();
+  const key = "11111111-2222-4333-8444-555555555555";
+  await withTelegramMock(async calls => {
+    const first = await worker.fetch(siteRequest({ name: "Иван", contact: "@ivan" }, key), orderEnv(kv));
+    const firstBody = await first.json();
+    assert.equal(first.status, 200);
+    const second = await worker.fetch(siteRequest({ name: "Иван", contact: "@ivan" }, key), orderEnv(kv));
+    const secondBody = await second.json();
+    assert.equal(second.status, 200);
+    assert.equal(secondBody.orderNumber, firstBody.orderNumber);
+    assert.equal((await kv.list({ prefix: "order:" })).keys.length, 1);
+    assert.equal(calls.filter(c => c.method === "sendMessage" && /заявка №/i.test(c.payload.text)).length, 2);
+  });
+});
+
+test("same website idempotency key cannot be reused for different customer data", async () => {
+  const kv = memoryKV();
+  const key = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  await withTelegramMock(async () => {
+    await worker.fetch(siteRequest({ name: "Иван", contact: "@ivan" }, key), orderEnv(kv));
+    const conflict = await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }, key), orderEnv(kv));
+    assert.equal(conflict.status, 409);
+    assert.equal((await kv.list({ prefix: "order:" })).keys.length, 1);
+  });
+});
+
+test("website lead rejects non-JSON bodies before storing or notifying", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const req=new Request("https://worker.test/api/request",{method:"POST",headers:{"content-type":"text/plain"},body:"name=bad"});
+  const res=await worker.fetch(req,orderEnv(kv));
+  assert.equal(res.status,415);
+  assert.equal((await kv.list({prefix:"order:"})).keys.length,0);
+  assert.equal(calls.length,0);
+ });
+});
+
+test("website lead rejects oversized and wrongly typed fields without side effects", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const tooLong=await worker.fetch(siteRequest({name:"A".repeat(500),contact:"+79990000000"}),orderEnv(kv));
+  assert.equal(tooLong.status,400);
+  const wrongType=await worker.fetch(siteRequest({name:["not","text"],contact:"+79990000000"}),orderEnv(kv));
+  assert.equal(wrongType.status,400);
+  assert.equal((await kv.list({prefix:"order:"})).keys.length,0);
+  assert.equal(calls.length,0);
+ });
+});
+
+test("successful website lead response includes privacy and cache headers", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async ()=>{
+  const res=await worker.fetch(siteRequest({name:"Тест",contact:"+79990000000"}),orderEnv(kv));
+  assert.equal(res.status,200);
+  assert.equal(res.headers.get("cache-control"),"no-store");
+  assert.equal(res.headers.get("x-content-type-options"),"nosniff");
+  assert.equal(res.headers.get("referrer-policy"),"no-referrer");
+ });
+});
 test("site order goes to every admin with an accept button and returns a bot link", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
@@ -358,21 +614,78 @@ test("site order goes to every admin with an accept button and returns a bot lin
     const body = await res.json();
     assert.equal(body.ok, true);
     assert.match(body.orderId, /^[0-9a-f]{16}$/);
-    assert.equal(body.botLink, `https://t.me/avtoy_test_bot?start=order_${body.orderId}`);
+    assert.match(body.botLink, /^https:\/\/t\.me\/avtoy_test_bot\?start=order_[0-9a-f]{64}$/);
     const cards = calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup);
     assert.equal(cards.length, 2);
-    assert.equal(cards[0].payload.reply_markup.inline_keyboard[0][0].callback_data, `ord:${body.orderId}`);
+    assert.equal(cards[0].payload.reply_markup.inline_keyboard[0][0].callback_data, `ord:${body.orderNumber}`);
   });
+});
+
+test("website orders created in the same millisecond receive distinct visible numbers", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    const first = await (await worker.fetch(siteRequest({ name: "Анна", contact: "+79990000000" }), orderEnv(kv))).json();
+    const second = await (await worker.fetch(siteRequest({ name: "Иван", contact: "+79991111111" }), orderEnv(kv))).json();
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.match(first.orderNumber, /^\d{23}$/);
+    assert.match(second.orderNumber, /^\d{23}$/);
+    assert.notEqual(first.orderNumber, second.orderNumber);
+    assert.ok(await kv.get("order_no:" + first.orderNumber));
+    assert.ok(await kv.get("order_no:" + second.orderNumber));
+  });
+});
+
+test("Telegram binding token is one-time and cannot bind a second chat", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const created=await (await worker.fetch(siteRequest({name:"Анна",contact:"@anna"}),orderEnv(kv))).json();
+  const token=new URL(created.botLink).searchParams.get("start").slice("order_".length);
+  assert.match(token,/^[0-9a-f]{64}$/);
+  await worker.fetch(webhookUpdate({message:{chat:{id:444444444,type:"private"},from:{id:444444444,first_name:"Anna"},text:"/start order_"+token}}),orderEnv(kv));
+  assert.equal(await kv.get("bind_token:"+token),null);
+  await worker.fetch(webhookUpdate({message:{chat:{id:555555555,type:"private"},text:"/start order_"+token}}),orderEnv(kv));
+  const order=JSON.parse(await kv.get("order:"+created.orderId));
+  assert.equal(String(order.chatId),"444444444");
+  assert.equal(String(order.telegramId),"444444444");
+  assert.ok(calls.some(c=>String(c.payload.chat_id)==="555555555"&&c.payload.text.includes("недействительна")));
+ });
+});
+test("failed KV write during Telegram binding keeps the one-time token for retry", async () => {
+ const kv=memoryKV();
+ const body=await withTelegramMock(async()=>await (await worker.fetch(siteRequest({name:"Иван",contact:"@ivan"}),orderEnv(kv))).json());
+ const token=new URL(body.botLink).searchParams.get("start").slice("order_".length);
+ let failOnce=true;
+ const flakyKV={
+  async get(k){return kv.get(k);},
+  async put(k,v,options){if(k==="order_no:"+body.orderNumber&&failOnce){failOnce=false;throw new Error("temporary KV failure");}return kv.put(k,v,options);},
+  async delete(k){return kv.delete(k);},
+  async list(args){return kv.list(args);}
+ };
+ const update={update_id:9901,message:{chat:{id:444444444,type:"private"},from:{id:444444444,first_name:"Ivan"},text:"/start order_"+token}};
+ await withTelegramMock(async calls=>{
+  const first=await worker.fetch(webhookUpdate(update),orderEnv(flakyKV));
+  assert.equal(first.status,502);
+  assert.ok(await kv.get("bind_token:"+token),"token remains available after partial KV failure");
+  const second=await worker.fetch(webhookUpdate(update),orderEnv(flakyKV));
+  assert.equal(second.status,200);
+  assert.equal(await kv.get("bind_token:"+token),null);
+  const order=JSON.parse(await kv.get("order:"+body.orderId));
+  assert.equal(String(order.chatId),"444444444");
+  assert.equal(String(order.telegramId),"444444444");
+  assert.ok(calls.some(c=>String(c.payload.chat_id)==="444444444"&&c.payload.text.includes("Telegram подключён к заявке")));
+ });
 });
 
 test("client opens the link, admin accepts, client gets the confirmation", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
     const res = await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv));
-    const { orderId } = await res.json();
+    const { orderId, botLink } = await res.json();
+    const bindToken = new URL(botLink).searchParams.get("start").slice("order_".length);
 
-    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${orderId}` } }), orderEnv(kv));
-    assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("заявка получена")));
+    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { id: 444444444, first_name: "Anna" }, text: `/start order_${bindToken}` } }), orderEnv(kv));
+    assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("Telegram подключён к заявке")));
 
     await worker.fetch(webhookUpdate(callback(111111111, `ord:${orderId}`)), orderEnv(kv));
     assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("принята в работу")));
@@ -384,8 +697,10 @@ test("client opens the link, admin accepts, client gets the confirmation", async
 test("accepting an order twice does not message the client twice", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
-    const { orderId } = await (await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv))).json();
-    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { first_name: "Anna" }, text: `/start order_${orderId}` } }), orderEnv(kv));
+    const created = await (await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv))).json();
+    const { orderId } = created;
+    const bindToken = new URL(created.botLink).searchParams.get("start").slice("order_".length);
+    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { id: 444444444, first_name: "Anna" }, text: `/start order_${bindToken}` } }), orderEnv(kv));
     await worker.fetch(webhookUpdate(callback(111111111, `ord:${orderId}`)), orderEnv(kv));
     await worker.fetch(webhookUpdate(callback(222222222, `ord:${orderId}`)), orderEnv(kv));
     const confirmations = calls.filter(c => String(c.payload.chat_id) === "444444444" && c.payload.text.includes("принята в работу"));
@@ -427,7 +742,7 @@ test("website form can temporarily deliver a phone-only lead to one configured a
     const body = await response.json();
     assert.equal(response.status, 200);
     assert.equal(body.ok, true);
-    const notices = calls.filter(c => c.method === "sendMessage" && c.payload.text.includes("+79991234567"));
+    const notices = calls.filter(c => c.method === "sendMessage" && /заявка №/i.test(c.payload.text));
     assert.equal(notices.length, 1);
     assert.equal(String(notices[0].payload.chat_id), "1095575236");
   });
@@ -440,10 +755,11 @@ test("website form accepts a phone-only contact and sends the lead privately to 
     const body = await response.json();
     assert.equal(response.status, 200);
     assert.equal(body.ok, true);
-    const notices = calls.filter(c => c.method === "sendMessage" && c.payload.text.includes("+79991234567"));
+    const notices = calls.filter(c => c.method === "sendMessage" && /заявка №/i.test(c.payload.text));
     assert.equal(notices.length, 2);
     assert.ok(notices.every(c => !String(c.payload.chat_id).startsWith("-")));
-    assert.ok(notices.every(c => c.payload.text.includes("Заявка: " + body.orderId)));
+    assert.ok(notices.every(c => c.payload.text.includes("заявка №" + body.orderNumber)));
+    assert.ok(notices.every(c => !c.payload.text.includes("+79991234567")));
   });
 });
 
@@ -464,15 +780,41 @@ test("admin native Reply sends a response to a customer who connected Telegram",
   const kv = memoryKV();
   await withTelegramMock(async calls => {
     const response = await worker.fetch(siteRequest({ name: "Анна", contact: "+79990000000" }), orderEnv(kv));
-    const { orderId } = await response.json();
+    const { orderId, botLink } = await response.json();
+    const bindToken = new URL(botLink).searchParams.get("start").slice("order_".length);
     const card = calls.find(c => c.method === "sendMessage" && c.payload.text.includes("Заявка: " + orderId));
-    await worker.fetch(webhook({ chat: { id: 444444444, type: "private" }, from: { id: 444444444 }, text: "/start order_" + orderId }), orderEnv(kv));
+    await worker.fetch(webhook({ chat: { id: 444444444, type: "private" }, from: { id: 444444444 }, text: "/start order_" + bindToken }), orderEnv(kv));
     await worker.fetch(webhook({ chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "Подобрали варианты", reply_to_message: { text: card.payload.text } }), orderEnv(kv));
     assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text === "Подобрали варианты"));
     assert.ok(calls.some(c => String(c.payload.chat_id) === "111111111" && c.payload.text.includes("Ответ отправлен клиенту")));
   });
 });
 
+
+test("admin Reply can resolve a card containing only the visible order number", async () => {
+  const kv = memoryKV();
+  const order = { id: "0123456789abcdef", number: "1793456789012", contact: "+79990000000", chatId: "444444444", status: "new" };
+  await kv.put("order_no:" + order.number, JSON.stringify(order));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhook({ chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "Ответ по заявке", reply_to_message: { text: "🚘 Новая заявка №" + order.number } }), orderEnv(kv));
+    assert.ok(calls.some(c => String(c.payload.chat_id) === "444444444" && c.payload.text === "Ответ по заявке"));
+    assert.ok(calls.some(c => String(c.payload.chat_id) === "111111111" && c.payload.text.includes("Ответ отправлен клиенту")));
+  });
+});
+
+test("admin import buttons are rejected outside the admin private chat", async () => {
+  const kv = memoryKV();
+  await kv.put("import_pending:-100123_77", JSON.stringify({ chat: { id: -100123, username: "avtoykorea" }, message_id: 77, text: "Post" }));
+  await withTelegramMock(async calls => {
+    const update = webhookUpdate(callback(111111111, "imp:review:-100123_77", { id: -100123, type: "supergroup" }));
+    const response = await worker.fetch(update, reviewEnv(kv));
+    assert.equal(response.status, 200);
+    assert.ok(await kv.get("import_pending:-100123_77"));
+    const answer = calls.find(c => c.method === "answerCallbackQuery");
+    assert.match(answer.payload.text, /только в личном чате/);
+    assert.equal(calls.some(c => c.method === "sendMessage" && String(c.payload.chat_id) === "111111111"), false);
+  });
+});
 
 test("homepage inline JavaScript parses before deployment", async () => {
   const vm = await import("node:vm");
@@ -482,4 +824,235 @@ test("homepage inline JavaScript parses before deployment", async () => {
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
   assert.ok(scripts.length > 0, "homepage contains inline JavaScript");
   for (const script of scripts) new vm.Script(script[1]);
+});
+
+
+test("website order retry delivers only the admin whose first notification failed", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  const deliveries = [];
+  let failFirstAdmin = true;
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const payload = JSON.parse(init.body || "{}");
+      const recipient = String(payload.chat_id);
+      deliveries.push(recipient);
+      if (recipient === "111111111" && failFirstAdmin) {
+        return Response.json({ ok: false, description: "temporary failure" });
+      }
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const key = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+    const body = { name: "Retry Test", contact: "@retry", model: "Kia" };
+    const first = await worker.fetch(siteRequest(body, key), orderEnv(kv));
+    assert.equal(first.status, 503);
+    assert.deepEqual(deliveries, ["111111111", "222222222"]);
+    failFirstAdmin = false;
+    const retry = await worker.fetch(siteRequest(body, key), orderEnv(kv));
+    assert.equal(retry.status, 200);
+    assert.deepEqual(deliveries, ["111111111", "222222222", "111111111"]);
+    assert.equal((await kv.list({ prefix: "order:" })).keys.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("website form does not resend an old stored payload after the customer edits the form", async () => {
+  const vm = await import("node:vm");
+  const response = await worker.fetch(new Request("https://worker.test/"), env);
+  const html = await response.text();
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).find(s => s.includes("request-form"));
+  assert.ok(script, "homepage contains the request form script");
+  const storage = new Map();
+  const sessionStorage = {
+    getItem: k => (storage.has(k) ? storage.get(k) : null),
+    setItem: (k, v) => storage.set(k, String(v)),
+    removeItem: k => storage.delete(k)
+  };
+  const makeElement = () => ({ addEventListener() {}, style: {}, setAttribute() {}, appendChild() {}, focus() {}, textContent: "", disabled: false, reset() {} });
+  const elements = {};
+  const form = makeElement();
+  let submitHandler = null;
+  form.addEventListener = (type, fn) => { if (type === "submit") submitHandler = fn; };
+  const document = {
+    getElementById: id => (id === "request-form" ? form : (elements[id] ||= makeElement())),
+    querySelectorAll: () => [],
+    createElement: () => makeElement()
+  };
+  let currentForm = {};
+  const sent = [];
+  const context = {
+    document, sessionStorage, crypto: globalThis.crypto, JSON, Object, console,
+    window: { setTimeout: () => 0 },
+    location: { origin: "https://worker.test", href: "" },
+    FormData: class { entries() { return Object.entries(currentForm); } },
+    fetch: async (url, init) => {
+      sent.push({ body: JSON.parse(init.body), key: init.headers["idempotency-key"] });
+      return { ok: false, status: 503, text: async () => JSON.stringify({ ok: false, error: "temporary" }) };
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(script, context);
+  assert.ok(submitHandler, "form submit handler is registered");
+
+  currentForm = { name: "Иван", contact: "@ivan", model: "Kia" };
+  await submitHandler({ preventDefault() {} });
+  currentForm = { name: "Иван", contact: "+79001112233", model: "Kia" };
+  await submitHandler({ preventDefault() {} });
+
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].body.contact, "+79001112233", "corrected contact must be sent, not the stale one");
+  assert.notEqual(sent[1].key, sent[0].key, "edited form must get a new idempotency key");
+});
+
+
+test("webhook retry skips admins who already received a client message", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  const deliveries = [];
+  let failSecondAdmin = true;
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const payload = JSON.parse(init.body || "{}");
+      const recipient = String(payload.chat_id);
+      deliveries.push(recipient);
+      if (recipient === "222222222" && failSecondAdmin) return Response.json({ ok: false, description: "temporary failure" });
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const update = { update_id: 987654321, message: {
+      message_id: 77, chat: { id: 333333333, type: "private" },
+      from: { id: 333333333, first_name: "Client" }, text: "Нужна консультация"
+    }};
+    const first = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(first.status, 502);
+    assert.deepEqual(deliveries, ["111111111", "222222222"]);
+    failSecondAdmin = false;
+    const retry = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(retry.status, 200);
+    // Admin 111 is not resent; admin 222 gets the card once; the client gets the thank-you once, for the first time.
+    assert.deepEqual(deliveries, ["111111111", "222222222", "222222222", "333333333"]);
+    const again = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(again.status, 200);
+    assert.deepEqual(deliveries, ["111111111", "222222222", "222222222", "333333333"]);
+    assert.ok(await kv.get("webhook_delivery:987654321"));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("admin native Reply never sends a whitespace-only customer message", async () => {
+  const kv = memoryKV();
+  const order = { id: "0123456789abcdef", number: "1793456789012", contact: "+79990000000", chatId: "444444444", status: "new" };
+  await kv.put("order_no:" + order.number, JSON.stringify(order));
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(webhook({
+      chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "   ",
+      reply_to_message: { text: "🚘 Новая заявка №" + order.number }
+    }), orderEnv(kv));
+    assert.equal(response.status, 200);
+    assert.equal(calls.some(c => String(c.payload.chat_id) === "444444444"), false);
+    assert.ok(calls.some(c => String(c.payload.chat_id) === "111111111" && /Ответ пустой/.test(c.payload.text)));
+  });
+});
+
+test("client thank-you failure retry does not resend admin cards", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  const deliveries = [];
+  let failClientThanks = true;
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const payload = JSON.parse(init.body || "{}");
+      const recipient = String(payload.chat_id);
+      deliveries.push(recipient);
+      if (recipient === "333333333" && failClientThanks) return Response.json({ ok: false, description: "temporary failure" });
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const update = { update_id: 555000111, message: {
+      message_id: 90, chat: { id: 333333333, type: "private" },
+      from: { id: 333333333, first_name: "Client" }, text: "Вопрос по Kia"
+    }};
+    const first = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(first.status, 502);
+    assert.deepEqual(deliveries, ["111111111", "222222222", "333333333"]);
+    failClientThanks = false;
+    const retry = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(retry.status, 200);
+    assert.deepEqual(deliveries, ["111111111", "222222222", "333333333", "333333333"]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("messages without update_id or message_id are each delivered, not dropped as duplicates", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  const adminDeliveries = [];
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const payload = JSON.parse(init.body || "{}");
+      if (String(payload.chat_id) === "111111111") adminDeliveries.push(payload.text);
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const first = await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST", headers: { "content-type": "application/json", "X-Telegram-Bot-Api-Secret-Token": "hook-secret" },
+      body: JSON.stringify({ message: { chat: { id: 333333333, type: "private" }, from: { id: 333333333, first_name: "Client" }, text: "Первое сообщение" } })
+    }), reviewEnv(kv));
+    const second = await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST", headers: { "content-type": "application/json", "X-Telegram-Bot-Api-Secret-Token": "hook-secret" },
+      body: JSON.stringify({ message: { chat: { id: 333333333, type: "private" }, from: { id: 333333333, first_name: "Client" }, text: "Второе сообщение" } })
+    }), reviewEnv(kv));
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(adminDeliveries.filter(t => t.includes("Первое сообщение")).length, 1);
+    assert.equal(adminDeliveries.filter(t => t.includes("Второе сообщение")).length, 1);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test("failed order acceptance notification is retried on the next callback", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  let failClientNotice = true;
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const method = new URL(String(input)).pathname.split("/").pop();
+      const payload = JSON.parse(init.body || "{}");
+      calls.push({ method, payload });
+      if (method === "sendMessage" && String(payload.chat_id) === "444444444" && String(payload.text || "").includes("принята в работу") && failClientNotice) {
+        failClientNotice = false;
+        return Response.json({ ok: false, description: "temporary failure" });
+      }
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const created = await (await worker.fetch(siteRequest({ name: "Анна", contact: "@anna" }), orderEnv(kv))).json();
+    const token = new URL(created.botLink).searchParams.get("start").slice("order_".length);
+    await worker.fetch(webhookUpdate({ message: { chat: { id: 444444444, type: "private" }, from: { id: 444444444, first_name: "Anna" }, text: "/start order_" + token } }), orderEnv(kv));
+
+    const first = await worker.fetch(webhookUpdate(callback(111111111, "ord:" + created.orderId)), orderEnv(kv));
+    assert.equal(first.status, 502);
+    assert.equal(JSON.parse(await kv.get("order:" + created.orderId)).status, "in_work");
+    assert.equal(JSON.parse(await kv.get("order:" + created.orderId)).acceptanceNotifiedAt, undefined);
+
+    const retry = await worker.fetch(webhookUpdate(callback(111111111, "ord:" + created.orderId)), orderEnv(kv));
+    assert.equal(retry.status, 200);
+    const order = JSON.parse(await kv.get("order:" + created.orderId));
+    assert.ok(order.acceptanceNotifiedAt);
+    const notices = calls.filter(c => c.method === "sendMessage" && String(c.payload.chat_id) === "444444444" && c.payload.text.includes("принята в работу"));
+    assert.equal(notices.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
