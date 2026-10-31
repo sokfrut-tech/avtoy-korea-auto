@@ -108,5 +108,5 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Improved tile/card surfaces, spacing, typography, touch target sizing, focus-visible state, image aspect ratio and mobile hero sizing; kept existing content, forms, Telegram actions, and API routes unchanged.
 - Mobile catalogue/review cards now retain readable text rather than hiding car details; form fields use two columns on most phones and one column on narrow screens.
 - No live Worker deployment, merge, webhook change, or secret mutation performed. User approval is needed before publishing the branch to production.
-- Verification status: awaiting GitHub Actions for commit `4c9d2750dd4e14bea3f37dd635825d5d67b1f05c`; automated tests do not replace visual checks on real phone/tablet/desktop browsers.
+- Verification: Cloudflare Worker checks #109 succeeded (`41215441345`); Factory Review #44 succeeded (`41215441332`) with functional/regression, security/privacy and director/release-evidence jobs all green. Automated tests do not replace visual checks on real phone/tablet/desktop browsers.
 - Next: inspect workflow results, review CSS for regressions, then request explicit approval before production deployment. After deployment, ask user to refresh the site and inspect mobile layout.
