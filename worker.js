@@ -283,6 +283,7 @@ export default {
    }
    const chatId = String(msg.chat.id);
    const text = String(msg.text || "").trim();
+   const origin = msg.forward_origin || null;
    const api = async (method, payload) => {
     const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
      method: "POST",
@@ -296,8 +297,29 @@ export default {
     chat_id: target, text: body, disable_web_page_preview: true
    });
    try {
-    const origin = msg.forward_origin;
-    if (adminIds.includes(chatId) && origin && origin.type === "channel") {
+    // Native Telegram Reply on an admin notification routes the response without typing a Chat ID.
+    if (adminIds.includes(chatId) && msg.reply_to_message) {
+     const repliedText = String(msg.reply_to_message.text || msg.reply_to_message.caption || "");
+     const orderMatch = repliedText.match(/Заявка:\s*([0-9a-f]{16})/i);
+     if (orderMatch && env.REVIEWS) {
+      const rawOrder = await env.REVIEWS.get("order:" + orderMatch[1]);
+      if (rawOrder) {
+       const order = JSON.parse(rawOrder);
+       if (order.chatId) {
+        await send(order.chatId, text || " ");
+        await send(chatId, "Ответ отправлен клиенту по заявке " + order.id + ".");
+       } else {
+        await send(chatId, "У клиента нет подключённого Telegram. Свяжитесь с ним по контакту из заявки: " + order.contact);
+       }
+      } else await send(chatId, "Заявка не найдена в хранилище.");
+     } else {
+      const chatMatch = repliedText.match(/Chat ID:\s*(-?\d+)/i);
+      if (chatMatch && text) {
+       await send(chatMatch[1], text);
+       await send(chatId, "Ответ отправлен клиенту.");
+      } else await send(chatId, "Не удалось определить клиента. Ответьте через Reply на карточку заявки или уведомление бота.");
+     }
+    } else if (adminIds.includes(chatId) && origin && origin.type === "channel") {
      const sourceChat = origin.chat || {};
      if (String(sourceChat.username || "").toLowerCase() !== "avtoykorea") {
       await send(chatId, "Переслано сообщение не из канала @avtoYkorea. Для импорта перешлите публикацию именно из этого канала, не копируйте её текст.");
@@ -331,7 +353,7 @@ export default {
       await Promise.all(adminIds.map(id => send(id, notice)));
      }
     } else if (text === "/help") {
-     await send(chatId, "Напишите марку и модель, бюджет и страну покупки. Чтобы обратиться к менеджеру, просто отправьте сообщение сюда. Команда для администратора: /reply CHAT_ID текст сообщения.");
+     await send(chatId, "Напишите марку и модель, бюджет и страну покупки. Чтобы обратиться к менеджеру, просто отправьте сообщение сюда.");
     } else if (text === "/countries") {
      await send(chatId, "🌍 Подбираем автомобили из:\n🇰🇷 Южной Кореи\n🇨🇳 Китая\n🇦🇪 ОАЭ\n\nНапишите, какая страна вас интересует.");
     } else if (text === "/catalog") {
@@ -358,13 +380,17 @@ export default {
    const f = {name:clean(d.name,100),contact:clean(d.contact,150),model:clean(d.model,150),budget:clean(d.budget,100),country:clean(d.country,80),year:clean(d.year,30),purpose:clean(d.purpose,100),details:clean(d.details,1000)};
    if (!f.name || !f.contact) return Response.json({ok:false,error:"Укажите имя и контакт для связи."},{status:400});
    const message = ["🚘 Новая заявка AVTOY KOREA","",`Имя: ${f.name}`,`Контакт: ${f.contact}`,`Марка / модель: ${f.model||"не указано"}`,`Бюджет: ${f.budget||"не указан"}`,`Страна: ${f.country||"не указана"}`,`Год от: ${f.year||"не указан"}`,`Тема обращения: ${f.purpose||"Подбор автомобиля"}`,`Пожелания: ${f.details||"нет"}`].join("\n");
-   if (env.TELEGRAM_BOT_TOKEN && adminIds.length && env.REVIEWS) {
+   if (!env.TELEGRAM_BOT_TOKEN || adminIds.length < 2) {
+    return Response.json({ok:false,error:"Не настроена доставка заявок двум администраторам. Сообщите администратору сайта."},{status:503});
+   }
+   if (env.REVIEWS) {
     const orderId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
     await env.REVIEWS.put(`order:${orderId}`, JSON.stringify({ id: orderId, ...f, status: "new", chatId: null, createdAt: new Date().toISOString() }));
+    const cardText = message + "\n\nЗаявка: " + orderId;
     const keyboard = { inline_keyboard: [[{ text: "✅ Принять в работу", callback_data: `ord:${orderId}` }]] };
-    const deliveries = await Promise.all(adminIds.map(async chat_id => {
+    const deliveries = await Promise.all(adminIds.slice(0, 2).map(async chat_id => {
      try {
-      const payload = await callTelegram(env, "sendMessage", { chat_id, text: message, reply_markup: keyboard });
+      const payload = await callTelegram(env, "sendMessage", { chat_id, text: cardText, reply_markup: keyboard });
       return Boolean(payload && payload.ok === true);
      } catch {
       return false;
@@ -387,7 +413,7 @@ export default {
     if (deliveries.some(ok => !ok)) return Response.json({ok:false,error:"Не удалось отправить заявку всем администраторам."},{status:502});
     return Response.json({ok:true});
    }
-   return Response.json({ok:true,telegramText:message,setupNeeded:true});
+   return Response.json({ok:false,error:"Не настроена доставка заявок. Сообщите администратору сайта."},{status:503});
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
    const cars = [];
@@ -612,10 +638,10 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
 <section class="wrap section" id="order" style="padding-top:40px">
   <div class="eyebrow">Как заказать</div>
   <h2>Четыре шага до вашего автомобиля</h2>
-  <p class="sub">Заполните короткую форму. Заявка сразу приходит администратору в Telegram, и он отвечает с предложениями.</p>
+  <p class="sub">Заполните короткую форму. Заявка приходит обоим администраторам лично. Они свяжутся с вами по указанному контакту.</p>
   <div class="steps">
     <article class="card"><div class="num">01</div><h3>Заполните форму</h3><p>Марка и модель, бюджет, страна покупки, год выпуска и пожелания.</p></article>
-    <article class="card"><div class="num">02</div><h3>Получите предложения</h3><p>Подбираем варианты под ваш бюджет и отвечаем вам в Telegram.</p></article>
+    <article class="card"><div class="num">02</div><h3>Получите предложения</h3><p>Подбираем варианты под ваш бюджет и связываемся с вами по указанному контакту.</p></article>
     <article class="card"><div class="num">03</div><h3>Проверьте перед покупкой</h3><p>Оцениваем состояние автомобиля и документы до решения о покупке.</p></article>
     <article class="card"><div class="num">04</div><h3>Доставка и итог</h3><p>Стоимость доставки и итоговая цена обсуждаются с вами отдельно.</p></article>
   </div>
@@ -659,7 +685,7 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
     <div>
       <div class="eyebrow">Бесплатный подбор</div>
       <h2>Какой автомобиль вы ищете?</h2>
-      <p class="form-intro">Оставьте параметры автомобиля и удобный контакт. Мы свяжемся с вами в Telegram.</p>
+      <p class="form-intro">Оставьте параметры автомобиля и удобный контакт. Мы свяжемся с вами по указанному телефону или другому контакту.</p>
       <p class="hint">Можно обратиться и по вопросам рекламы, партнёрства или размещения предложений.</p>
     </div>
     <div>
@@ -693,7 +719,7 @@ footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-s
 
 <script>
 const form=document.getElementById('request-form'),statusEl=document.getElementById('status');
-form.addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('submit-btn');b.disabled=true;statusEl.textContent='Отправляем заявку…';try{const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))});const x=await r.json();if(!r.ok||!x.ok)throw Error(x.error||'Не удалось отправить заявку.');if(x.setupNeeded){statusEl.textContent='Заявка подготовлена. Откроется Telegram: выберите чат менеджера и отправьте сообщение.';location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText)}else{statusEl.textContent='Заявка отправлена. Спасибо!';form.reset();if(x.botLink){var a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a)}}}catch(err){statusEl.textContent=err.message||'Ошибка. Попробуйте ещё раз.'}finally{b.disabled=false}});
+form.addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('submit-btn');b.disabled=true;statusEl.textContent='Отправляем заявку…';try{const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))});const x=await r.json();if(!r.ok||!x.ok)throw Error(x.error||'Не удалось отправить заявку.');if(x.setupNeeded){statusEl.textContent='Заявка подготовлена. Откроется Telegram: выберите чат менеджера и отправьте сообщение.';location.href='https://t.me/share/url?url='+encodeURIComponent(location.origin)+'&text='+encodeURIComponent(x.telegramText)}else{statusEl.textContent='Заявка доставлена администраторам. Спасибо! Свяжемся с вами по указанному контакту.';form.reset();if(x.botLink){var a=document.createElement('a');a.href=x.botLink;a.target='_blank';a.rel='noopener';a.textContent='Открыть Telegram, чтобы получать ответ здесь';statusEl.appendChild(document.createElement('br'));statusEl.appendChild(a)}}}catch(err){statusEl.textContent=err.message||'Ошибка. Попробуйте ещё раз.'}finally{b.disabled=false}});
 fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
   var list=document.getElementById('reviews-list');
   if(!data.reviews||!data.reviews.length)return;
