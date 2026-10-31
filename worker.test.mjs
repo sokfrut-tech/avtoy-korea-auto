@@ -1101,7 +1101,7 @@ test("admin can edit a pending review before publishing; original text is retain
   const prompt = calls.find(c=>c.method==="sendMessage" && String(c.payload.text||"").startsWith("✏️ РЕДАКТИРОВАНИЕ"));
   assert.ok(prompt);
   assert.ok(await kv.get("moderation_edit:111111111"), "callback must persist the admin edit session");
-  const response = await worker.fetch(webhookUpdate({message_id:902,chat:{id:111111111,type:"private"},from:{id:111111111},text:"Новый текст отзыва",reply_to_message:{text:prompt.payload.text}}),reviewEnv(kv));
+  const response = await worker.fetch(webhookUpdate({message:{message_id:902,chat:{id:111111111,type:"private"},from:{id:111111111},text:"Новый текст отзыва",reply_to_message:{text:prompt.payload.text}}}),reviewEnv(kv));
   assert.equal(response.status,200);
   const saved=JSON.parse(await kv.get("pending:"+id));
   assert.equal(saved.text,"Новый текст отзыва");
@@ -1119,7 +1119,7 @@ test("admin can edit a pending car caption and the public API uses only the edit
   assert.equal(started.status,200);
   const prompt=calls.find(c=>c.method==="sendMessage" && String(c.payload.text||"").startsWith("✏️ РЕДАКТИРОВАНИЕ"));
   assert.ok(prompt);
-  const response=await worker.fetch(webhookUpdate({message_id:903,chat:{id:111111111,type:"private"},from:{id:111111111},text:"Kia Sorento 2022\nПробег 20 000 км\nТелефон: +79991234567",reply_to_message:{text:prompt.payload.text}}),reviewEnv(kv));
+  const response=await worker.fetch(webhookUpdate({message:{message_id:903,chat:{id:111111111,type:"private"},from:{id:111111111},text:"Kia Sorento 2022\nПробег 20 000 км\nТелефон: +79991234567",reply_to_message:{text:prompt.payload.text}}}),reviewEnv(kv));
   assert.equal(response.status,200);
   const saved=JSON.parse(await kv.get("car_pending:"+id));
   assert.equal(saved.caption,"Kia Sorento 2022\nПробег 20 000 км");
