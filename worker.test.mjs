@@ -482,7 +482,7 @@ test("website form can temporarily deliver a phone-only lead to one configured a
     const body = await response.json();
     assert.equal(response.status, 200);
     assert.equal(body.ok, true);
-    const notices = calls.filter(c => c.method === "sendMessage" && c.payload.text.includes("Заявка №"));
+    const notices = calls.filter(c => c.method === "sendMessage" && /заявка №/i.test(c.payload.text));
     assert.equal(notices.length, 1);
     assert.equal(String(notices[0].payload.chat_id), "1095575236");
   });
@@ -495,10 +495,11 @@ test("website form accepts a phone-only contact and sends the lead privately to 
     const body = await response.json();
     assert.equal(response.status, 200);
     assert.equal(body.ok, true);
-    const notices = calls.filter(c => c.method === "sendMessage" && c.payload.text.includes("+79991234567"));
+    const notices = calls.filter(c => c.method === "sendMessage" && /заявка №/i.test(c.payload.text));
     assert.equal(notices.length, 2);
     assert.ok(notices.every(c => !String(c.payload.chat_id).startsWith("-")));
-    assert.ok(notices.every(c => c.payload.text.includes("Заявка №" + body.orderNumber)));
+    assert.ok(notices.every(c => c.payload.text.includes("заявка №" + body.orderNumber)));
+    assert.ok(notices.every(c => !c.payload.text.includes("+79991234567")));
   });
 });
 
