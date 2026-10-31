@@ -50,3 +50,11 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 2. Verify the live Cloudflare Worker, KV binding, secrets, and webhook without exposing secret values.
 3. Test `/start`, ordinary customer messages, website requests, private admin details, accept/complete callbacks, and review moderation.
 4. Only after the user approves, merge PR #12 and deploy the Worker; then repeat live smoke tests.
+
+
+## Production baseline and webhook notes
+- The latest observed Cloudflare deploy workflow on `main` was run [#17](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41164162865), successful at 2026-10-31 03:23 UTC, for production commit `cfae5aaa4b3a00e3c11060467973cd224ccd0721`.
+- The deployment workflow runs only on pushes to `main`; this feature branch and PR #12 have not been deployed.
+- The production `main` Worker requires the `X-Telegram-Bot-Api-Secret-Token` header to equal `TELEGRAM_WEBHOOK_SECRET` and returns 503 if bot configuration is missing.
+- The README documents manual Telegram webhook registration to `https://avtoy-korea-auto.sokfrut.workers.dev/telegram/webhook` with the matching `secret_token`. The Worker code does not self-register the webhook.
+- The production Worker and PR code require the persistent `REVIEWS` KV binding for order persistence. Its actual Cloudflare binding is not confirmed from repository CI.
