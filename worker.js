@@ -358,13 +358,17 @@ export default {
    const f = {name:clean(d.name,100),contact:clean(d.contact,150),model:clean(d.model,150),budget:clean(d.budget,100),country:clean(d.country,80),year:clean(d.year,30),purpose:clean(d.purpose,100),details:clean(d.details,1000)};
    if (!f.name || !f.contact) return Response.json({ok:false,error:"Укажите имя и контакт для связи."},{status:400});
    const message = ["🚘 Новая заявка AVTOY KOREA","",`Имя: ${f.name}`,`Контакт: ${f.contact}`,`Марка / модель: ${f.model||"не указано"}`,`Бюджет: ${f.budget||"не указан"}`,`Страна: ${f.country||"не указана"}`,`Год от: ${f.year||"не указан"}`,`Тема обращения: ${f.purpose||"Подбор автомобиля"}`,`Пожелания: ${f.details||"нет"}`].join("\n");
-   if (env.TELEGRAM_BOT_TOKEN && adminIds.length && env.REVIEWS) {
+   if (!env.TELEGRAM_BOT_TOKEN || adminIds.length < 2) {
+    return Response.json({ok:false,error:"Не настроена доставка заявок двум администраторам. Сообщите администратору сайта."},{status:503});
+   }
+   if (env.REVIEWS) {
     const orderId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
     await env.REVIEWS.put(`order:${orderId}`, JSON.stringify({ id: orderId, ...f, status: "new", chatId: null, createdAt: new Date().toISOString() }));
+    const cardText = message + "\n\nЗаявка: " + orderId;
     const keyboard = { inline_keyboard: [[{ text: "✅ Принять в работу", callback_data: `ord:${orderId}` }]] };
-    const deliveries = await Promise.all(adminIds.map(async chat_id => {
+    const deliveries = await Promise.all(adminIds.slice(0, 2).map(async chat_id => {
      try {
-      const payload = await callTelegram(env, "sendMessage", { chat_id, text: message, reply_markup: keyboard });
+      const payload = await callTelegram(env, "sendMessage", { chat_id, text: cardText, reply_markup: keyboard });
       return Boolean(payload && payload.ok === true);
      } catch {
       return false;
