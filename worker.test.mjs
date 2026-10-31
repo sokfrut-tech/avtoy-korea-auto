@@ -676,3 +676,37 @@ test("homepage inline JavaScript parses before deployment", async () => {
   assert.ok(scripts.length > 0, "homepage contains inline JavaScript");
   for (const script of scripts) new vm.Script(script[1]);
 });
+
+
+test("website order retry delivers only the admin whose first notification failed", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  const deliveries = [];
+  let failFirstAdmin = true;
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const payload = JSON.parse(init.body || "{}");
+      const recipient = String(payload.chat_id);
+      deliveries.push(recipient);
+      if (recipient === "111111111" && failFirstAdmin) {
+        return Response.json({ ok: false, description: "temporary failure" });
+      }
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const key = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+    const body = { name: "Retry Test", contact: "@retry", model: "Kia" };
+    const first = await worker.fetch(siteRequest(body, key), orderEnv(kv));
+    assert.equal(first.status, 503);
+    assert.deepEqual(deliveries, ["111111111", "222222222"]);
+    failFirstAdmin = false;
+    const retry = await worker.fetch(siteRequest(body, key), orderEnv(kv));
+    assert.equal(retry.status, 200);
+    assert.deepEqual(deliveries, ["111111111", "222222222", "111111111"]);
+    assert.equal((await kv.list({ prefix: "order:" })).keys.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
