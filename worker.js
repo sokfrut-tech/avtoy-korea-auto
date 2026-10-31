@@ -377,8 +377,12 @@ export default {
       if (rawOrder) {
        const order = JSON.parse(rawOrder);
        if (order.chatId) {
-        await send(order.chatId, text || " ");
-        await send(chatId, "Ответ отправлен клиенту по заявке " + order.id + ".");
+        if (!text.trim()) {
+         await send(chatId, "Ответ пустой. Напишите текст сообщения клиенту и отправьте его ещё раз.");
+        } else {
+         await send(order.chatId, text.trim());
+         await send(chatId, "Ответ отправлен клиенту по заявке " + order.id + ".");
+        }
        } else {
         await send(chatId, "У клиента нет подключённого Telegram. Свяжитесь с ним по контакту из заявки: " + order.contact);
        }
@@ -447,7 +451,23 @@ export default {
     } else if (text && !adminIds.includes(chatId)) {
      const who = String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано");
      const notice = "📩 Сообщение боту AVTOY KOREA\nОт: " + who + "\nChat ID: " + chatId + "\n\n" + text.slice(0, 3500) + "\n\nОтветить: /reply " + chatId + " текст сообщения";
-     await Promise.all(adminIds.map(id => send(id, notice)));
+     // Persist each successful admin delivery so webhook retries skip completed recipients.
+     const deliveryId = update.update_id !== undefined && update.update_id !== null
+      ? String(update.update_id)
+      : String(chatId) + "_" + String(msg.message_id || "unknown");
+     const deliveryKey = "webhook_delivery:" + deliveryId;
+     let deliveryState = env.REVIEWS ? await env.REVIEWS.get(deliveryKey) : null;
+     deliveryState = deliveryState ? JSON.parse(deliveryState) : { deliveredAdminIds: [] };
+     const deliveredAdmins = new Set((deliveryState.deliveredAdminIds || []).map(String));
+     for (const id of adminIds) {
+      if (deliveredAdmins.has(String(id))) continue;
+      await send(id, notice);
+      deliveredAdmins.add(String(id));
+      if (env.REVIEWS) {
+       deliveryState.deliveredAdminIds = [...deliveredAdmins];
+       await env.REVIEWS.put(deliveryKey, JSON.stringify(deliveryState), { expirationTtl: 604800 });
+      }
+     }
      await send(chatId, "Спасибо! Ваше сообщение передано менеджеру. Мы ответим, как только сможем.");
     } else if (text && adminIds.includes(chatId)) {
      await send(chatId, "Для ответа клиенту используйте: /reply CHAT_ID текст сообщения\nChat ID клиента указан в уведомлении.");
