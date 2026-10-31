@@ -733,3 +733,51 @@ test("website order retry delivers only the admin whose first notification faile
     globalThis.fetch = originalFetch;
   }
 });
+
+test("website form does not resend an old stored payload after the customer edits the form", async () => {
+  const vm = await import("node:vm");
+  const response = await worker.fetch(new Request("https://worker.test/"), env);
+  const html = await response.text();
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).find(s => s.includes("request-form"));
+  assert.ok(script, "homepage contains the request form script");
+  const storage = new Map();
+  const sessionStorage = {
+    getItem: k => (storage.has(k) ? storage.get(k) : null),
+    setItem: (k, v) => storage.set(k, String(v)),
+    removeItem: k => storage.delete(k)
+  };
+  const makeElement = () => ({ addEventListener() {}, style: {}, setAttribute() {}, appendChild() {}, focus() {}, textContent: "", disabled: false, reset() {} });
+  const elements = {};
+  const form = makeElement();
+  let submitHandler = null;
+  form.addEventListener = (type, fn) => { if (type === "submit") submitHandler = fn; };
+  const document = {
+    getElementById: id => (id === "request-form" ? form : (elements[id] ||= makeElement())),
+    querySelectorAll: () => [],
+    createElement: () => makeElement()
+  };
+  let currentForm = {};
+  const sent = [];
+  const context = {
+    document, sessionStorage, crypto: globalThis.crypto, JSON, Object, console,
+    window: { setTimeout: () => 0 },
+    location: { origin: "https://worker.test", href: "" },
+    FormData: class { entries() { return Object.entries(currentForm); } },
+    fetch: async (url, init) => {
+      sent.push({ body: JSON.parse(init.body), key: init.headers["idempotency-key"] });
+      return { ok: false, status: 503, text: async () => JSON.stringify({ ok: false, error: "temporary" }) };
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(script, context);
+  assert.ok(submitHandler, "form submit handler is registered");
+
+  currentForm = { name: "Иван", contact: "@ivan", model: "Kia" };
+  await submitHandler({ preventDefault() {} });
+  currentForm = { name: "Иван", contact: "+79001112233", model: "Kia" };
+  await submitHandler({ preventDefault() {} });
+
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].body.contact, "+79001112233", "corrected contact must be sent, not the stale one");
+  assert.notEqual(sent[1].key, sent[0].key, "edited form must get a new idempotency key");
+});

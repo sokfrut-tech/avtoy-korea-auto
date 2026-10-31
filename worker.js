@@ -852,7 +852,7 @@ form.addEventListener('submit',async function(e){
  const entered=Object.fromEntries(new FormData(form).entries());
  let pending=null;
  try{pending=JSON.parse(sessionStorage.getItem('avtoy_pending_request')||'null')}catch{}
- if(pending&&pending.key&&pending.payload){
+ if(pending&&pending.key&&pending.payload&&JSON.stringify(pending.payload)===JSON.stringify(entered)){
   window.requestIdempotencyKey=pending.key;
  }else{
   window.requestIdempotencyKey=crypto.randomUUID();
