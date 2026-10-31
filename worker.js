@@ -452,23 +452,30 @@ export default {
      const who = String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано");
      const notice = "📩 Сообщение боту AVTOY KOREA\nОт: " + who + "\nChat ID: " + chatId + "\n\n" + text.slice(0, 3500) + "\n\nОтветить: /reply " + chatId + " текст сообщения";
      // Persist each successful admin delivery so webhook retries skip completed recipients.
-     const deliveryId = update.update_id !== undefined && update.update_id !== null
-      ? String(update.update_id)
-      : String(chatId) + "_" + String(msg.message_id || "unknown");
-     const deliveryKey = "webhook_delivery:" + deliveryId;
-     let deliveryState = env.REVIEWS ? await env.REVIEWS.get(deliveryKey) : null;
-     deliveryState = deliveryState ? JSON.parse(deliveryState) : { deliveredAdminIds: [] };
+     // Without update_id and message_id there is no safe key: deliver without deduplication instead of dropping later messages.
+     const hasUpdateId = update.update_id !== undefined && update.update_id !== null;
+     const hasMessageId = msg.message_id !== undefined && msg.message_id !== null;
+     const deliveryId = hasUpdateId ? String(update.update_id) : (hasMessageId ? chatId + "_" + String(msg.message_id) : null);
+     const deliveryKey = deliveryId ? "webhook_delivery:" + deliveryId : null;
+     const canPersist = Boolean(deliveryKey && env.REVIEWS);
+     let deliveryState = canPersist ? await env.REVIEWS.get(deliveryKey) : null;
+     deliveryState = deliveryState ? JSON.parse(deliveryState) : { deliveredAdminIds: [], clientThanked: false };
      const deliveredAdmins = new Set((deliveryState.deliveredAdminIds || []).map(String));
      for (const id of adminIds) {
       if (deliveredAdmins.has(String(id))) continue;
       await send(id, notice);
       deliveredAdmins.add(String(id));
-      if (env.REVIEWS) {
+      if (canPersist) {
        deliveryState.deliveredAdminIds = [...deliveredAdmins];
        await env.REVIEWS.put(deliveryKey, JSON.stringify(deliveryState), { expirationTtl: 604800 });
       }
      }
-     await send(chatId, "Спасибо! Ваше сообщение передано менеджеру. Мы ответим, как только сможем.");
+     // Thank-you is sent once per update: a retry after a failed admin delivery must not repeat it.
+     if (!deliveryState.clientThanked) {
+      await send(chatId, "Спасибо! Ваше сообщение передано менеджеру. Мы ответим, как только сможем.");
+      deliveryState.clientThanked = true;
+      if (canPersist) await env.REVIEWS.put(deliveryKey, JSON.stringify(deliveryState), { expirationTtl: 604800 });
+     }
     } else if (text && adminIds.includes(chatId)) {
      await send(chatId, "Для ответа клиенту используйте: /reply CHAT_ID текст сообщения\nChat ID клиента указан в уведомлении.");
     }

@@ -809,7 +809,11 @@ test("webhook retry skips admins who already received a client message", async (
     failSecondAdmin = false;
     const retry = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
     assert.equal(retry.status, 200);
-    assert.deepEqual(deliveries, ["111111111", "222222222", "222222222"]);
+    // Admin 111 is not resent; admin 222 gets the card once; the client gets the thank-you once, for the first time.
+    assert.deepEqual(deliveries, ["111111111", "222222222", "222222222", "333333333"]);
+    const again = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(again.status, 200);
+    assert.deepEqual(deliveries, ["111111111", "222222222", "222222222", "333333333"]);
     assert.ok(await kv.get("webhook_delivery:987654321"));
   } finally { globalThis.fetch = originalFetch; }
 });
@@ -827,4 +831,62 @@ test("admin native Reply never sends a whitespace-only customer message", async 
     assert.equal(calls.some(c => String(c.payload.chat_id) === "444444444"), false);
     assert.ok(calls.some(c => String(c.payload.chat_id) === "111111111" && /Ответ пустой/.test(c.payload.text)));
   });
+});
+
+test("client thank-you failure retry does not resend admin cards", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  const deliveries = [];
+  let failClientThanks = true;
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const payload = JSON.parse(init.body || "{}");
+      const recipient = String(payload.chat_id);
+      deliveries.push(recipient);
+      if (recipient === "333333333" && failClientThanks) return Response.json({ ok: false, description: "temporary failure" });
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const update = { update_id: 555000111, message: {
+      message_id: 90, chat: { id: 333333333, type: "private" },
+      from: { id: 333333333, first_name: "Client" }, text: "Вопрос по Kia"
+    }};
+    const first = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(first.status, 502);
+    assert.deepEqual(deliveries, ["111111111", "222222222", "333333333"]);
+    failClientThanks = false;
+    const retry = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(retry.status, 200);
+    assert.deepEqual(deliveries, ["111111111", "222222222", "333333333", "333333333"]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("messages without update_id or message_id are each delivered, not dropped as duplicates", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  const adminDeliveries = [];
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input).startsWith("https://api.telegram.org/")) {
+      const payload = JSON.parse(init.body || "{}");
+      if (String(payload.chat_id) === "111111111") adminDeliveries.push(payload.text);
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const first = await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST", headers: { "content-type": "application/json", "X-Telegram-Bot-Api-Secret-Token": "hook-secret" },
+      body: JSON.stringify({ message: { chat: { id: 333333333, type: "private" }, from: { id: 333333333, first_name: "Client" }, text: "Первое сообщение" } })
+    }), reviewEnv(kv));
+    const second = await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST", headers: { "content-type": "application/json", "X-Telegram-Bot-Api-Secret-Token": "hook-secret" },
+      body: JSON.stringify({ message: { chat: { id: 333333333, type: "private" }, from: { id: 333333333, first_name: "Client" }, text: "Второе сообщение" } })
+    }), reviewEnv(kv));
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(adminDeliveries.filter(t => t.includes("Первое сообщение")).length, 1);
+    assert.equal(adminDeliveries.filter(t => t.includes("Второе сообщение")).length, 1);
+  } finally { globalThis.fetch = originalFetch; }
 });
