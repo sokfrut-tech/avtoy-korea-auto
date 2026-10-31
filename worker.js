@@ -300,7 +300,7 @@ export default {
     // Native Telegram Reply on an admin notification routes the response without typing a Chat ID.
     if (adminIds.includes(chatId) && msg.reply_to_message) {
      const repliedText = String(msg.reply_to_message.text || msg.reply_to_message.caption || "");
-     const orderMatch = repliedText.match(/Заявка:\\s*([0-9a-f]{16})/i);
+     const orderMatch = repliedText.match(/Заявка:\s*([0-9a-f]{16})/i);
      if (orderMatch && env.REVIEWS) {
       const rawOrder = await env.REVIEWS.get("order:" + orderMatch[1]);
       if (rawOrder) {
@@ -313,7 +313,7 @@ export default {
        }
       } else await send(chatId, "Заявка не найдена в хранилище.");
      } else {
-      const chatMatch = repliedText.match(/Chat ID:\\s*(-?\\d+)/i);
+      const chatMatch = repliedText.match(/Chat ID:\s*(-?\\d+)/i);
       if (chatMatch && text) {
        await send(chatMatch[1], text);
        await send(chatId, "Ответ отправлен клиенту.");
