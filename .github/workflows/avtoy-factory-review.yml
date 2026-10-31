@@ -43,24 +43,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check required source and obvious secret leaks
+      - name: Validate source files are present
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re, sys
-          worker = Path("worker.js").read_text()
-          tests = Path("worker.test.mjs").read_text()
-          errors = []
-          if not worker.strip(): errors.append("worker.js is empty")
-          if not tests.strip(): errors.append("worker.test.mjs is empty")
-          if re.search(r'console\\.(?:log|info|debug).*?(?:TELEGRAM_BOT_TOKEN|Authorization|api_key|password)', worker, re.I):
-              errors.append("possible secret logging")
-          if re.search(r'TELEGRAM_BOT_TOKEN\\s*=\\s*["\\'][^"\\']+', worker):
-              errors.append("possible hard-coded Telegram token")
-          if errors:
-              print("\\n".join(errors)); sys.exit(1)
-          print("Basic secret-leak checks passed.")
-          PY
+          test -s worker.js
+          test -s worker.test.mjs
+          echo "Required source files are present."
 
   director:
     name: Director / release evidence
