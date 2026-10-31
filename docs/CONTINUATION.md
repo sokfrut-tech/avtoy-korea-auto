@@ -100,3 +100,13 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - PR #12 remains open. No merge, production deployment, secret change, or webhook mutation has been performed.
 
 - Final PR head at 2026-10-31 15:29 UTC: `643b110e187ad764c2cd02e8c0be4b75e6ee84a9`; current main/base SHA remains `cfae5aaa4b3a00e3c11060467973cd224ccd0721`. PR #12 remains open and mergeable, not merged. No production deployment, webhook change, or secret mutation was performed.
+
+## 2026-10-31 — responsive tile-based website refresh
+- User confirmed the Cloudflare Worker site opens on their phone and requested a more attractive mobile layout, with compatibility across phones, tablets, and desktop.
+- Updated the embedded homepage CSS in `worker.js` on `feature/numbered-private-order-workflow` (commit `4c9d2750dd4e14bea3f37dd635825d5d67b1f05c`).
+- Added responsive breakpoints for compact phones (<=340px), phones (<=420px), mobile/tablet (<=780px), tablet/small desktop (781–1100px), and wide desktop.
+- Improved tile/card surfaces, spacing, typography, touch target sizing, focus-visible state, image aspect ratio and mobile hero sizing; kept existing content, forms, Telegram actions, and API routes unchanged.
+- Mobile catalogue/review cards now retain readable text rather than hiding car details; form fields use two columns on most phones and one column on narrow screens.
+- No live Worker deployment, merge, webhook change, or secret mutation performed. User approval is needed before publishing the branch to production.
+- Verification status: awaiting GitHub Actions for commit `4c9d2750dd4e14bea3f37dd635825d5d67b1f05c`; automated tests do not replace visual checks on real phone/tablet/desktop browsers.
+- Next: inspect workflow results, review CSS for regressions, then request explicit approval before production deployment. After deployment, ask user to refresh the site and inspect mobile layout.
