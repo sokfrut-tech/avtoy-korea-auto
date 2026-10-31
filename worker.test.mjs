@@ -406,6 +406,39 @@ function siteRequest(body) {
 
 const orderEnv = (kv) => ({ ...env, TELEGRAM_BOT_USERNAME: "@avtoy_test_bot", REVIEWS: kv });
 
+test("website lead rejects non-JSON bodies before storing or notifying", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const req=new Request("https://worker.test/api/request",{method:"POST",headers:{"content-type":"text/plain"},body:"name=bad"});
+  const res=await worker.fetch(req,orderEnv(kv));
+  assert.equal(res.status,415);
+  assert.equal((await kv.list({prefix:"order:"})).keys.length,0);
+  assert.equal(calls.length,0);
+ });
+});
+
+test("website lead rejects oversized and wrongly typed fields without side effects", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async calls=>{
+  const tooLong=await worker.fetch(siteRequest({name:"A".repeat(500),contact:"+79990000000"}),orderEnv(kv));
+  assert.equal(tooLong.status,400);
+  const wrongType=await worker.fetch(siteRequest({name:["not","text"],contact:"+79990000000"}),orderEnv(kv));
+  assert.equal(wrongType.status,400);
+  assert.equal((await kv.list({prefix:"order:"})).keys.length,0);
+  assert.equal(calls.length,0);
+ });
+});
+
+test("successful website lead response includes privacy and cache headers", async () => {
+ const kv=memoryKV();
+ await withTelegramMock(async ()=>{
+  const res=await worker.fetch(siteRequest({name:"Тест",contact:"+79990000000"}),orderEnv(kv));
+  assert.equal(res.status,200);
+  assert.equal(res.headers.get("cache-control"),"no-store");
+  assert.equal(res.headers.get("x-content-type-options"),"nosniff");
+  assert.equal(res.headers.get("referrer-policy"),"no-referrer");
+ });
+});
 test("site order goes to every admin with an accept button and returns a bot link", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
