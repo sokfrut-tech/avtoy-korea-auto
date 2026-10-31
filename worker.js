@@ -32,7 +32,7 @@ function formatReviewCard(review) {
 
 async function handleAdminMediaUpload(msg, env, adminIds) {
  const adminId = String(msg.chat && msg.chat.id || "");
- if (!adminIds.includes(adminId)) return false;
+ if (!adminIds.includes(adminId) || msg.forward_origin) return false;
  const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
  const video = msg.video || null;
  if (!photo && !video) return false;
