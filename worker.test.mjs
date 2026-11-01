@@ -1629,3 +1629,98 @@ test("car flow end to end: forwarded post -> Автомобиль -> Опубл�
     assert.equal(body.cars.length, 1, "published car is listed on the site");
   });
 });
+
+// --- Снятие с сайта и удаление фото до публикации ---
+const ADMIN = 111111111;
+const CAR_ID = "car_100555_1601";
+const REVIEW_ID = "-1001234567890_12";
+const seedCar = (photos) => ({ id: CAR_ID, caption: "Kia K5 2021\nпробег 40 000 км", photos, videos: [], mediaType: "photo", sourceUrl: "https://t.me/avtoYkorea/1601", sourceDate: 1790000000, createdAt: "2026-10-01T10:00:00Z" });
+const photoReply = (text) => webhookUpdate({ message: { message_id: 9, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text, reply_to_message: { message_id: 8, chat: { id: ADMIN, type: "private" }, text: "✏️ РЕДАКТИРОВАНИЕ ОПИСАНИЕ АВТОМОБИЛЯ\n\nТЕКУЩИЙ ТЕКСТ:\nKia K5" } } });
+
+test("/site lists what is on the site for an admin and nothing for a client", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:" + CAR_ID, JSON.stringify({ ...seedCar([{ file_id: "A" }]), publishedAt: "2026-10-02T10:00:00Z" }));
+  await kv.put("approved:" + REVIEW_ID, JSON.stringify({ id: REVIEW_ID, kind: "text", text: "Всё быстро и честно", name: "Анна", photos: [{ file_id: "R1" }], publishedAt: "2026-10-03T10:00:00Z" }));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 20, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text: "/site" } }), reviewEnv(kv));
+    const list = calls.find(c => c.payload.text && c.payload.text.startsWith("🌐 Сейчас на сайте: 2"));
+    assert.ok(list, "admin gets the list with two items");
+    const buttons = list.payload.reply_markup.inline_keyboard.map(row => row[0].callback_data);
+    assert.ok(buttons.includes("sitedel:" + CAR_ID) && buttons.includes("sitedel:" + REVIEW_ID), "each item has a remove button");
+  });
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 21, chat: { id: 333333333, type: "private" }, from: { id: 333333333 }, text: "/site" } }), reviewEnv(kv));
+    assert.equal(calls.some(c => String(c.payload.text || "").includes("Сейчас на сайте")), false, "client never sees the site list");
+  });
+});
+
+test("admin removes a published car from the site: asks first, then it returns to waiting", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:" + CAR_ID, JSON.stringify({ ...seedCar([{ file_id: "A" }, { file_id: "B" }]), publishedAt: "2026-10-02T10:00:00Z" }));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "sitedel:" + CAR_ID)), reviewEnv(kv));
+    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("Убрать с сайта?") && c.payload.reply_markup.inline_keyboard[0][0].callback_data === "sitedelok:" + CAR_ID), "confirmation is asked");
+    assert.ok(await kv.get("car_approved:" + CAR_ID), "nothing removed before confirmation");
+    await worker.fetch(webhookUpdate(callback(ADMIN, "sitedelok:" + CAR_ID)), reviewEnv(kv));
+    assert.equal(await kv.get("car_approved:" + CAR_ID), null, "removed from the site");
+    assert.ok(await kv.get("car_pending:" + CAR_ID), "returns to waiting for moderation");
+    const body = await (await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv))).json();
+    assert.equal(body.cars.length, 0, "site list is empty again");
+    assert.ok(calls.some(c => c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "carpub:" + CAR_ID), "admin gets a publish button again");
+  });
+});
+
+test("admin removes a published review from the site and it can be published again", async () => {
+  const kv = memoryKV();
+  await kv.put("approved:" + REVIEW_ID, JSON.stringify({ id: REVIEW_ID, kind: "text", text: "Всё быстро и честно", name: "Анна", photos: [{ file_id: "R1" }, { file_id: "R2" }], publishedAt: "2026-10-03T10:00:00Z" }));
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "sitedelok:" + REVIEW_ID)), reviewEnv(kv));
+    assert.equal(await kv.get("approved:" + REVIEW_ID), null, "removed from the site");
+    const back = JSON.parse(await kv.get("pending:" + REVIEW_ID));
+    assert.equal(back.photos.length, 2, "photos are kept");
+    assert.equal(back.hasPhoto, true);
+    const body = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
+    assert.equal(body.reviews.length, 0);
+  });
+});
+
+test("cancelling removal from the site leaves the car published", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:" + CAR_ID, JSON.stringify({ ...seedCar([{ file_id: "A" }]), publishedAt: "2026-10-02T10:00:00Z" }));
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "sitedelno")), reviewEnv(kv));
+    assert.ok(await kv.get("car_approved:" + CAR_ID), "still on the site");
+  });
+});
+
+test("admin deletes chosen photos from a car before publishing, after confirmation", async () => {
+  const kv = memoryKV();
+  await kv.put("car_pending:" + CAR_ID, JSON.stringify(seedCar([{ file_id: "A" }, { file_id: "B" }, { file_id: "C" }])));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "caredit:" + CAR_ID)), reviewEnv(kv));
+    const prompt = calls.find(c => String(c.payload.text || "").startsWith("✏️ РЕДАКТИРОВАНИЕ ОПИСАНИЕ АВТОМОБИЛЯ"));
+    assert.ok(prompt && prompt.payload.text.includes("УДАЛИТЬ ФОТО"), "edit prompt shows the photo command");
+    assert.ok(prompt.payload.text.includes("Фото: 1 2 3"), "edit prompt lists the photo numbers");
+    await worker.fetch(photoReply("УДАЛИТЬ ФОТО 2"), reviewEnv(kv));
+    const ask = calls.find(c => String(c.payload.text || "").startsWith("Удалить фото 2?"));
+    assert.ok(ask, "confirmation is asked");
+    assert.equal(JSON.parse(await kv.get("car_pending:" + CAR_ID)).photos.length, 3, "nothing deleted before confirmation");
+    await worker.fetch(webhookUpdate(callback(ADMIN, "mphoto:yes")), reviewEnv(kv));
+    const left = JSON.parse(await kv.get("car_pending:" + CAR_ID)).photos.map(p => p.file_id);
+    assert.deepEqual(left, ["A", "C"], "only the chosen photo is removed");
+  });
+});
+
+test("photo removal can be cancelled, and wrong numbers are refused", async () => {
+  const kv = memoryKV();
+  await kv.put("car_pending:" + CAR_ID, JSON.stringify(seedCar([{ file_id: "A" }, { file_id: "B" }])));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "caredit:" + CAR_ID)), reviewEnv(kv));
+    await worker.fetch(photoReply("УДАЛИТЬ ФОТО 9"), reviewEnv(kv));
+    assert.ok(calls.some(c => String(c.payload.text || "").includes("от 1 до 2")), "wrong number is explained");
+    assert.equal(calls.some(c => String(c.payload.text || "").startsWith("Удалить фото")), false, "no confirmation for a wrong number");
+    await worker.fetch(photoReply("УДАЛИТЬ ФОТО 1"), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(ADMIN, "mphoto:no")), reviewEnv(kv));
+    assert.equal(JSON.parse(await kv.get("car_pending:" + CAR_ID)).photos.length, 2, "cancel keeps both photos");
+  });
+});
