@@ -2006,9 +2006,6 @@ footer{background:#071321;color:#aeb9c8}
 #cars .cars>.card .car-body .car-specs{color:#667085}
 .brand-logo{display:block;width:250px;max-width:100%;height:auto}
 @media(max-width:900px){.brand-logo{width:205px}}
-#cars .cars>.card .car-body{color:#172033}
-#cars .cars>.card .car-body p{color:#475467}
-#cars .cars>.card .car-body .car-specs{color:#667085}
 </style>
 </head>
 <body>
