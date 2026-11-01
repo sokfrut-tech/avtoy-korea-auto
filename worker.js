@@ -118,6 +118,40 @@ function siteLabel(id, record) {
  return "Отзыв: " + (text ? "«" + text.slice(0, 50) + "»" : "видео без текста");
 }
 
+// Подсказка для администраторов: открывается из меню команд (слева внизу) и кнопкой под списком /site.
+const ADMIN_HELP_TEXT = [
+ "❓ Подсказка администратора",
+ "",
+ "Сайт:",
+ "/site — что сейчас опубликовано. Убрать: 🗑 → Да.",
+ "",
+ "Карточка на модерации:",
+ "✅ Опубликовать — выложить на сайт",
+ "❌ Не публиковать — убрать из очереди",
+ "🙈 Скрыть имя — только для отзывов",
+ "✏️ Редактировать — правка текста",
+ "",
+ "Правка текста (ответом на сообщение бота):",
+ "ЗАМЕНИТЬ: старое => новое",
+ "УДАЛИТЬ: фрагмент",
+ "ДОБАВИТЬ В КОНЕЦ: текст",
+ "УДАЛИТЬ ФОТО 2 4 — убрать фото по номерам",
+ "",
+ "Ответить клиенту:",
+ "/reply <chat_id> текст"
+].join("\n");
+
+async function setAdminCommands(env, adminId) {
+ await callTelegram(env, "setMyCommands", {
+  commands: [
+   { command: "site", description: "Что опубликовано на сайте" },
+   { command: "help", description: "Подсказка администратора" },
+   { command: "reply", description: "Ответить клиенту: /reply <chat_id> текст" }
+  ],
+  scope: { type: "chat", chat_id: Number(adminId) }
+ });
+}
+
 async function showSiteList(chatId, env) {
  if (!env.REVIEWS) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "Хранилище не настроено." });
  const cars = await env.REVIEWS.list({ prefix: "car_approved:" });
@@ -132,7 +166,7 @@ async function showSiteList(chatId, env) {
  if (!items.length) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "На сайте сейчас ничего не опубликовано." });
  const shown = items.slice(0, 30);
  const text = "🌐 Сейчас на сайте: " + items.length + "\n\n" + shown.map((item, index) => (index + 1) + ". " + item.label).join("\n") + (items.length > shown.length ? "\n\nПоказаны первые " + shown.length + "." : "");
- const keyboard = { inline_keyboard: shown.map(item => [{ text: "🗑 " + item.label.slice(0, 40), callback_data: "sitedel:" + item.id }]) };
+ const keyboard = { inline_keyboard: [...shown.map(item => [{ text: "🗑 " + item.label.slice(0, 40), callback_data: "sitedel:" + item.id }]), [{ text: "❓ Подсказка", callback_data: "adminhelp" }]] };
  return callTelegram(env, "sendMessage", { chat_id: chatId, text, reply_markup: keyboard });
 }
 
@@ -1058,6 +1092,7 @@ export default {
      else if (String(cb.data || "").startsWith("imp:")) await handleImportChoice(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("sitedel")) await handleSiteDeleteCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("mphoto:")) await handlePhotoDeleteCallback(cb, env, adminIds);
+     else if (String(cb.data || "") === "adminhelp") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); await callTelegram(env, "sendMessage", { chat_id: cb.message.chat.id, text: ADMIN_HELP_TEXT }); }
      else if (String(cb.data || "").startsWith("car")) await handleCarCallback(cb, env, adminIds);
      else await handleReviewCallback(cb, env, adminIds);
     } catch { return new Response("Telegram processing failed", { status: 502 }); }
@@ -1168,6 +1203,7 @@ export default {
       }
      }
     } else if (text === "/start" || text.startsWith("/start ")) {
+     if (adminIds.includes(chatId)) await setAdminCommands(env, chatId).catch(() => {});
      await send(chatId, "Здравствуйте! Это AVTOY KOREA 🚘\n\nПомогаем с подбором автомобилей из Кореи, Китая и ОАЭ.\n\nКоманды:\n/countries — страны покупки\n/catalog — как проходит подбор\n/contact — оставить заявку\n/help — помощь\n\nНапишите, какой автомобиль ищете, и мы передадим запрос менеджеру.");
      if (!adminIds.includes(chatId)) {
       const notice = "👋 Новый пользователь бота AVTOY KOREA\nИмя: " + String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано") + "\nChat ID: " + chatId;
@@ -1175,6 +1211,9 @@ export default {
      }
     } else if (text === "/site" && adminIds.includes(chatId)) {
      await showSiteList(chatId, env);
+    } else if (text === "/help" && adminIds.includes(chatId)) {
+     await setAdminCommands(env, chatId);
+     await callTelegram(env, "sendMessage", { chat_id: chatId, text: ADMIN_HELP_TEXT });
     } else if (text === "/help") {
      await send(chatId, "Напишите марку и модель, бюджет и страну покупки. Чтобы обратиться к менеджеру, просто отправьте сообщение сюда.");
     } else if (text === "/countries") {

@@ -1792,3 +1792,34 @@ test("end to end: admin uploads via bot, edits photos, publishes, removes from s
     assert.equal(site3.reviews.length, 1, "published again");
   });
 });
+
+test("admin gets help and the command menu; clients do not", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 800, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text: "/help" } }), reviewEnv(kv));
+    const menu = calls.find(c => c.method === "setMyCommands");
+    assert.ok(menu, "admin menu is set for this chat");
+    assert.deepEqual(menu.payload.scope, { type: "chat", chat_id: ADMIN });
+    assert.ok(menu.payload.commands.some(c => c.command === "site"), "menu has /site");
+    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("❓ Подсказка администратора")), "admin gets the help text");
+  });
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 801, chat: { id: 333333333, type: "private" }, from: { id: 333333333 }, text: "/help" } }), reviewEnv(kv));
+    assert.equal(calls.some(c => c.method === "setMyCommands"), false, "client gets no admin menu");
+    assert.equal(calls.some(c => String(c.payload.text || "").startsWith("❓ Подсказка администратора")), false, "client gets no admin help");
+  });
+});
+
+test("help button under the site list shows the admin help", async () => {
+  const kv = memoryKV();
+  await kv.put("approved:-1001234567890_12", JSON.stringify({ id: "-1001234567890_12", kind: "text", text: "Хорошо", name: "Анна", photos: [{ file_id: "R1" }], publishedAt: "2026-10-03T10:00:00Z" }));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 802, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text: "/site" } }), reviewEnv(kv));
+    const list = calls.find(c => String(c.payload.text || "").startsWith("🌐 Сейчас на сайте"));
+    assert.ok(list.payload.reply_markup.inline_keyboard.some(row => row[0].callback_data === "adminhelp"), "list has the help button");
+  });
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "adminhelp")), reviewEnv(kv));
+    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("❓ Подсказка администратора")), "button shows the help");
+  });
+});
