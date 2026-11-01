@@ -13,4 +13,4 @@ class_name = "AlbumSerializer"
 
 [[migrations]]
 tag = "v1-album-serializer"
-new_classes = ["AlbumSerializer"]
+new_sqlite_classes = ["AlbumSerializer"]
