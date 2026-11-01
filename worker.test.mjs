@@ -1734,3 +1734,12 @@ test("site car list hides seller contacts but keeps the car description", async 
   assert.ok(!/Владимир|Продавец/i.test(caption), "seller name line is hidden");
   assert.ok(caption.includes("Двигатель 1.6 дизель") && caption.includes("Пробег 33 000 км") && caption.includes("Цена 1 716 671"), "specs and price stay");
 });
+
+test("homepage cars scroll sideways one car at a time, with photo thumbnails and a full-screen viewer", async () => {
+  const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()))).text();
+  assert.ok(html.includes(".cars{display:flex!important"), "cars are a sideways row");
+  assert.ok(html.includes("scroll-snap-type:x mandatory"), "one car snaps into view at a time");
+  assert.ok(html.includes("car-thumbs") && html.includes("car-lightbox"), "photos are thumbnails that open a viewer");
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+  for (const code of scripts) assert.doesNotThrow(() => new Function(code), "homepage script parses");
+});
