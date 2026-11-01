@@ -1739,6 +1739,8 @@ test("homepage cars scroll sideways one car at a time, with photo thumbnails and
   const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()))).text();
   assert.ok(html.includes(".cars{display:flex!important"), "cars are a sideways row");
   assert.ok(html.includes("scroll-snap-type:x mandatory"), "one car snaps into view at a time");
+  assert.ok(html.includes(".cars{display:grid!important") && html.includes("@media (min-width:900px)"), "on a computer cars are rows going down");
+  assert.ok(html.includes("cars-hint"), "phone shows a hint that cars scroll sideways");
   assert.ok(html.includes("car-thumbs") && html.includes("car-lightbox"), "photos are thumbnails that open a viewer");
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
   for (const code of scripts) assert.doesNotThrow(() => new Function(code), "homepage script parses");

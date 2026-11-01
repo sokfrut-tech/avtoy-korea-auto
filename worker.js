@@ -1612,7 +1612,14 @@ footer{border-top-color:#ffffff18}
 /* Машины: прокрутка вбок по одной машине; фото внутри машины — ряды миниатюр */
 .cars{display:flex!important;grid-template-columns:none!important;overflow-x:auto;scroll-snap-type:x mandatory;gap:14px!important;padding:4px 2px 18px;scrollbar-width:none;overscroll-behavior-x:contain}
 .cars::-webkit-scrollbar{display:none}
-.cars>article{flex:0 0 min(88%,420px);min-width:0;scroll-snap-align:start;height:auto}
+.cars>article{flex:0 0 min(86%,340px);min-width:0;scroll-snap-align:start;height:auto}
+.cars-hint{display:none;margin:10px 0 0;font-size:13px;color:var(--muted)}
+.cars-hint.is-on{display:block}
+@media (min-width:900px){
+ .cars{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;overflow:visible;padding:0;scroll-snap-type:none}
+ .cars>article{flex:none;width:auto}
+ .cars-hint{display:none!important}
+}
 .car-thumbs{display:grid;grid-template-columns:repeat(auto-fill,56px);gap:6px;justify-content:start;margin:14px 0 0}
 .car-thumb{all:unset;cursor:zoom-in;box-sizing:border-box;width:56px;height:56px;border-radius:9px;overflow:hidden;background:#0b0c0f;border:1px solid #2a2e38;position:relative;display:block}
 .car-thumb img,.car-thumb video{width:100%;height:100%;object-fit:cover;display:block}
@@ -1683,6 +1690,7 @@ footer{border-top-color:#ffffff18}
   <h2>Примеры выполненных заказов</h2>
   <p class="sub">Точная стоимость зависит от курса и условий. Уточняйте у администратора.</p>
   <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Объявления из Telegram появятся после проверки и одобрения администратором.</div></article></div>
+  <p class="cars-hint">← Листайте пальцем, справа видно следующую машину →</p>
 </section>
 <section class="wrap section" id="reviews" style="padding-top:20px">
   <h2>Отзывы наших клиентов</h2>
@@ -1850,6 +1858,7 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
 fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
  var list=document.getElementById('cars-list'); if(!list || !data.cars || !data.cars.length)return; list.textContent='';
  var NL=String.fromCharCode(10);
+ var hint=document.querySelector('.cars-hint'); if(hint)hint.classList.add('is-on');
  var lightbox=null, items=[], current=0;
  function onKey(e){ if(e.key==='Escape')closeBox(); else if(e.key==='ArrowRight')show(current+1); else if(e.key==='ArrowLeft')show(current-1); }
  function closeBox(){ if(lightbox){ lightbox.remove(); lightbox=null; } document.removeEventListener('keydown', onKey); }
