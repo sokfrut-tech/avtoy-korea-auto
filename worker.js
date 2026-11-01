@@ -141,6 +141,14 @@ const ADMIN_HELP_TEXT = [
  "/reply <chat_id> текст"
 ].join("\n");
 
+async function sendAdminHelp(env, chatId) {
+ await callTelegram(env, "sendMessage", {
+  chat_id: chatId,
+  text: ADMIN_HELP_TEXT,
+  reply_markup: { inline_keyboard: [[{ text: "🌐 Что на сайте", callback_data: "admincmd:site" }]] }
+ });
+}
+
 async function setAdminCommands(env, adminId) {
  await callTelegram(env, "setMyCommands", {
   commands: [
@@ -1092,7 +1100,8 @@ export default {
      else if (String(cb.data || "").startsWith("imp:")) await handleImportChoice(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("sitedel")) await handleSiteDeleteCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("mphoto:")) await handlePhotoDeleteCallback(cb, env, adminIds);
-     else if (String(cb.data || "") === "adminhelp") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); await callTelegram(env, "sendMessage", { chat_id: cb.message.chat.id, text: ADMIN_HELP_TEXT }); }
+     else if (String(cb.data || "") === "adminhelp") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); await sendAdminHelp(env, cb.message.chat.id); }
+     else if (String(cb.data || "") === "admincmd:site") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); await showSiteList(cb.message.chat.id, env); }
      else if (String(cb.data || "").startsWith("car")) await handleCarCallback(cb, env, adminIds);
      else await handleReviewCallback(cb, env, adminIds);
     } catch { return new Response("Telegram processing failed", { status: 502 }); }
@@ -1213,7 +1222,7 @@ export default {
      await showSiteList(chatId, env);
     } else if (text === "/help" && adminIds.includes(chatId)) {
      await setAdminCommands(env, chatId);
-     await callTelegram(env, "sendMessage", { chat_id: chatId, text: ADMIN_HELP_TEXT });
+     await sendAdminHelp(env, chatId);
     } else if (text === "/help") {
      await send(chatId, "Напишите марку и модель, бюджет и страну покупки. Чтобы обратиться к менеджеру, просто отправьте сообщение сюда.");
     } else if (text === "/countries") {

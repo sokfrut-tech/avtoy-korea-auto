@@ -1823,3 +1823,17 @@ test("help button under the site list shows the admin help", async () => {
     assert.ok(calls.some(c => String(c.payload.text || "").startsWith("❓ Подсказка администратора")), "button shows the help");
   });
 });
+
+test("buttons in the help run /site and show the help again, so admins need not type commands", async () => {
+  const kv = memoryKV();
+  await kv.put("approved:-1001234567890_12", JSON.stringify({ id: "-1001234567890_12", kind: "text", text: "Хорошо", name: "Анна", photos: [{ file_id: "R1" }], publishedAt: "2026-10-03T10:00:00Z" }));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 803, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text: "/help" } }), reviewEnv(kv));
+    const help = calls.find(c => String(c.payload.text || "").startsWith("❓ Подсказка администратора"));
+    assert.ok(help.payload.reply_markup.inline_keyboard[0].some(b => b.callback_data === "admincmd:site"), "help has a what-is-on-site button");
+  });
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "admincmd:site")), reviewEnv(kv));
+    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 Сейчас на сайте: 1")), "button shows the site list");
+  });
+});
