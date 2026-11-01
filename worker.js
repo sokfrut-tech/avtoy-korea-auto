@@ -2332,8 +2332,9 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(fu
 }).catch(function(){});
 // Главный слайдер: автоматическая смена, точки и стрелки
 (function(){
+  if(typeof document.querySelector!=='function')return;
   var root=document.querySelector('.hero-standard');
-  if(!root)return;
+  if(!root || typeof root.querySelector!=='function')return;
   var slides=root.querySelectorAll('.hero-slide');
   var dots=root.querySelectorAll('.hero-dot');
   if(!slides.length)return;
