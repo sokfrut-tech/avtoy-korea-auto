@@ -9,7 +9,7 @@ async function beginModerationEdit(callback, env, type, id, answer) {
  const item = JSON.parse(raw);
  const currentText = String(isCar ? item.caption || "" : item.text || "");
  const session = { type, id, createdAt: new Date().toISOString() };
- await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 1800 });
+ await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 86400 });
  const label = isCar ? "описание автомобиля" : "текст отзыва";
  const photoCount = Array.isArray(item.photos) ? item.photos.length : 0;
  const photoHint = photoCount ? "\n\nФото: " + Array.from({ length: photoCount }, (_, i) => i + 1).join(" ") + "\n• УДАЛИТЬ ФОТО: номера через пробел, например УДАЛИТЬ ФОТО 2 4" : "";
@@ -75,7 +75,7 @@ async function requestPhotoDelete(session, adminId, rawNumbers, env) {
   return callTelegram(env, "sendMessage", { chat_id: adminId, text: count ? "Укажите номера фото от 1 до " + count + ", например: УДАЛИТЬ ФОТО 2 4" : "В этом материале нет фото для удаления." });
  }
  session.photoDelete = numbers;
- await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 1800 });
+ await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 86400 });
  return callTelegram(env, "sendMessage", {
   chat_id: adminId,
   text: "Удалить фото " + numbers.join(", ") + "? Останется фото: " + (count - numbers.length) + ".",
@@ -92,7 +92,7 @@ async function handlePhotoDeleteCallback(callback, env, adminIds) {
  if (!session || !Array.isArray(session.photoDelete)) return answer("Удаление фото не ожидает подтверждения", true);
  const numbers = session.photoDelete;
  delete session.photoDelete;
- await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 1800 });
+ await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 86400 });
  if (callback.data === "mphoto:no") return answer("Фото не удалены");
  const key = (session.type === "car" ? "car_pending:" : "pending:") + session.id;
  const raw = await env.REVIEWS.get(key);
@@ -538,7 +538,7 @@ async function handleReviewSubmission(msg, env, adminIds) {
   const stashRaw = await env.REVIEWS.get("album_stash:" + albumId);
   const stash = stashRaw ? JSON.parse(stashRaw) : [];
   if (!stash.some(item => item.file_id === photoItem.file_id)) stash.push(photoItem);
-  await env.REVIEWS.put("album_stash:" + albumId, JSON.stringify(stash), { expirationTtl: 86400 });
+  await env.REVIEWS.put("album_stash:" + albumId, JSON.stringify(stash), { expirationTtl: 2592000 });
   return;
  }
  const text = body.replace(/^\/review(@\w+)?/i, "").trim().slice(0, 1000);
