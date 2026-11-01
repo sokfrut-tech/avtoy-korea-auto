@@ -582,8 +582,7 @@ async function handleReviewSubmission(msg, env, adminIds) {
    return;
   }
   const stashRaw = await env.REVIEWS.get("album_stash:" + albumId);
-  const stash = stashRaw ? JSON.parse(stashRaw) : [];
-  if (!stash.some(item => item.file_id === photoItem.file_id)) stash.push(photoItem);
+  const stash = uniqueFileItems([...(stashRaw ? JSON.parse(stashRaw) : []), photoItem]);
   await env.REVIEWS.put("album_stash:" + albumId, JSON.stringify(stash), { expirationTtl: 2592000 });
   return;
  }
@@ -595,18 +594,19 @@ async function handleReviewSubmission(msg, env, adminIds) {
  const photos = [];
  if (msg.media_group_id && env.REVIEWS) {
   const stashRaw = await env.REVIEWS.get("album_stash:" + id);
-  for (const item of (stashRaw ? JSON.parse(stashRaw) : [])) if (!photos.some(p => p.file_id === item.file_id)) photos.push(item);
+  photos.push(...uniqueFileItems(stashRaw ? JSON.parse(stashRaw) : []));
   await env.REVIEWS.delete("album_stash:" + id);
  }
- if (photoItem && !photos.some(p => p.file_id === photoItem.file_id)) photos.push(photoItem);
+ if (photoItem) photos.push(photoItem);
+ const uniquePhotos = uniqueFileItems(photos);
  const review = {
   id,
   kind: video ? "video" : "text",
   text,
   name: String((msg.from && msg.from.first_name) || "Клиент").slice(0, 50),
-  fileId: video || (photos[0] && photos[0].file_id) || null,
-  photos,
-  hasPhoto: photos.length > 0,
+  fileId: video || (uniquePhotos[0] && uniquePhotos[0].file_id) || null,
+  photos: uniquePhotos,
+  hasPhoto: uniquePhotos.length > 0,
   hasThanks: THANKS_PATTERN.test(text),
   anonymous: false,
   createdAt: new Date().toISOString()
@@ -1828,22 +1828,23 @@ footer{border-top-color:#ffffff18}
  .nav .pill{white-space:normal;text-align:center}
 }
 
-/* AVTOY KOREA review gallery: clean editorial photo mosaic, not a Telegram post */
-.review-carousel .reviews>article{display:flex;flex-direction:column;gap:0}
-.review-gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:clamp(112px,13vw,156px);gap:8px;width:100%;margin:0 0 4px;overflow:hidden;border-radius:16px}
-.review-gallery-item{display:block;min-width:0;min-height:0;overflow:hidden;background:#080b10;border-radius:12px}
-.review-gallery-item:first-child{grid-column:1/-1;grid-row:span 2}
-.review-gallery-item img{display:block;width:100%;height:100%;object-fit:cover;transition:transform .35s ease}
-.review-gallery-item:hover img{transform:scale(1.035)}
-.review-gallery.is-single{grid-template-columns:1fr;grid-auto-rows:auto}
-.review-gallery.is-single .review-gallery-item:first-child{grid-column:auto;grid-row:auto;aspect-ratio:16/10}
-.review-gallery.is-single .review-gallery-item img{object-fit:cover}
+/* AVTOY KOREA review gallery: sized to the review card, not the viewport */
+.review-carousel .reviews>article{display:flex;flex-direction:column;align-items:stretch;gap:0}
+.review-gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:7px;width:100%;max-width:100%;aspect-ratio:1.48/1;margin:0 0 4px;overflow:hidden;border-radius:14px}
+.review-gallery-item{display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;overflow:hidden;background:#090d13;border-radius:10px}
+.review-gallery-item:first-child{grid-column:1;grid-row:1/3}
+.review-gallery-item img{display:block;width:100%;height:100%;object-fit:contain;object-position:center;transition:transform .25s ease}
+.review-gallery-item:hover img{transform:scale(1.02)}
+.review-gallery.is-single{display:block;aspect-ratio:16/10}
+.review-gallery.is-single .review-gallery-item:first-child{width:100%;height:100%}
+.review-gallery.is-single .review-gallery-item img{object-fit:contain}
+.review-gallery-item:nth-child(n+5){display:none}
 .review-carousel .review-name{margin-top:12px}
 .review-carousel .review-text{white-space:pre-line;overflow-wrap:anywhere}
 @media(max-width:780px){
- .review-gallery{grid-auto-rows:clamp(100px,29vw,138px);gap:6px;border-radius:13px}
- .review-gallery-item{border-radius:9px}
- .review-gallery.is-single .review-gallery-item:first-child{aspect-ratio:16/10}
+ .review-gallery{gap:5px;aspect-ratio:1.42/1;border-radius:12px}
+ .review-gallery-item{border-radius:8px}
+ .review-gallery.is-single{aspect-ratio:16/10}
 }
 @media(prefers-reduced-motion:reduce){.review-gallery-item img{transition:none}}
 
