@@ -1745,3 +1745,50 @@ test("homepage cars scroll sideways one car at a time, with photo thumbnails and
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
   for (const code of scripts) assert.doesNotThrow(() => new Function(code), "homepage script parses");
 });
+
+test("end to end: admin uploads via bot, edits photos, publishes, removes from site via bot, republishes", async () => {
+  const kv = memoryKV();
+  const adminChat = { id: ADMIN, type: "private" };
+  const from = { id: ADMIN, first_name: "Admin" };
+  const photoMsg = (messageId, fileId) => webhookUpdate({ message: {
+    message_id: messageId, chat: adminChat, from, media_group_id: "9001",
+    photo: [{ file_id: fileId + "_s", file_unique_id: fileId + "_su" }, { file_id: fileId, file_unique_id: fileId + "_u" }],
+    caption: "Клиент: Анна. Всё быстро и честно"
+  } });
+  await withTelegramMock(async calls => {
+    // 1. Upload from the bot: two photos in one album
+    await worker.fetch(photoMsg(700, "PH1"), reviewEnv(kv));
+    await worker.fetch(photoMsg(701, "PH2"), reviewEnv(kv));
+    const pendingKeys = (await kv.list({ prefix: "pending:" })).keys.map(k => k.name);
+    assert.equal(pendingKeys.length, 1, "upload became one review waiting for moderation");
+    const id = pendingKeys[0].replace("pending:", "");
+    assert.ok(calls.some(c => c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "pub:" + id), "moderation card has publish");
+    assert.equal(JSON.parse(await kv.get("pending:" + id)).photos.length, 2, "both photos are kept");
+
+    // 2. Edit before publishing: remove photo 2
+    await worker.fetch(webhookUpdate(callback(ADMIN, "edit:" + id)), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: { message_id: 710, chat: adminChat, from, text: "УДАЛИТЬ ФОТО 2", reply_to_message: { message_id: 709, chat: adminChat, text: "✏️ РЕДАКТИРОВАНИЕ ТЕКСТ ОТЗЫВА\n\nТЕКУЩИЙ ТЕКСТ:\nКлиент" } } }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(ADMIN, "mphoto:yes")), reviewEnv(kv));
+    assert.equal(JSON.parse(await kv.get("pending:" + id)).photos.length, 1, "only photo 2 removed");
+
+    // 3. Publish
+    await worker.fetch(webhookUpdate(callback(ADMIN, "pub:" + id)), reviewEnv(kv));
+    const site1 = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
+    assert.equal(site1.reviews.length, 1, "review is on the site");
+    assert.equal(site1.reviews[0].mediaItems.length, 1, "site shows the remaining photo");
+    assert.ok(calls.some(c => c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "sitedel:" + id), "admin gets a remove-from-site button");
+
+    // 4. /site lists it, and removal through the bot returns it to waiting
+    await worker.fetch(webhookUpdate({ message: { message_id: 720, chat: adminChat, from, text: "/site" } }), reviewEnv(kv));
+    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 Сейчас на сайте: 1")), "/site shows it");
+    await worker.fetch(webhookUpdate(callback(ADMIN, "sitedelok:" + id)), reviewEnv(kv));
+    const site2 = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
+    assert.equal(site2.reviews.length, 0, "removed from the site");
+    assert.ok(await kv.get("pending:" + id), "back to waiting for moderation");
+
+    // 5. Publish again
+    await worker.fetch(webhookUpdate(callback(ADMIN, "pub:" + id)), reviewEnv(kv));
+    const site3 = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
+    assert.equal(site3.reviews.length, 1, "published again");
+  });
+});
