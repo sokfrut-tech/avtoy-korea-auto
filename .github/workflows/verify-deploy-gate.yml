@@ -1,0 +1,40 @@
+name: SAFE deploy gate verification (no Cloudflare)
+
+on:
+  push:
+    branches:
+      - verify/deploy-gate-2026-11-01
+    paths:
+      - ".github/workflows/verify-deploy-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simulate a failing regression test
+        id: simulated_tests
+        run: |
+          echo "INTENTIONAL FAILURE: this is an isolated safety test."
+          exit 1
+
+      - name: Simulated deploy step (must be skipped)
+        id: deploy_probe
+        if: success()
+        run: |
+          echo "ERROR: deploy probe ran after failed tests."
+          exit 99
+
+      - name: Assert deploy probe was skipped
+        if: always()
+        env:
+          DEPLOY_PROBE_OUTCOME: ${{ steps.deploy_probe.outcome }}
+        run: |
+          echo "Deploy probe outcome: $DEPLOY_PROBE_OUTCOME"
+          if [ "$DEPLOY_PROBE_OUTCOME" != "skipped" ]; then
+            echo "::error::The post-test step was not skipped."
+            exit 1
+          fi
+          echo "PASS: a failed test prevented the following deploy step."
