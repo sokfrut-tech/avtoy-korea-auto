@@ -1828,24 +1828,20 @@ footer{border-top-color:#ffffff18}
  .nav .pill{white-space:normal;text-align:center}
 }
 
-/* AVTOY KOREA review gallery: sized to the review card, not the viewport */
+/* AVTOY KOREA review photo slider — one full-size image per card */
 .review-carousel .reviews>article{display:flex;flex-direction:column;align-items:stretch;gap:0}
-.review-gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(82px,1fr));grid-auto-rows:minmax(82px,1fr);gap:7px;width:100%;max-width:100%;margin:0 0 4px;overflow:hidden;border-radius:14px}
-.review-gallery-item{display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;overflow:hidden;background:#090d13;border-radius:10px}
-.review-gallery-item:first-child{grid-column:1;grid-row:1/3}
-.review-gallery-item img{display:block;width:100%;height:100%;object-fit:contain;object-position:center;transition:transform .25s ease}
-.review-gallery-item:hover img{transform:scale(1.02)}
-.review-gallery.is-single{display:block;aspect-ratio:16/10}
-.review-gallery.is-single .review-gallery-item:first-child{width:100%;height:100%}
-.review-gallery.is-single .review-gallery-item img{object-fit:contain}
+.review-gallery{position:relative;width:100%;max-width:100%;height:clamp(170px,22vw,250px);margin:0 0 4px;overflow:hidden;border-radius:14px;background:#080d14}
+.review-gallery-photo{display:flex;width:100%;height:100%;align-items:center;justify-content:center}
+.review-gallery-image{display:block;width:100%;height:100%;object-fit:contain;object-position:center}
+.review-gallery-arrow{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border:1px solid #ffffff55;border-radius:50%;background:#090d14c9;color:#fff;font-size:25px;line-height:1;display:grid;place-items:center;cursor:pointer;z-index:2}
+.review-gallery-arrow.is-prev{left:9px}.review-gallery-arrow.is-next{right:9px}
+.review-gallery-arrow:disabled{opacity:.35;cursor:default}
+.review-gallery-count{position:absolute;right:10px;bottom:9px;padding:4px 9px;border-radius:20px;background:#090d14d9;color:#fff;font-size:11px;font-weight:700;letter-spacing:.04em}
+.review-gallery-arrow[hidden],.review-gallery-count[hidden]{display:none}
 .review-carousel .review-name{margin-top:12px}
 .review-carousel .review-text{white-space:pre-line;overflow-wrap:anywhere}
-@media(max-width:780px){
- .review-gallery{grid-template-rows:repeat(2,minmax(72px,1fr));grid-auto-rows:minmax(72px,1fr);gap:5px;border-radius:12px}
- .review-gallery-item{border-radius:8px}
- .review-gallery.is-single{aspect-ratio:16/10}
-}
-@media(prefers-reduced-motion:reduce){.review-gallery-item img{transition:none}}
+@media(max-width:780px){.review-gallery{height:clamp(160px,48vw,230px);border-radius:12px}.review-gallery-arrow{width:32px;height:32px}}
+@media(prefers-reduced-motion:reduce){.review-gallery-image{transition:none}}
 
 /* Homepage customer reviews carousel */
 .review-carousel{position:relative}
@@ -2102,12 +2098,30 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
       var label=document.createElement('div');label.className='review-video-label';label.textContent='Видео клиента';card.appendChild(label);
       mediaItems.forEach(function(mediaUrl){var el=document.createElement('video');el.className='review-media';el.src=mediaUrl;el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео клиента');card.appendChild(el)});
     }else if(mediaItems.length){
-      var gallery=document.createElement('div');gallery.className='review-gallery'+(mediaItems.length===1?' is-single':'');
-      mediaItems.forEach(function(mediaUrl,mediaIndex){
-        var link=document.createElement('a');link.className='review-gallery-item';link.href=mediaUrl;link.target='_blank';link.rel='noopener';link.setAttribute('aria-label','Открыть фотографию '+(mediaIndex+1));
-        var el=document.createElement('img');el.src=mediaUrl;el.loading=mediaIndex<2?'eager':'lazy';el.decoding='async';el.alt='Фотография автомобиля клиента '+(mediaIndex+1);link.appendChild(el);gallery.appendChild(link);
-      });
-      card.appendChild(gallery);
+      var gallery=document.createElement('div');gallery.className='review-gallery';
+      var photoLink=document.createElement('a');photoLink.className='review-gallery-photo';photoLink.target='_blank';photoLink.rel='noopener';
+      var photo=document.createElement('img');photo.className='review-gallery-image';photo.loading='eager';photo.decoding='async';photo.alt='Фотография автомобиля клиента';
+      photoLink.appendChild(photo);gallery.appendChild(photoLink);
+      var photoIndex=0;
+      function showReviewPhoto(nextIndex){
+        photoIndex=(nextIndex+mediaItems.length)%mediaItems.length;
+        photo.src=mediaItems[photoIndex];photoLink.href=mediaItems[photoIndex];
+        photo.alt='Фотография автомобиля клиента '+(photoIndex+1);
+        counter.textContent=(photoIndex+1)+' / '+mediaItems.length;
+        back.disabled=mediaItems.length<2;forward.disabled=mediaItems.length<2;
+        back.hidden=forward.hidden=mediaItems.length<2;
+        counter.hidden=mediaItems.length<2;
+      }
+      var back=document.createElement('button');back.type='button';back.className='review-gallery-arrow is-prev';back.textContent='‹';back.setAttribute('aria-label','Предыдущее фото');
+      var forward=document.createElement('button');forward.type='button';forward.className='review-gallery-arrow is-next';forward.textContent='›';forward.setAttribute('aria-label','Следующее фото');
+      var counter=document.createElement('span');counter.className='review-gallery-count';
+      back.addEventListener('click',function(){showReviewPhoto(photoIndex-1)});
+      forward.addEventListener('click',function(){showReviewPhoto(photoIndex+1)});
+      gallery.appendChild(back);gallery.appendChild(forward);gallery.appendChild(counter);
+      var touchStart=0;
+      gallery.addEventListener('touchstart',function(e){touchStart=e.changedTouches[0].clientX},{passive:true});
+      gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showReviewPhoto(photoIndex+(delta<0?1:-1))},{passive:true});
+      showReviewPhoto(0);card.appendChild(gallery);
     }
     var who=document.createElement('div');who.className='review-name';who.textContent=rv.name;
     var text=document.createElement('p');text.className='review-text';text.textContent=rv.text||'';
