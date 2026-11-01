@@ -1776,7 +1776,7 @@ test("end to end: admin uploads via bot, edits photos, publishes, removes from s
     const site1 = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
     assert.equal(site1.reviews.length, 1, "review is on the site");
     assert.equal(site1.reviews[0].mediaItems.length, 1, "site shows the remaining photo");
-    assert.ok(calls.some(c => c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "sitedel:" + id), "admin gets a remove-from-site button");
+    assert.ok(calls.some(c => (c.payload.reply_markup?.inline_keyboard || []).some(row => row.some(b => b.callback_data === "sitedel:" + id))), "admin gets a remove-from-site button");
 
     // 4. /site lists it, and removal through the bot returns it to waiting
     await worker.fetch(webhookUpdate({ message: { message_id: 720, chat: adminChat, from, text: "/site" } }), reviewEnv(kv));
@@ -1871,5 +1871,59 @@ test("after rejection the same photo can be uploaded again as a new card", async
     const waiting = (await kv.list({ prefix: "pending:" })).keys.map(k => k.name.replace("pending:", ""));
     assert.equal(waiting.length, 1, "one new card is waiting");
     assert.ok(calls.some(c => (c.payload.reply_markup?.inline_keyboard || []).some(r => r.some(b => b.callback_data === "pub:" + waiting[0]))), "new card has publish button");
+  });
+});
+
+const REVIEW_PENDING = "-1001234567890_40";
+const pendingReview = (text, photos) => ({ id: REVIEW_PENDING, kind: "text", text, name: "Анна", anonymous: false, photos, videos: [], hasPhoto: photos.length > 0, fileId: photos.length ? photos[0].file_id : null });
+
+test("publishing warns about a phone number or link first; admin can publish anyway", async () => {
+  const kv = memoryKV();
+  await kv.put("pending:" + REVIEW_PENDING, JSON.stringify(pendingReview("Звоните +7 999 123-45-67", [{ file_id: "P1" }])));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "pub:" + REVIEW_PENDING)), reviewEnv(kv));
+    assert.equal(await kv.get("approved:" + REVIEW_PENDING), null, "not published yet");
+    assert.ok(calls.some(c => String(c.payload.text || "").includes("в тексте есть телефон")), "warning names the problem");
+    await worker.fetch(webhookUpdate(callback(ADMIN, "pubforce:" + REVIEW_PENDING)), reviewEnv(kv));
+    assert.ok(await kv.get("approved:" + REVIEW_PENDING), "published after the admin confirms");
+  });
+});
+
+test("rejection asks for a reason, which is written to the log and shown by /log", async () => {
+  const kv = memoryKV();
+  await kv.put("pending:" + REVIEW_PENDING, JSON.stringify(pendingReview("Хорошо", [{ file_id: "P1" }])));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "rej:" + REVIEW_PENDING)), reviewEnv(kv));
+    const ask = calls.find(c => String(c.payload.text || "").startsWith("Причина отказа?"));
+    assert.ok(ask, "reason is asked");
+    await worker.fetch(webhookUpdate(callback(ADMIN, "rejr:2:" + REVIEW_PENDING)), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: { message_id: 900, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text: "/log" } }), reviewEnv(kv));
+    const log = calls.find(c => String(c.payload.text || "").startsWith("📜 Журнал"));
+    assert.ok(log && log.payload.text.includes("отказ: Нет фото автомобиля"), "log shows the reason");
+  });
+});
+
+test("undo after publishing takes it back to waiting; undo after removal puts it back on the site", async () => {
+  const kv = memoryKV();
+  await kv.put("pending:" + REVIEW_PENDING, JSON.stringify(pendingReview("Хорошо", [{ file_id: "P1" }])));
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "pub:" + REVIEW_PENDING)), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(ADMIN, "undo:" + REVIEW_PENDING)), reviewEnv(kv));
+    assert.equal(await kv.get("approved:" + REVIEW_PENDING), null, "undo removed it from the site");
+    assert.ok(await kv.get("pending:" + REVIEW_PENDING), "back in waiting");
+    await kv.put("approved:" + REVIEW_PENDING, JSON.stringify({ id: REVIEW_PENDING, kind: "text", text: "Хорошо", name: "Анна", photos: [{ file_id: "P1" }], publishedAt: "2026-10-03T10:00:00Z" }));
+    await kv.delete("pending:" + REVIEW_PENDING);
+    await worker.fetch(webhookUpdate(callback(ADMIN, "sitedelok:" + REVIEW_PENDING)), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(ADMIN, "undo:" + REVIEW_PENDING)), reviewEnv(kv));
+    assert.ok(await kv.get("approved:" + REVIEW_PENDING), "undo put it back on the site");
+    assert.equal(await kv.get("pending:" + REVIEW_PENDING), null, "and out of waiting");
+  });
+});
+
+test("undo window is over after two minutes", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "undo:" + REVIEW_PENDING)), reviewEnv(kv));
+    assert.ok(calls.some(c => c.method === "answerCallbackQuery" && c.payload.text === "Время для отмены вышло"), "admin is told the time is over");
   });
 });

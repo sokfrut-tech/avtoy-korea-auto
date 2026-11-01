@@ -105,6 +105,7 @@ async function handlePhotoDeleteCallback(callback, env, adminIds) {
  if (session.type === "car") item.mediaType = item.photos.length ? "photo" : (postVideos(item).length ? "video" : "photo");
  item.photosEditedAt = new Date().toISOString();
  await env.REVIEWS.put(key, JSON.stringify(item));
+ await writeLog(env, adminId, "удалено фото: " + numbers.join(", "), session.type === "car" ? "машина" : "отзыв", session.id, "");
  await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Фото удалены. Осталось: " + item.photos.length + (item.photos.length ? " (номера 1–" + item.photos.length + ")" : "") + ".\nКогда всё готово, нажмите «✅ Опубликовать» на карточке модерации." });
  return answer("Фото удалены");
 }
@@ -124,6 +125,8 @@ const ADMIN_HELP_TEXT = [
  "",
  "Сайт:",
  "/site — что сейчас опубликовано. Убрать: 🗑 → Да.",
+ "/log — журнал действий, последние 20.",
+ "↩️ Отменить — 2 минуты после публикации или снятия.",
  "",
  "Карточка на модерации:",
  "✅ Опубликовать — выложить на сайт",
@@ -153,6 +156,7 @@ async function setAdminCommands(env, adminId) {
  await callTelegram(env, "setMyCommands", {
   commands: [
    { command: "site", description: "Что опубликовано на сайте" },
+   { command: "log", description: "Журнал действий администраторов" },
    { command: "help", description: "Подсказка администратора" },
    { command: "reply", description: "Ответить клиенту: /reply <chat_id> текст" }
   ],
@@ -199,9 +203,8 @@ async function handleSiteDeleteCallback(callback, env, adminIds) {
  }
  const match = data.match(/^sitedel(ok)?:(car_-?\d+_\d+|-?\d+_\d+)$/);
  if (!match || !env.REVIEWS) return answer("Материал не найден", true);
- const confirmed = Boolean(match[1]), id = match[2], isCar = id.startsWith("car_");
- const storedKey = (isCar ? "car_approved:" : "approved:") + id;
- const raw = await env.REVIEWS.get(storedKey);
+ const confirmed = Boolean(match[1]), id = match[2];
+ const raw = await env.REVIEWS.get((id.startsWith("car_") ? "car_approved:" : "approved:") + id);
  if (!raw) return answer("Уже не опубликовано на сайте", true);
  const record = JSON.parse(raw);
  if (!confirmed) {
@@ -212,26 +215,10 @@ async function handleSiteDeleteCallback(callback, env, adminIds) {
   });
   return answer("Подтвердите действие");
  }
- if (isCar) {
-  const car = { ...record };
-  delete car.publishedAt;
-  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
-  await env.REVIEWS.delete(storedKey);
-  await sendPendingCarCard(env, adminIds, car, id, "↩️ Снято с сайта. Объявление снова ожидает решения модератора.");
- } else {
-  const photos = Array.isArray(record.photos) ? record.photos : [];
-  const review = {
-   id, kind: record.kind, text: record.text, name: record.name, anonymous: !record.name, fileId: record.fileId,
-   photos, videos: Array.isArray(record.videos) ? record.videos : [],
-   hasPhoto: photos.length > 0 || Boolean(record.fileId),
-   unpublishedAt: new Date().toISOString()
-  };
-  await env.REVIEWS.put("pending:" + id, JSON.stringify(review));
-  await env.REVIEWS.delete(storedKey);
-  const uploadRaw = await env.REVIEWS.get("admin_upload:" + id);
-  if (uploadRaw) { const uploadState = JSON.parse(uploadRaw); uploadState.status = "pending"; await env.REVIEWS.put("admin_upload:" + id, JSON.stringify(uploadState), {expirationTtl:2592000}); }
-  await sendReviewCardTo(env, adminIds, review, id, "↩️ Снято с сайта. Отзыв снова ожидает решения модератора.");
- }
+ const removed = await unpublishItem(env, adminIds, id);
+ if (!removed) return answer("Уже не опубликовано на сайте", true);
+ await writeLog(env, fromId, "снят с сайта", id.startsWith("car_") ? "машина" : "отзыв", id, siteLabel(id, record));
+ await offerUndo(env, fromId, id, { action: "restore", record }, "↩️ Снято с сайта. Материал в ожидании модерации.");
  if (chat && messageId) await callTelegram(env, "deleteMessage", { chat_id: chat.id, message_id: messageId });
  return answer("Снято с сайта. Материал вернулся в ожидание");
 }
@@ -605,11 +592,146 @@ async function handleReviewSubmission(msg, env, adminIds) {
  }));
 }
 
+// --- Журнал, причины отказа, проверка перед публикацией, отмена ---
+const REJECT_REASONS = { "1": "Не по теме", "2": "Нет фото автомобиля", "3": "Дубль", "4": "Другое" };
+
+async function writeLog(env, adminId, action, kind, id, detail) {
+ if (!env.REVIEWS) return;
+ const at = new Date().toISOString();
+ const key = "log:" + at + "_" + Math.random().toString(36).slice(2, 8);
+ await env.REVIEWS.put(key, JSON.stringify({ at, adminId: String(adminId), action, kind, id, detail: String(detail || "").slice(0, 120) }), { expirationTtl: 2592000 });
+}
+
+async function showLog(chatId, env) {
+ if (!env.REVIEWS) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "Хранилище не настроено." });
+ const list = await env.REVIEWS.list({ prefix: "log:" });
+ const names = list.keys.map(k => k.name).slice(-20).reverse();
+ if (!names.length) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "Журнал пока пуст." });
+ const lines = [];
+ for (const name of names) {
+  const raw = await env.REVIEWS.get(name);
+  if (!raw) continue;
+  const e = JSON.parse(raw);
+  const when = new Date(Date.parse(e.at) + 3 * 3600 * 1000).toISOString().slice(5, 16).replace("T", " ");
+  lines.push(when + " — " + e.action + " (" + e.kind + ")" + (e.detail ? ": " + e.detail : ""));
+ }
+ return callTelegram(env, "sendMessage", { chat_id: chatId, text: "📜 Журнал, последние " + lines.length + " (время Москва):\n\n" + lines.join("\n") });
+}
+
+// Предупреждения перед публикацией: телефон, ссылка или ник в тексте, нет фото.
+function publishWarnings(text, photoCount) {
+ const body = String(text || "");
+ const warnings = [];
+ if (/(?<!\d)(?:\+?7|8)[\s().-]*\d(?:[\s().-]*\d){9}(?!\d)/.test(body)) warnings.push("в тексте есть телефон");
+ if (/https?:\/\/|t\.me\/|@[A-Za-z0-9_]{4,}/i.test(body)) warnings.push("в тексте есть ссылка или ник");
+ if (!photoCount) warnings.push("нет фото");
+ return warnings;
+}
+
+async function askPublishCheck(env, adminId, kind, id, warnings) {
+ const isCar = kind === "car";
+ await callTelegram(env, "sendMessage", {
+  chat_id: adminId,
+  text: "⚠️ Перед публикацией проверьте:\n• " + warnings.join("\n• ") + "\n\nЕсли всё в порядке, опубликуйте без проверки.",
+  reply_markup: { inline_keyboard: [
+   [{ text: "✅ Всё равно опубликовать", callback_data: (isCar ? "carpubforce:" : "pubforce:") + id }],
+   [{ text: "✏️ Исправить", callback_data: (isCar ? "caredit:" : "edit:") + id }]
+  ] }
+ });
+}
+
+async function askRejectReason(env, adminId, id) {
+ const buttons = Object.entries(REJECT_REASONS).map(([n, label]) => ({ text: label, callback_data: "rejr:" + n + ":" + id }));
+ await callTelegram(env, "sendMessage", {
+  chat_id: adminId,
+  text: "Причина отказа? Она попадёт в журнал, автор ничего не получит.",
+  reply_markup: { inline_keyboard: [buttons.slice(0, 2), buttons.slice(2)] }
+ });
+}
+
+async function handleRejectReasonCallback(callback, env, adminIds) {
+ const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
+ const fromId = String((callback.from && callback.from.id) || "");
+ if (!adminIds.includes(fromId)) return answer("Нет доступа", true);
+ const match = String(callback.data || "").match(/^rejr:([1-4]):((?:car_)?-?\d+_\d+)$/);
+ if (!match) return answer("Причина не распознана", true);
+ const label = REJECT_REASONS[match[1]];
+ const id = match[2];
+ await writeLog(env, fromId, "отказ: " + label, id.startsWith("car_") ? "машина" : "отзыв", id, "");
+ if (callback.message) await callTelegram(env, "deleteMessage", { chat_id: callback.message.chat.id, message_id: callback.message.message_id }).catch(() => {});
+ return answer("Причина записана: " + label);
+}
+
+// Кнопка «Отменить» на 2 минуты после публикации или снятия.
+async function offerUndo(env, adminId, id, state, text, extraRows) {
+ await env.REVIEWS.put("undo:" + id, JSON.stringify(state), { expirationTtl: 120 });
+ await callTelegram(env, "sendMessage", {
+  chat_id: adminId,
+  text: text + "\n\nОтменить можно в течение 2 минут.",
+  reply_markup: { inline_keyboard: [[{ text: "↩️ Отменить", callback_data: "undo:" + id }], ...(extraRows || [])] }
+ });
+}
+
+// Снимает материал с сайта и возвращает в ожидание. Возвращает прежнюю запись или null.
+async function unpublishItem(env, adminIds, id) {
+ const isCar = id.startsWith("car_");
+ const storedKey = (isCar ? "car_approved:" : "approved:") + id;
+ const raw = await env.REVIEWS.get(storedKey);
+ if (!raw) return null;
+ const record = JSON.parse(raw);
+ if (isCar) {
+  const car = { ...record };
+  delete car.publishedAt;
+  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
+  await env.REVIEWS.delete(storedKey);
+  await sendPendingCarCard(env, adminIds, car, id, "↩️ Снято с сайта. Объявление снова ожидает решения модератора.");
+ } else {
+  const photos = Array.isArray(record.photos) ? record.photos : [];
+  const review = {
+   id, kind: record.kind, text: record.text, name: record.name, anonymous: !record.name, fileId: record.fileId,
+   photos, videos: Array.isArray(record.videos) ? record.videos : [],
+   hasPhoto: photos.length > 0 || Boolean(record.fileId),
+   unpublishedAt: new Date().toISOString()
+  };
+  await env.REVIEWS.put("pending:" + id, JSON.stringify(review));
+  await env.REVIEWS.delete(storedKey);
+  const uploadRaw = await env.REVIEWS.get("admin_upload:" + id);
+  if (uploadRaw) { const uploadState = JSON.parse(uploadRaw); uploadState.status = "pending"; await env.REVIEWS.put("admin_upload:" + id, JSON.stringify(uploadState), {expirationTtl:2592000}); }
+  await sendReviewCardTo(env, adminIds, review, id, "↩️ Снято с сайта. Отзыв снова ожидает решения модератора.");
+ }
+ return record;
+}
+
+async function handleUndoCallback(callback, env, adminIds) {
+ const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
+ const fromId = String((callback.from && callback.from.id) || "");
+ if (!adminIds.includes(fromId)) return answer("Нет доступа", true);
+ const match = String(callback.data || "").match(/^undo:((?:car_)?-?\d+_\d+)$/);
+ if (!match || !env.REVIEWS) return answer("Не распознано", true);
+ const id = match[1];
+ const raw = await env.REVIEWS.get("undo:" + id);
+ if (!raw) return answer("Время для отмены вышло", true);
+ const state = JSON.parse(raw);
+ await env.REVIEWS.delete("undo:" + id);
+ const kind = id.startsWith("car_") ? "машина" : "отзыв";
+ if (state.action === "unpublish") {
+  const done = await unpublishItem(env, adminIds, id);
+  if (!done) return answer("Уже не на сайте", true);
+  await writeLog(env, fromId, "отмена публикации", kind, id, "");
+  return answer("Публикация отменена");
+ }
+  const isCar = id.startsWith("car_");
+  await env.REVIEWS.put((isCar ? "car_approved:" : "approved:") + id, JSON.stringify(state.record));
+  await env.REVIEWS.delete((isCar ? "car_pending:" : "pending:") + id);
+  await writeLog(env, fromId, "отмена снятия", kind, id, "");
+  return answer("Снова опубликовано на сайте");
+}
+
 async function handleReviewCallback(callback, env, adminIds) {
  const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
  const fromId = String((callback.from && callback.from.id) || "");
  if (!adminIds.includes(fromId)) return answer("Нет доступа", true);
- const match = String(callback.data || "").match(/^(pub|rej|anon|edit):(-?\d+_\d+)$/);
+ const match = String(callback.data || "").match(/^(pub|pubforce|rej|anon|edit):(-?\d+_\d+)$/);
  if (!match || !env.REVIEWS) return answer("Отзыв не найден", true);
  const [, action, id] = match;
  const raw = await env.REVIEWS.get(`pending:${id}`);
@@ -625,10 +747,15 @@ async function handleReviewCallback(callback, env, adminIds) {
   await env.REVIEWS.delete(`pending:${id}`);
   const uploadRaw = await env.REVIEWS.get("admin_upload:" + id);
   if (uploadRaw) { const uploadState = JSON.parse(uploadRaw); uploadState.status = "rejected"; await env.REVIEWS.put("admin_upload:" + id,JSON.stringify(uploadState),{expirationTtl:2592000}); }
+  await askRejectReason(env, fromId, id);
   return answer("Не публикуется");
  }
  const problem = reviewRuleProblem(review);
  if (problem) return answer(`Нельзя опубликовать: ${problem}`, true);
+ if (action === "pub") {
+  const warnings = publishWarnings(review.text, Array.isArray(review.photos) && review.photos.length ? review.photos.length : (review.fileId ? 1 : 0));
+  if (warnings.length) { await askPublishCheck(env, fromId, "review", id, warnings); return answer("Проверьте перед публикацией"); }
+ }
  const published = {
   id,
   kind: review.kind,
@@ -644,7 +771,8 @@ async function handleReviewCallback(callback, env, adminIds) {
  await env.REVIEWS.delete(`pending:${id}`);
  const uploadRaw = await env.REVIEWS.get("admin_upload:" + id);
  if (uploadRaw) { const uploadState = JSON.parse(uploadRaw); uploadState.status = "approved"; await env.REVIEWS.put("admin_upload:" + id,JSON.stringify(uploadState),{expirationTtl:2592000}); }
- await callTelegram(env, "sendMessage", { chat_id: fromId, text: "🌐 Отзыв опубликован на сайте.", reply_markup: { inline_keyboard: [[{ text: "🗑 Убрать с сайта", callback_data: "sitedel:" + id }]] } });
+ await writeLog(env, fromId, "опубликован", "отзыв", id, siteLabel(id, published));
+ await offerUndo(env, fromId, id, { action: "unpublish" }, "🌐 Отзыв опубликован на сайте.", [[{ text: "🗑 Убрать с сайта", callback_data: "sitedel:" + id }]]);
  return answer("Опубликовано на сайте");
 }
 
@@ -990,17 +1118,22 @@ async function handleCarCallback(callback, env, adminIds) {
  const answer = (text, alert=false) => callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
  const fromId = String((callback.from && callback.from.id) || "");
  if (!adminIds.includes(fromId)) return answer("Нет доступа",true);
- const match = String(callback.data || "").match(/^car(pub|rej|edit):(car_-?[0-9]+_[0-9]+)$/);
+ const match = String(callback.data || "").match(/^car(pub|pubforce|rej|edit):(car_-?[0-9]+_[0-9]+)$/);
  if (!match || !env.REVIEWS) return answer("Объявление не найдено",true);
  const action = match[1], id = match[2];
  const raw = await env.REVIEWS.get("car_pending:" + id);
  if (!raw) return answer("Объявление уже обработано или не найдено",true);
  const car = JSON.parse(raw);
  if (action === "edit") return beginModerationEdit(callback, env, "car", id, answer);
- if (action === "rej") { await env.REVIEWS.delete("car_pending:" + id); return answer("Объявление отклонено"); }
+ if (action === "rej") { await env.REVIEWS.delete("car_pending:" + id); await askRejectReason(env, fromId, id); return answer("Объявление отклонено"); }
+ if (action === "pub") {
+  const warnings = publishWarnings(car.caption, postPhotos(car).length + postVideos(car).length);
+  if (warnings.length) { await askPublishCheck(env, fromId, "car", id, warnings); return answer("Проверьте перед публикацией"); }
+ }
  await env.REVIEWS.put("car_approved:" + id,JSON.stringify({...car,publishedAt:new Date().toISOString()}));
  await env.REVIEWS.delete("car_pending:" + id);
- await callTelegram(env, "sendMessage", { chat_id: fromId, text: "🌐 Автомобиль опубликован на сайте.", reply_markup: { inline_keyboard: [[{ text: "🗑 Убрать с сайта", callback_data: "sitedel:" + id }]] } });
+ await writeLog(env, fromId, "опубликован", "машина", id, siteLabel(id, {caption: car.caption}));
+ await offerUndo(env, fromId, id, { action: "unpublish" }, "🌐 Автомобиль опубликован на сайте.", [[{ text: "🗑 Убрать с сайта", callback_data: "sitedel:" + id }]]);
  return answer("Автомобиль опубликован на сайте");
 }
 // --- Заявки с сайта: карточка администраторам, кнопка «Принять в работу», ответ клиенту в Telegram ---
@@ -1114,6 +1247,8 @@ export default {
      else if (String(cb.data || "").startsWith("mphoto:")) await handlePhotoDeleteCallback(cb, env, adminIds);
      else if (String(cb.data || "") === "adminhelp") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); await sendAdminHelp(env, cb.message.chat.id); }
      else if (String(cb.data || "") === "admincmd:site") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); await showSiteList(cb.message.chat.id, env); }
+     else if (String(cb.data || "").startsWith("rejr:")) await handleRejectReasonCallback(cb, env, adminIds);
+     else if (String(cb.data || "").startsWith("undo:")) await handleUndoCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("car")) await handleCarCallback(cb, env, adminIds);
      else await handleReviewCallback(cb, env, adminIds);
     } catch { return new Response("Telegram processing failed", { status: 502 }); }
@@ -1232,6 +1367,8 @@ export default {
      }
     } else if (text === "/site" && adminIds.includes(chatId)) {
      await showSiteList(chatId, env);
+    } else if (text === "/log" && adminIds.includes(chatId)) {
+     await showLog(chatId, env);
     } else if (text === "/help" && adminIds.includes(chatId)) {
      await setAdminCommands(env, chatId);
      await sendAdminHelp(env, chatId);
