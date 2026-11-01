@@ -1724,3 +1724,13 @@ test("photo removal can be cancelled, and wrong numbers are refused", async () =
     assert.equal(JSON.parse(await kv.get("car_pending:" + CAR_ID)).photos.length, 2, "cancel keeps both photos");
   });
 });
+
+test("site car list hides seller contacts but keeps the car description", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:car_100555_2001", JSON.stringify({ id: "car_100555_2001", caption: "KG Mobility Tivoli 2019\nДвигатель 1.6 дизель, 136 л.с.\nПробег 33 000 км\nПродавец: Владимир\nТел: +7 999 123-45-67\nЦена 1 716 671 ₽", photos: [{ file_id: "P1" }], videos: [], mediaType: "photo", publishedAt: "2026-10-31T10:00:00Z" }));
+  const body = await (await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv))).json();
+  const caption = body.cars[0].caption;
+  assert.ok(!/999|123-45|\+7/.test(caption), "phone is hidden");
+  assert.ok(!/Владимир|Продавец/i.test(caption), "seller name line is hidden");
+  assert.ok(caption.includes("Двигатель 1.6 дизель") && caption.includes("Пробег 33 000 км") && caption.includes("Цена 1 716 671"), "specs and price stay");
+});

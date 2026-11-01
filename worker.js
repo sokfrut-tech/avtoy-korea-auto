@@ -262,6 +262,16 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
 const THANKS_PATTERN = /спасибо|благодар/i;
 
 // Убираем рекламный хвост канала из описаний, оставляя полезный текст публикации.
+// На сайте в описании машины не показываем контакты продавца: строки с именем и связью по контакту.
+function publicCarCaption(value) {
+ return cleanPublicationText(value)
+  .split("\n")
+  .filter(line => !/^\s*(?:📲|📞|☎️?|👤|✉️?)?\s*(?:контакт|продавец|менеджер|связ|звон|позвон|тел\b|телефон|whats?app|viber|telegram|телеграм|написать|писать)/i.test(line))
+  .join("\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+}
+
 function cleanPublicationText(value) {
  return String(value || "")
   .replace(/\r/g, "")
@@ -1278,7 +1288,7 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photos = Array.isArray(car.photos) && car.photos.length ? car.photos.map((_,index)=>"/api/car-media/"+car.id+"/"+index) : (car.fileId ? ["/api/car-media/"+car.id+"/0"] : []); cars.push({id:car.id,caption:cleanPublicationText(car.caption),media:photos[0] || null,mediaItems:photos,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photos = Array.isArray(car.photos) && car.photos.length ? car.photos.map((_,index)=>"/api/car-media/"+car.id+"/"+index) : (car.fileId ? ["/api/car-media/"+car.id+"/0"] : []); cars.push({id:car.id,caption:publicCarCaption(car.caption),media:photos[0] || null,mediaItems:photos,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
