@@ -1895,38 +1895,155 @@ footer{border-top-color:#ffffff18}
 .car-lightbox-nav{display:flex;gap:12px}
 .car-lightbox button{all:unset;cursor:pointer;box-sizing:border-box;min-width:48px;height:48px;border-radius:999px;background:#1d2029;color:#f4f4f5;display:flex;align-items:center;justify-content:center;font-size:22px;padding:0 14px}
 
+
+/* Reference standard: AVTOY KOREA premium automotive landing */
+:root{--red:#f12f38;--navy:#071321;--bg:#071321;--panel:#111a27;--max:1400px}
+body{background:#f5f7fa;color:#111827;font-family:Inter,Arial,sans-serif}
+.wrap{width:min(1400px,calc(100% - 64px))}
+.topbar{background:#071321;border-bottom:1px solid #ffffff16;position:relative}
+.nav{min-height:96px;gap:22px}
+.brand{font-size:25px;letter-spacing:.04em;color:#fff;white-space:nowrap}
+.brand small{font-size:9px;letter-spacing:.16em;color:#aeb9c8}
+.nav-links{gap:clamp(12px,2.2vw,34px);font-size:14px;color:#e5eaf0;white-space:nowrap}
+.nav-links a{position:relative;padding:8px 0}
+.nav-links .nav-home:after{content:"";position:absolute;left:0;right:0;bottom:-9px;height:3px;background:var(--red);border-radius:3px}
+.nav-telegram{display:flex;align-items:center;gap:10px;white-space:nowrap;font-size:13px}
+.nav-telegram>span{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:#229ed9;color:white;font-size:19px}
+.nav-telegram small{display:block;color:#aeb9c8;font-size:11px;margin-top:2px}
+.nav .pill{border-radius:30px;padding:14px 24px;white-space:nowrap;background:var(--red);box-shadow:0 8px 22px #f12f3830}
+.hero-standard{height:clamp(430px,39vw,570px);position:relative;overflow:hidden;background:#091625;color:#fff;display:flex;align-items:center}
+.hero-standard-bg,.hero-standard-bg:after{position:absolute;inset:0}
+.hero-standard-bg:after{content:"";background:linear-gradient(90deg,#06111fe8 0%,#06111fa8 34%,#06111f20 72%),linear-gradient(0deg,#06111f55,transparent 40%)}
+.hero-standard .hero-slide{background-size:cover;background-position:center 55%}
+.hero-standard-content{position:relative;z-index:2;padding-top:18px}
+.hero-standard .eyebrow{color:#d5dce5;letter-spacing:.18em}
+.hero-standard h1{font-size:clamp(48px,5vw,76px);line-height:1.02;margin:20px 0 18px;letter-spacing:-.04em;color:#fff}
+.hero-standard h1 span{color:var(--red)}
+.hero-standard .intro{font-size:17px;line-height:1.55;color:#e0e5ec;max-width:430px}
+.hero-standard .btn{margin-top:26px;border-radius:28px;padding:16px 30px;min-width:210px}
+.hero-standard .hero-dots{position:static;margin:36px 0 0 44%;display:flex;gap:12px}
+.hero-standard .hero-dot{border:0;padding:0;width:10px;height:10px;cursor:pointer}
+.hero-standard .hero-dot.active{background:var(--red)}
+.hero-arrow{position:absolute;z-index:3;top:48%;width:42px;height:42px;border:0;border-radius:50%;background:#07132199;color:#fff;font-size:30px;cursor:pointer}
+.hero-prev{left:20px}.hero-next{right:20px}
+.benefit-strip{background:#071321;color:#fff;padding:22px 0 26px}
+.benefit-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px}
+.benefit-grid article{display:flex;align-items:center;gap:16px;padding:8px 18px;border-right:1px solid #ffffff12}
+.benefit-grid article:last-child{border:0}
+.benefit-icon{flex:0 0 56px;height:56px;border:2px solid #58687b;border-radius:50%;display:grid;place-items:center;font-size:27px;color:#e8edf5}
+.benefit-grid b{font-size:14px;line-height:1.3;display:block}
+.benefit-grid small{display:block;color:#aeb9c8;font-size:12px;line-height:1.45;margin-top:8px}
+#about{display:none}
+#cars{background:#f5f7fa;color:#111827;width:100%;max-width:none;padding:38px max(32px,calc((100% - 1400px)/2)) 64px;margin:0}
+#cars .eyebrow{display:none}
+#cars h2{font-size:clamp(28px,3vw,38px);margin:0 0 8px;color:#111827}
+#cars h2:after{content:"";display:inline-block}
+#cars .sub{color:#667085;font-size:15px;margin-bottom:26px}
+.cars{grid-template-columns:repeat(4,minmax(0,1fr));gap:22px}
+.cars>.card{background:#fff;color:#111827;border:1px solid #e3e7ed;border-radius:12px;overflow:hidden;padding:0;box-shadow:0 6px 22px #15223810}
+.car-photo{height:auto;aspect-ratio:16/10;background-size:cover}
+.car-body{padding:16px}
+.car-body h3{font-size:17px;color:#172033}
+.car-specs{color:#667085;font-size:13px}
+.car-foot{border-color:#edf0f4}
+.car-price{font-size:17px;color:#111827}
+.car-link{color:var(--red)}
+#order,#reviews,#telegram,#request{color:#172033}
+#order .card,#reviews .card{background:#fff;color:#172033;border-color:#e4e8ef}
+#order .card p,#reviews .review-text{color:#667085}
+#order .get{background:#fff;color:#172033;border-color:#e4e8ef}
+#order .get ul{color:#475467}
+#reviews .sub{color:#667085}
+#request .form-card{background:#fff;color:#172033;border-color:#e4e8ef}
+#request .form-intro,#request .hint{color:#667085}
+footer{background:#071321;color:#aeb9c8}
+@media(max-width:1100px){
+ .nav{gap:12px}.nav-links{gap:12px;font-size:12px}.nav-telegram{display:none}
+ .cars{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .benefit-grid{gap:6px}.benefit-grid article{padding:8px}
+}
+@media(max-width:780px){
+ .wrap{width:calc(100% - 32px)}
+ .topbar{position:sticky;top:0;z-index:20}
+ .nav{min-height:72px;gap:10px}
+ .brand{font-size:17px}.brand small{font-size:7px}
+ .nav-links{display:none}
+ .nav .pill{padding:11px 14px;font-size:12px}
+ .hero-standard{height:500px;align-items:flex-start}
+ .hero-standard-bg .hero-slide{background-position:62% center}
+ .hero-standard-bg:after{background:linear-gradient(90deg,#06111fe8 0%,#06111fa8 54%,#06111f35 100%),linear-gradient(0deg,#06111f66,transparent 45%)}
+ .hero-standard-content{padding-top:52px}
+ .hero-standard h1{font-size:clamp(44px,11vw,58px);margin:16px 0}
+ .hero-standard .intro{font-size:15px;max-width:300px}
+ .hero-standard .btn{width:auto;min-width:0;padding:14px 22px}
+ .hero-standard .hero-dots{margin:42px 0 0 36%}
+ .hero-arrow{top:auto;bottom:24px;width:34px;height:34px;font-size:24px}
+ .hero-prev{left:12px}.hero-next{right:12px}
+ .benefit-strip{padding:15px 0}
+ .benefit-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+ .benefit-grid article{gap:9px;padding:9px 3px;border-right:0}
+ .benefit-icon{flex-basis:42px;height:42px;font-size:20px}
+ .benefit-grid b{font-size:11px}.benefit-grid small{font-size:10px;margin-top:4px}
+ #cars{padding:30px 16px 42px}
+ #cars h2{font-size:26px}
+ #cars .sub{font-size:13px}
+ .cars{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .car-photo{aspect-ratio:4/3;height:auto}
+ .car-body{padding:11px}
+ .car-body h3{font-size:13px}
+ .car-specs{font-size:11px}
+ .car-price{font-size:14px}
+ #order,#reviews,#telegram,#request{padding-top:42px!important}
+}
+@media(max-width:380px){
+ .nav .pill{font-size:11px;padding:10px}
+ .hero-standard{height:470px}
+ .benefit-grid b{font-size:10px}
+ .cars{gap:8px}
+}
 </style>
 </head>
 <body>
 <header class="topbar"><div class="wrap nav">
-  <a class="brand" href="#">AVTO<em>Y</em> KOREA<small>КОРЕЯ · КИТАЙ · ОАЭ</small></a>
-  <nav class="nav-links">
-    <a href="#reviews">Отзывы</a>
-    <a href="#order">Как заказать</a>
-    <a class="pill" href="#request">Подобрать автомобиль</a>
+  <a class="brand" href="#" aria-label="AVTOY KOREA — главная">AVTO<em>Y</em> KOREA<small>АВТОМОБИЛИ ИЗ КОРЕИ</small></a>
+  <nav class="nav-links" aria-label="Основная навигация">
+    <a class="nav-home" href="#">Главная</a><a href="#cars">Каталог</a><a href="#about">О нас</a><a href="#order">Услуги</a><a href="#reviews">Отзывы</a><a href="#request">Контакты</a>
   </nav>
+  <a class="nav-telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener"><span>➤</span><b>Мы в Telegram<small>@avtoYkorea</small></b></a>
+  <a class="pill" href="#request">Оставить заявку</a>
 </div></header>
 
 <main>
-<section class="wrap hero">
-  <div>
-    <div class="eyebrow">Автомобили под заказ</div>
-    <h1>Подберём<br><span>ваш автомобиль</span></h1>
-    <p class="intro">Подберём автомобиль под ваш бюджет, проверим перед покупкой и организуем доставку из Кореи, Китая или ОАЭ.</p>
-    <div class="actions">
-      <a class="btn btn-red" href="#request">Оставить заявку →</a>
-      <a class="btn btn-dark telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">✈ Написать в Telegram</a>
-    </div>
+<section class="hero-standard">
+  <div class="hero-standard-bg">
+    <div class="hero-slide active" style="background-image:url('https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=2000&q=90')"></div>
+    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=2000&q=90')"></div>
+    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=2000&q=90')"></div>
   </div>
-  <div class="photo" aria-label="Галерея автомобилей">
-    <div class="hero-slide active" style="background-image:url('https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1400&q=85')"></div>
-    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1400&q=85')"></div>
-    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=1400&q=85')"></div>
-    <div class="hero-caption">Автомобили из Кореи, Китая и ОАЭ</div>
-    <div class="hero-dots" aria-hidden="true"><span class="hero-dot active"></span><span class="hero-dot"></span><span class="hero-dot"></span></div>
+  <button class="hero-arrow hero-prev" type="button" aria-label="Предыдущий слайд">‹</button><button class="hero-arrow hero-next" type="button" aria-label="Следующий слайд">›</button>
+  <div class="wrap hero-standard-content">
+    <div class="eyebrow">ПРЯМЫЕ ПОСТАВКИ ИЗ КОРЕИ</div>
+    <h1>Автомобили<br><span>из Кореи</span></h1>
+    <p class="intro">Надёжные, проверенные, с гарантией.<br>Подберём и доставим автомобиль под ваши требования.</p>
+    <a class="btn btn-red" href="#cars">Перейти в каталог <b>→</b></a>
+    <div class="hero-dots"><button class="hero-dot active" aria-label="Слайд 1"></button><button class="hero-dot" aria-label="Слайд 2"></button><button class="hero-dot" aria-label="Слайд 3"></button></div>
   </div>
 </section>
+<section class="benefit-strip"><div class="wrap benefit-grid">
+ <article><span class="benefit-icon">♧</span><div><b>Проверенные автомобили</b><small>Только честные предложения<br>и прозрачная история</small></div></article>
+ <article><span class="benefit-icon">◇</span><div><b>Гарантия<br>на все авто</b><small>Официальная гарантия<br>на основные узлы</small></div></article>
+ <article><span class="benefit-icon">▣</span><div><b>Быстрая доставка</b><small>Оптимальные сроки<br>и полное сопровождение</small></div></article>
+ <article><span class="benefit-icon">♧</span><div><b>Поддержка 24/7</b><small>Всегда на связи<br>на всех этапах</small></div></article>
+</div></section>
 
+<section class="wrap section" id="about" style="padding-bottom:20px"><div class="eyebrow">AVTOY KOREA</div><h2>Автомобили из Кореи под ваш запрос</h2><p class="sub">Помогаем выбрать автомобиль, проверить его перед покупкой и организовать доставку. Сопровождаем на каждом этапе.</p></section>
+<section class="wrap section" id="cars" style="padding-top:20px">
+  <div class="eyebrow">Наши автомобили</div>
+  <h2>Примеры выполненных заказов</h2>
+  <p class="sub">Точная стоимость зависит от курса и условий. Уточняйте у администратора.</p>
+  <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Объявления из Telegram появятся после проверки и одобрения администратором.</div></article></div>
+  <p class="cars-hint">← Листайте пальцем, справа видно следующую машину →</p>
+</section>
 <section class="wrap section" id="order" style="padding-top:40px">
   <div class="eyebrow">Как заказать</div>
   <h2>Четыре шага до вашего автомобиля</h2>
@@ -1948,13 +2065,6 @@ footer{border-top-color:#ffffff18}
   </div>
 </section>
 
-<section class="wrap section" id="cars" style="padding-top:20px">
-  <div class="eyebrow">Наши автомобили</div>
-  <h2>Примеры выполненных заказов</h2>
-  <p class="sub">Точная стоимость зависит от курса и условий. Уточняйте у администратора.</p>
-  <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Объявления из Telegram появятся после проверки и одобрения администратором.</div></article></div>
-  <p class="cars-hint">← Листайте пальцем, справа видно следующую машину →</p>
-</section>
 <section class="wrap section" id="reviews" style="padding-top:20px">
   <h2>Отзывы наших клиентов</h2>
   <p class="sub">Публикуем отзывы только с согласия клиентов.</p>
