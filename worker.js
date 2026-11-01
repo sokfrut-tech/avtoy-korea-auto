@@ -485,10 +485,12 @@ async function handleAdminMediaUpload(msg, env, adminIds) {
  const id = msg.media_group_id ? reviewIdFor(adminId, msg) : adminId + "_" + String(msg.message_id);
  const uploadKey = "admin_upload:" + id;
  let state = JSON.parse(await env.REVIEWS.get(uploadKey) || "null");
- if (state && ["approved","rejected"].includes(state.status)) {
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Это медиа уже обработано."});
+ if (state && state.status === "approved") {
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Это медиа уже опубликовано на сайте. Чтобы убрать его, откройте /site."});
   return true;
  }
+ // После отказа то же медиа можно прислать заново: появится новая карточка.
+ if (state && state.status === "rejected") state = null;
  if (!state) {
   const caption = String(msg.caption || "").trim().slice(0,1000);
   const review = {id,kind:video ? "video" : "text",text:caption,name:"Администратор загрузил",fileId:video ? video.file_id : photo.file_id,photos:photo ? [photo] : [],hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(caption),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:"Загрузка администратора"};
@@ -506,6 +508,16 @@ async function handleAdminMediaUpload(msg, env, adminIds) {
    await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Добавлено фото в альбом. Всего фото в отзыве: " + review.photos.length + ".",reply_markup:{inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}]]}});
    return true;
   }
+ }
+ // Повторная отправка того же медиа: карточка с кнопками приходит снова.
+ if (state.cardSent && !(msg.media_group_id && photo)) {
+  const pendingRaw = await env.REVIEWS.get("pending:" + id);
+  if (pendingRaw) {
+   await sendReviewCardTo(env, [adminId], JSON.parse(pendingRaw), id, "🔁 Повторная отправка: материал ещё ожидает решения модератора.");
+  } else {
+   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Материал уже обработан. Опубликованное можно посмотреть и убрать в /site."});
+  }
+  return true;
  }
  if (!state.cardSent) {
   const review = state.review;

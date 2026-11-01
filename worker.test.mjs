@@ -1848,3 +1848,28 @@ test("album photos waiting for the /review command are kept for 30 days, not one
   assert.ok(stash, "photo of the album is stashed");
   assert.ok(stash.opts.expirationTtl >= 2592000, "stash lives at least 30 days");
 });
+
+const adminPhoto = (messageId, fileId) => webhookUpdate({ message: { message_id: messageId, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, photo: [{ file_id: fileId + "_s", file_unique_id: fileId + "_su" }, { file_id: fileId, file_unique_id: fileId + "_u" }], caption: "Клиент: Анна. Хорошо" } });
+
+test("sending the same admin upload again brings back its card with buttons", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(adminPhoto(1100, "UP1"), reviewEnv(kv));
+    await worker.fetch(adminPhoto(1100, "UP1"), reviewEnv(kv));
+    const cards = calls.filter(c => (c.payload.reply_markup?.inline_keyboard || []).some(r => r.some(b => b.callback_data?.startsWith("pub:"))));
+    assert.ok(cards.length >= 2, "the card with buttons is sent again");
+  });
+});
+
+test("after rejection the same photo can be uploaded again as a new card", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(adminPhoto(1200, "UP2"), reviewEnv(kv));
+    const id = (await kv.list({ prefix: "pending:" })).keys[0].name.replace("pending:", "");
+    await worker.fetch(webhookUpdate(callback(ADMIN, "rej:" + id)), reviewEnv(kv));
+    await worker.fetch(adminPhoto(1201, "UP2"), reviewEnv(kv));
+    const waiting = (await kv.list({ prefix: "pending:" })).keys.map(k => k.name.replace("pending:", ""));
+    assert.equal(waiting.length, 1, "one new card is waiting");
+    assert.ok(calls.some(c => (c.payload.reply_markup?.inline_keyboard || []).some(r => r.some(b => b.callback_data === "pub:" + waiting[0]))), "new card has publish button");
+  });
+});
