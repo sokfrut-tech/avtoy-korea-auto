@@ -2001,11 +2001,23 @@ footer{background:#071321;color:#aeb9c8}
  .benefit-grid b{font-size:10px}
  .cars{gap:8px}
 }
+#cars .cars>.card .car-body{color:#172033}
+#cars .cars>.card .car-body p{color:#475467}
+#cars .cars>.card .car-body .car-specs{color:#667085}
+.brand-logo{display:block;width:250px;max-width:100%;height:auto}
+@media(max-width:900px){.brand-logo{width:205px}}
 </style>
 </head>
 <body>
 <header class="topbar"><div class="wrap nav">
-  <a class="brand" href="#" aria-label="AVTOY KOREA — главная">AVTO<em>Y</em> KOREA<small>АВТОМОБИЛИ ИЗ КОРЕИ</small></a>
+  <a class="brand" href="#" aria-label="AVTOY KOREA — главная">
+    <svg class="brand-logo" viewBox="0 0 330 100" role="img" aria-label="AVTOY KOREA — автомобили из Кореи" xmlns="http://www.w3.org/2000/svg">
+      <path d="M24 31 Q72 1 118 22 Q158 5 202 28 Q238 31 285 43" fill="none" stroke="#f5f7fb" stroke-width="4" stroke-linecap="round"/>
+      <path d="M91 22 Q119 7 151 18 Q170 22 183 26" fill="none" stroke="#f5f7fb" stroke-width="2.5" stroke-linecap="round"/>
+      <text x="165" y="66" text-anchor="middle" font-family="Arial,sans-serif" font-size="34" font-weight="900" letter-spacing="1"><tspan fill="#fff">AVTOY</tspan><tspan fill="#ef3038"> KOREA</tspan></text>
+      <text x="165" y="88" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" letter-spacing="3.2" fill="#aeb9c8">АВТОМОБИЛИ ИЗ КОРЕИ</text>
+    </svg>
+  </a>
   <nav class="nav-links" aria-label="Основная навигация">
     <a class="nav-home" href="#">Главная</a><a href="#cars">Каталог</a><a href="#order">О нас</a><a href="#order">Услуги</a><a href="#reviews">Отзывы</a><a href="#request">Контакты</a>
   </nav>
