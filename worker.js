@@ -2004,16 +2004,28 @@ footer{background:#071321;color:#aeb9c8}
 #cars .cars>.card .car-body{color:#172033}
 #cars .cars>.card .car-body p{color:#475467}
 #cars .cars>.card .car-body .car-specs{color:#667085}
+.brand-logo{display:block;width:250px;max-width:100%;height:auto}
+@media(max-width:900px){.brand-logo{width:205px}}
+#cars .cars>.card .car-body{color:#172033}
+#cars .cars>.card .car-body p{color:#475467}
+#cars .cars>.card .car-body .car-specs{color:#667085}
 </style>
 </head>
 <body>
 <header class="topbar"><div class="wrap nav">
-  <a class="brand" href="#" aria-label="AVTOY KOREA — главная">AVTO<em>Y</em> KOREA<small>КОРЕЯ · КИТАЙ · ОАЭ</small></a>
+  <a class="brand" href="#" aria-label="AVTOY KOREA — главная">
+    <svg class="brand-logo" viewBox="0 0 330 100" role="img" aria-label="AVTOY KOREA — автомобили из Кореи" xmlns="http://www.w3.org/2000/svg">
+      <path d="M24 31 Q72 1 118 22 Q158 5 202 28 Q238 31 285 43" fill="none" stroke="#f5f7fb" stroke-width="4" stroke-linecap="round"/>
+      <path d="M91 22 Q119 7 151 18 Q170 22 183 26" fill="none" stroke="#f5f7fb" stroke-width="2.5" stroke-linecap="round"/>
+      <text x="165" y="66" text-anchor="middle" font-family="Arial,sans-serif" font-size="34" font-weight="900" letter-spacing="1"><tspan fill="#fff">AVTOY</tspan><tspan fill="#ef3038"> KOREA</tspan></text>
+      <text x="165" y="88" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" letter-spacing="3.2" fill="#aeb9c8">АВТОМОБИЛИ ИЗ КОРЕИ</text>
+    </svg>
+  </a>
   <nav class="nav-links" aria-label="Основная навигация">
-    <a href="#reviews">Отзывы</a><a href="#order">Как заказать</a>
+    <a class="nav-home" href="#">Главная</a><a href="#cars">Каталог</a><a href="#order">О нас</a><a href="#order">Услуги</a><a href="#reviews">Отзывы</a><a href="#request">Контакты</a>
   </nav>
   <a class="nav-telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener"><span>➤</span><b>Мы в Telegram<small>@avtoYkorea</small></b></a>
-  <a class="pill" href="#request">Подобрать автомобиль</a>
+  <a class="pill" href="#request">Оставить заявку</a>
 </div></header>
 
 <main>
@@ -2025,10 +2037,10 @@ footer{background:#071321;color:#aeb9c8}
   </div>
   <button class="hero-arrow hero-prev" type="button" aria-label="Предыдущий слайд">‹</button><button class="hero-arrow hero-next" type="button" aria-label="Следующий слайд">›</button>
   <div class="wrap hero-standard-content">
-    <div class="eyebrow">Автомобили под заказ</div>
-    <h1>Подберём<br><span>ваш автомобиль</span></h1>
-    <p class="intro">Подберём автомобиль под ваш бюджет, проверим перед покупкой и организуем доставку из Кореи, Китая или ОАЭ.</p>
-    <a class="btn btn-red" href="#request">Оставить заявку →</a>
+    <div class="eyebrow">ПРЯМЫЕ ПОСТАВКИ ИЗ КОРЕИ</div>
+    <h1>Автомобили<br><span>из Кореи</span></h1>
+    <p class="intro">Надёжные, проверенные, с гарантией.<br>Подберём и доставим автомобиль под ваши требования.</p>
+    <a class="btn btn-red" href="#cars">Перейти в каталог <b>→</b></a>
     <div class="hero-dots"><button class="hero-dot active" aria-label="Слайд 1"></button><button class="hero-dot" aria-label="Слайд 2"></button><button class="hero-dot" aria-label="Слайд 3"></button></div>
   </div>
 </section>
