@@ -2007,7 +2007,7 @@ footer{background:#071321;color:#aeb9c8}
 <header class="topbar"><div class="wrap nav">
   <a class="brand" href="#" aria-label="AVTOY KOREA — главная">AVTO<em>Y</em> KOREA<small>АВТОМОБИЛИ ИЗ КОРЕИ</small></a>
   <nav class="nav-links" aria-label="Основная навигация">
-    <a class="nav-home" href="#">Главная</a><a href="#cars">Каталог</a><a href="#about">О нас</a><a href="#order">Услуги</a><a href="#reviews">Отзывы</a><a href="#request">Контакты</a>
+    <a class="nav-home" href="#">Главная</a><a href="#cars">Каталог</a><a href="#order">О нас</a><a href="#order">Услуги</a><a href="#reviews">Отзывы</a><a href="#request">Контакты</a>
   </nav>
   <a class="nav-telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener"><span>➤</span><b>Мы в Telegram<small>@avtoYkorea</small></b></a>
   <a class="pill" href="#request">Оставить заявку</a>
@@ -2330,17 +2330,25 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(fu
   article.appendChild(body); list.appendChild(article);
  });
 }).catch(function(){});
-// Плавная смена фотографий в главном блоке
+// Главный слайдер: автоматическая смена, точки и стрелки
 (function(){
-  var slides=document.querySelectorAll('.hero-slide');
-  var dots=document.querySelectorAll('.hero-dot');
-  if(slides.length<2)return;
+  var root=document.querySelector('.hero-standard');
+  if(!root)return;
+  var slides=root.querySelectorAll('.hero-slide');
+  var dots=root.querySelectorAll('.hero-dot');
+  if(!slides.length)return;
   var index=0;
-  window.setInterval(function(){
-    slides[index].classList.remove('active');dots[index].classList.remove('active');
-    index=(index+1)%slides.length;
-    slides[index].classList.add('active');dots[index].classList.add('active');
-  },5000);
+  function show(next){
+    slides[index].classList.remove('active');
+    if(dots[index])dots[index].classList.remove('active');
+    index=(next+slides.length)%slides.length;
+    slides[index].classList.add('active');
+    if(dots[index])dots[index].classList.add('active');
+  }
+  root.querySelector('.hero-prev')?.addEventListener('click',function(){show(index-1)});
+  root.querySelector('.hero-next')?.addEventListener('click',function(){show(index+1)});
+  dots.forEach(function(dot,i){dot.addEventListener('click',function(){show(i)})});
+  window.setInterval(function(){show(index+1)},5000);
 })();
 </script>
 </body>
