@@ -304,14 +304,22 @@ function publicCarCaption(value) {
 function cleanPublicationText(value) {
  return String(value || "")
   .replace(/\r/g, "")
-  // Удаляем российский номер телефона, сохраняя имя и остальной текст строки.
-  .replace(/(?<!\d)(?:\+?7|8)[\s().-]*\d(?:[\s().-]*\d){9}(?!\d)|(?<!\d)9(?:[\s().-]*\d){9}(?!\d)/g, "")
+  // Remove Telegram/channel presentation rather than reproducing a social post on the website.
+  .replace(/(?:^|\n)\s*(?:Источник|Переслано от|Forwarded from|Просмотры|Комментарии|Реакции)\s*[:：]?.*$/gim, "")
   .replace(/(?:^|\n)\s*Для заказа аналогичного автомобиля обращайтесь\s*:?[^]*$/i, "")
-  .replace(/^\s*Источник:\s*https?:\/\/\S+\s*$/gim, "")
-  .replace(/^\s*(?:📲\s*)?(?:тел(?:ефон)?\s*[:：]?|whats?app\s*\/\s*telegram|whats?app|telegram)\s*$/gim, "")
-  .replace(/^\s*Видео\s*$/gim, "")
   .replace(/(?:https?:\/\/)?t\.me\/[\w+/?=&%-]+/gi, "")
-  .replace(/^\s*[-–—|,;:]+\s*$/gm, "")
+  .replace(/^\s*@[\w]{3,}\s*$/gm, "")
+  .replace(/^\s*#[\p{L}\p{N}_]+(?:\s+#[\p{L}\p{N}_]+)*\s*$/gmu, "")
+  .replace(/^\s*(?:🔥|❤️|❤|👍|👎|👏|💬|👁️?|📲|📞|☎️?|👤|✉️?|▶️?|🎥|📷|🚘|🚗|⭐|✨|💯|🙏|😊|😍|😁|🥰|🤝|✅|❌|⚡|💥|🎉|💪|🫶|🤩|😎|🙌|🧡|💙|💚|💛|🖤|🤍|💬|🔗|➡️?|⬇️?|⬆️?)(?:\s|\uFE0F|\u200D|\u{1F3FB}-\u{1F3FF})*$/gmu, "")
+  // Remove phone numbers and contact-only lines; keep the customer's actual words.
+  .replace(/(?<!\d)(?:\+?7|8)[\s().-]*\d(?:[\s().-]*\d){9}(?!\d)|(?<!\d)9(?:[\s().-]*\d){9}(?!\d)/g, "")
+  .replace(/^\s*(?:тел(?:ефон)?|whats?app(?:\s*\/\s*telegram)?|telegram|телеграм|контакт|продавец|менеджер)\s*[:：]?.*$/gim, "")
+  // Emojis are useful in Telegram but are not part of the AVTOY KOREA website typography.
+  .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, "")
+  .replace(/^\s*Видео\s*$/gim, "")
+  .replace(/^\s*[-–—|,;:·•]+\s*$/gm, "")
+  .replace(/[ \t]{2,}/g, " ")
+  .replace(/\n[ \t]+/g, "\n")
   .replace(/\n{3,}/g, "\n\n")
   .trim();
 }
@@ -355,6 +363,8 @@ function largestPhotoItem(photos) {
 // Telegram отдаёт один и тот же снимок под разными file_id, но с одним file_unique_id.
 function photoItemFrom(raw) {
  const item = { file_id: String(raw.file_id) };
+ // Keep Telegram's stable media identity across retries and album merges.
+ // file_id can differ for the same original image; file_unique_id does not.
  if (raw.file_unique_id) item.file_unique_id = String(raw.file_unique_id);
  return item;
 }
@@ -1557,7 +1567,7 @@ export default {
       const photos = Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []);
       const mediaItems = r.kind === "video" ? (r.fileId ? [`/api/review-media/${r.id}/0`] : []) : photos.map((_,index)=>`/api/review-media/${r.id}/${index}`);
       const media = r.fileId ? `/api/review-media/${r.id}` : null;
-      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems});
+      reviews.push({id:r.id,kind:r.kind,name:r.anonymous ? "Клиент" : (cleanPublicationText(r.name || "Клиент").slice(0,60) || "Клиент"),text:cleanPublicationText(r.text),media,mediaItems});
      }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
@@ -1818,6 +1828,25 @@ footer{border-top-color:#ffffff18}
  .nav .pill{white-space:normal;text-align:center}
 }
 
+/* AVTOY KOREA review gallery: clean editorial photo mosaic, not a Telegram post */
+.review-carousel .reviews>article{display:flex;flex-direction:column;gap:0}
+.review-gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:clamp(112px,13vw,156px);gap:8px;width:100%;margin:0 0 4px;overflow:hidden;border-radius:16px}
+.review-gallery-item{display:block;min-width:0;min-height:0;overflow:hidden;background:#080b10;border-radius:12px}
+.review-gallery-item:first-child{grid-column:1/-1;grid-row:span 2}
+.review-gallery-item img{display:block;width:100%;height:100%;object-fit:cover;transition:transform .35s ease}
+.review-gallery-item:hover img{transform:scale(1.035)}
+.review-gallery.is-single{grid-template-columns:1fr;grid-auto-rows:auto}
+.review-gallery.is-single .review-gallery-item:first-child{grid-column:auto;grid-row:auto;aspect-ratio:16/10}
+.review-gallery.is-single .review-gallery-item img{object-fit:cover}
+.review-carousel .review-name{margin-top:12px}
+.review-carousel .review-text{white-space:pre-line;overflow-wrap:anywhere}
+@media(max-width:780px){
+ .review-gallery{grid-auto-rows:clamp(100px,29vw,138px);gap:6px;border-radius:13px}
+ .review-gallery-item{border-radius:9px}
+ .review-gallery.is-single .review-gallery-item:first-child{aspect-ratio:16/10}
+}
+@media(prefers-reduced-motion:reduce){.review-gallery-item img{transition:none}}
+
 /* Homepage customer reviews carousel */
 .review-carousel{position:relative}
 .review-carousel .reviews{display:flex;gap:18px;overflow-x:auto;overflow-y:hidden;padding:4px 3px 22px;scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain;scrollbar-width:none}
@@ -2069,7 +2098,17 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
   data.reviews.forEach(function(rv,index){
     var card=document.createElement('article');card.className='card';
     var mediaItems=Array.isArray(rv.mediaItems)&&rv.mediaItems.length?rv.mediaItems:(rv.media?[rv.media]:[]);
-    mediaItems.forEach(function(mediaUrl,mediaIndex){if(rv.kind==='video'){var label=document.createElement('div');label.className='review-video-label';label.textContent='Видеоотзыв клиента';if(mediaIndex===0)card.appendChild(label);var el=document.createElement('video');el.className='review-media';el.src=mediaUrl;el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видеоотзыв клиента');card.appendChild(el)}else{var el=document.createElement('img');el.className='review-media';el.src=mediaUrl;el.loading='lazy';el.alt='Фото автомобиля клиента '+(mediaIndex+1);card.appendChild(el)}});
+    if(rv.kind==='video'){
+      var label=document.createElement('div');label.className='review-video-label';label.textContent='Видео клиента';card.appendChild(label);
+      mediaItems.forEach(function(mediaUrl){var el=document.createElement('video');el.className='review-media';el.src=mediaUrl;el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео клиента');card.appendChild(el)});
+    }else if(mediaItems.length){
+      var gallery=document.createElement('div');gallery.className='review-gallery'+(mediaItems.length===1?' is-single':'');
+      mediaItems.forEach(function(mediaUrl,mediaIndex){
+        var link=document.createElement('a');link.className='review-gallery-item';link.href=mediaUrl;link.target='_blank';link.rel='noopener';link.setAttribute('aria-label','Открыть фотографию '+(mediaIndex+1));
+        var el=document.createElement('img');el.src=mediaUrl;el.loading=mediaIndex<2?'eager':'lazy';el.decoding='async';el.alt='Фотография автомобиля клиента '+(mediaIndex+1);link.appendChild(el);gallery.appendChild(link);
+      });
+      card.appendChild(gallery);
+    }
     var who=document.createElement('div');who.className='review-name';who.textContent=rv.name;
     var text=document.createElement('p');text.className='review-text';text.textContent=rv.text||'';
     card.appendChild(who);card.appendChild(text);list.appendChild(card);
