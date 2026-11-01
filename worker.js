@@ -459,6 +459,43 @@ async function handleForwardedGroupPost(msg, env, adminIds) {
  return true;
 }
 
+// Все части одного альбома приходят почти одновременно. Без очереди каждая часть видит,
+// что записи ещё нет, и создаёт свою карточку. Поэтому части одного альбома обрабатываются
+// по очереди внутри одного экземпляра Durable Object (AlbumSerializer), ключ — чат + media_group_id.
+// Если привязка не настроена (например, в тестах), обработка идёт напрямую.
+async function handleForwardedGroupPostSerialized(msg, env, adminIds) {
+ const origin = msg.forward_origin || null;
+ const isGroupForward = Boolean(origin && origin.type === "chat");
+ if (!isGroupForward || !msg.media_group_id || !env.ALBUM_SERIALIZER) {
+  return handleForwardedGroupPost(msg, env, adminIds);
+ }
+ const albumKey = "album:" + String(msg.chat && msg.chat.id || "") + "_" + String(msg.media_group_id);
+ const stub = env.ALBUM_SERIALIZER.get(env.ALBUM_SERIALIZER.idFromName(albumKey));
+ const response = await stub.fetch("https://album.internal/process", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ msg, adminIds })
+ });
+ if (!response.ok) throw new Error("Album serializer failed: " + response.status);
+ return (await response.json()).handled === true;
+}
+
+export class AlbumSerializer {
+ constructor(state, env) {
+  this.env = env;
+  this.chain = Promise.resolve();
+ }
+
+ async fetch(request) {
+  const { msg, adminIds } = await request.json();
+  // Очередь: каждая часть альбома ждёт завершения предыдущей, даже если KV отвечает медленно.
+  const run = this.chain.then(() => handleForwardedGroupPost(msg, this.env, adminIds));
+  this.chain = run.catch(() => {});
+  const handled = await run;
+  return Response.json({ handled });
+ }
+}
+
 async function handleAdminMediaUpload(msg, env, adminIds) {
  const adminId = String(msg.chat && msg.chat.id || "");
  if (!adminIds.includes(adminId) || (msg.forward_origin && msg.forward_origin.type === "channel")) return false;
@@ -1284,7 +1321,7 @@ export default {
     chat_id: target, text: body, disable_web_page_preview: true
    });
    try {
-    if (await handleForwardedGroupPost(msg, env, adminIds)) return Response.json({ok:true});
+    if (await handleForwardedGroupPostSerialized(msg, env, adminIds)) return Response.json({ok:true});
     if (await handleAdminMediaUpload(msg, env, adminIds)) return Response.json({ok:true});
     if (await handleAdminModerationEditReply(msg, env, adminIds)) return Response.json({ok:true});
     // /myid returns only the sender's own numeric Telegram ID for safe admin configuration.
