@@ -934,7 +934,7 @@ test("public car and review APIs remove Telegram promotional footer and source l
  await kv.put("approved:-100555_3383",JSON.stringify({id:"-100555_3383",kind:"video",text:"Отличный автомобиль!\n\nДля заказа аналогичного автомобиля обращайтесь:\n📞 Владимир: +79537477230\n📲 WhatsApp / Telegram\nhttps://t.me/avtoYkorea\nВидео\n\nИсточник: https://t.me/avtoYkorea/3383",name:"Клиент",fileId:"REVIEW_MEDIA"}));
  const siteEnv=reviewEnv(kv);
  const cars=await (await worker.fetch(new Request("https://worker.test/api/cars"),siteEnv)).json();
- assert.equal(cars.cars[0].caption,"Kia Sorento 2022\nПробег 20 000 км\nЦена под ключ: 1.716.671 ₽\n📞 Владимир:");
+ assert.equal(cars.cars[0].caption,"Kia Sorento 2022\nПробег 20 000 км\nЦена под ключ: 1.716.671 ₽\nВладимир:");
  assert.equal(Object.hasOwn(cars.cars[0],"sourceUrl"),false);
  const reviews=await (await worker.fetch(new Request("https://worker.test/api/reviews"),siteEnv)).json();
  assert.equal(reviews.reviews[0].text,"Отличный автомобиль!");

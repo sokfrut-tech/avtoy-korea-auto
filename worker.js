@@ -1567,7 +1567,7 @@ export default {
       const photos = uniqueFileItems(Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []));
       const mediaItems = r.kind === "video" ? (r.fileId ? [`/api/review-media/${r.id}/0`] : []) : photos.map((_,index)=>`/api/review-media/${r.id}/${index}`);
       const media = r.fileId ? `/api/review-media/${r.id}` : null;
-      reviews.push({id:r.id,kind:r.kind,name:r.anonymous ? "Клиент" : (cleanPublicationText(r.name || "Клиент").slice(0,60) || "Клиент"),text:cleanPublicationText(r.text),media,mediaItems});
+      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems});
      }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
@@ -2237,7 +2237,7 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
       gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showReviewPhoto(photoIndex+(delta<0?1:-1))},{passive:true});
       showReviewPhoto(0);card.appendChild(gallery);
     }
-    var who=document.createElement('div');who.className='review-name';who.textContent=rv.name;
+    var who=document.createElement('div');who.className='review-name';who.textContent='Клиент';
     var text=document.createElement('p');text.className='review-text';text.textContent=rv.text||'';
     card.appendChild(who);card.appendChild(text);list.appendChild(card);
     var dot=document.createElement('button');dot.type='button';dot.className='review-dot';dot.setAttribute('aria-label','Показать отзыв '+(index+1));
