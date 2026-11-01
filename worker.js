@@ -1564,7 +1564,7 @@ export default {
       const raw = await env.REVIEWS.get(key.name);
       if (!raw) continue;
       const r = JSON.parse(raw);
-      const photos = Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []);
+      const photos = uniqueFileItems(Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []));
       const mediaItems = r.kind === "video" ? (r.fileId ? [`/api/review-media/${r.id}/0`] : []) : photos.map((_,index)=>`/api/review-media/${r.id}/${index}`);
       const media = r.fileId ? `/api/review-media/${r.id}` : null;
       reviews.push({id:r.id,kind:r.kind,name:r.anonymous ? "Клиент" : (cleanPublicationText(r.name || "Клиент").slice(0,60) || "Клиент"),text:cleanPublicationText(r.text),media,mediaItems});
@@ -1582,7 +1582,7 @@ export default {
    if (!raw) return new Response("Not found", { status: 404 });
    const review = JSON.parse(raw);
    const index = Number(mediaMatch[2] || 0);
-   const photos = Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []);
+   const photos = uniqueFileItems(Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []));
    const fileId = review.kind === "video" ? (index === 0 ? review.fileId : null) : (photos[index] && photos[index].file_id);
    if (!fileId) return new Response("Not found", { status: 404 });
    const info = await callTelegram(env, "getFile", { file_id: fileId }).catch(() => null);
