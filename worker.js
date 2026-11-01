@@ -1830,7 +1830,7 @@ footer{border-top-color:#ffffff18}
 
 /* AVTOY KOREA review gallery: sized to the review card, not the viewport */
 .review-carousel .reviews>article{display:flex;flex-direction:column;align-items:stretch;gap:0}
-.review-gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:7px;width:100%;max-width:100%;aspect-ratio:1.48/1;margin:0 0 4px;overflow:hidden;border-radius:14px}
+.review-gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(82px,1fr));grid-auto-rows:minmax(82px,1fr);gap:7px;width:100%;max-width:100%;margin:0 0 4px;overflow:hidden;border-radius:14px}
 .review-gallery-item{display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;overflow:hidden;background:#090d13;border-radius:10px}
 .review-gallery-item:first-child{grid-column:1;grid-row:1/3}
 .review-gallery-item img{display:block;width:100%;height:100%;object-fit:contain;object-position:center;transition:transform .25s ease}
@@ -1838,11 +1838,10 @@ footer{border-top-color:#ffffff18}
 .review-gallery.is-single{display:block;aspect-ratio:16/10}
 .review-gallery.is-single .review-gallery-item:first-child{width:100%;height:100%}
 .review-gallery.is-single .review-gallery-item img{object-fit:contain}
-.review-gallery-item:nth-child(n+5){display:none}
 .review-carousel .review-name{margin-top:12px}
 .review-carousel .review-text{white-space:pre-line;overflow-wrap:anywhere}
 @media(max-width:780px){
- .review-gallery{gap:5px;aspect-ratio:1.42/1;border-radius:12px}
+ .review-gallery{grid-template-rows:repeat(2,minmax(72px,1fr));grid-auto-rows:minmax(72px,1fr);gap:5px;border-radius:12px}
  .review-gallery-item{border-radius:8px}
  .review-gallery.is-single{aspect-ratio:16/10}
 }
