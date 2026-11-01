@@ -2001,16 +2001,19 @@ footer{background:#071321;color:#aeb9c8}
  .benefit-grid b{font-size:10px}
  .cars{gap:8px}
 }
+#cars .cars>.card .car-body{color:#172033}
+#cars .cars>.card .car-body p{color:#475467}
+#cars .cars>.card .car-body .car-specs{color:#667085}
 </style>
 </head>
 <body>
 <header class="topbar"><div class="wrap nav">
-  <a class="brand" href="#" aria-label="AVTOY KOREA — главная">AVTO<em>Y</em> KOREA<small>АВТОМОБИЛИ ИЗ КОРЕИ</small></a>
+  <a class="brand" href="#" aria-label="AVTOY KOREA — главная">AVTO<em>Y</em> KOREA<small>КОРЕЯ · КИТАЙ · ОАЭ</small></a>
   <nav class="nav-links" aria-label="Основная навигация">
-    <a class="nav-home" href="#">Главная</a><a href="#cars">Каталог</a><a href="#order">О нас</a><a href="#order">Услуги</a><a href="#reviews">Отзывы</a><a href="#request">Контакты</a>
+    <a href="#reviews">Отзывы</a><a href="#order">Как заказать</a>
   </nav>
   <a class="nav-telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener"><span>➤</span><b>Мы в Telegram<small>@avtoYkorea</small></b></a>
-  <a class="pill" href="#request">Оставить заявку</a>
+  <a class="pill" href="#request">Подобрать автомобиль</a>
 </div></header>
 
 <main>
@@ -2022,10 +2025,10 @@ footer{background:#071321;color:#aeb9c8}
   </div>
   <button class="hero-arrow hero-prev" type="button" aria-label="Предыдущий слайд">‹</button><button class="hero-arrow hero-next" type="button" aria-label="Следующий слайд">›</button>
   <div class="wrap hero-standard-content">
-    <div class="eyebrow">ПРЯМЫЕ ПОСТАВКИ ИЗ КОРЕИ</div>
-    <h1>Автомобили<br><span>из Кореи</span></h1>
-    <p class="intro">Надёжные, проверенные, с гарантией.<br>Подберём и доставим автомобиль под ваши требования.</p>
-    <a class="btn btn-red" href="#cars">Перейти в каталог <b>→</b></a>
+    <div class="eyebrow">Автомобили под заказ</div>
+    <h1>Подберём<br><span>ваш автомобиль</span></h1>
+    <p class="intro">Подберём автомобиль под ваш бюджет, проверим перед покупкой и организуем доставку из Кореи, Китая или ОАЭ.</p>
+    <a class="btn btn-red" href="#request">Оставить заявку →</a>
     <div class="hero-dots"><button class="hero-dot active" aria-label="Слайд 1"></button><button class="hero-dot" aria-label="Слайд 2"></button><button class="hero-dot" aria-label="Слайд 3"></button></div>
   </div>
 </section>
