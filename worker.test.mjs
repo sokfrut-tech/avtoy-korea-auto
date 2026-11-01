@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker from "./worker.js";
+import worker, { AlbumSerializer } from "./worker.js";
 
 const env = {
   TELEGRAM_BOT_TOKEN: "test-token",
@@ -1925,5 +1925,43 @@ test("undo window is over after two minutes", async () => {
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate(callback(ADMIN, "undo:" + REVIEW_PENDING)), reviewEnv(kv));
     assert.ok(calls.some(c => c.method === "answerCallbackQuery" && c.payload.text === "Время для отмены вышло"), "admin is told the time is over");
+  });
+});
+
+// Регрессия: все части альбома из ГРУППЫ отзывов, пересланного админом, приходят одновременно.
+// Раньше каждая часть создавала свою карточку модерации.
+function albumSerializerEnv(kv) {
+  const instances = new Map();
+  const serializerEnv = { ...reviewEnv(kv) };
+  serializerEnv.ALBUM_SERIALIZER = {
+    idFromName: name => name,
+    get: id => {
+      if (!instances.has(id)) instances.set(id, new AlbumSerializer(null, serializerEnv));
+      const instance = instances.get(id);
+      return { fetch: (url, init) => instance.fetch(new Request(url, init)) };
+    },
+  };
+  return serializerEnv;
+}
+
+function groupForwardPart(privateMessageId, originId, mediaGroupId, extra = {}) {
+  return { message_id: privateMessageId, chat: { id: 111111111, type: "private" }, from: { id: 111111111, first_name: "Admin" },
+    media_group_id: mediaGroupId,
+    forward_origin: { type: "chat", date: 1790000000, sender_chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, message_id: originId },
+    ...extra };
+}
+
+test("four album parts of a forwarded group post, sent at the same time, create exactly one moderation card", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const parts = [
+      groupForwardPart(401, 901, "fw-race", { caption: "Hyundai Tucson 2021", photo: [{ file_id: "P1" }] }),
+      groupForwardPart(402, 902, "fw-race", { photo: [{ file_id: "P2" }] }),
+      groupForwardPart(403, 903, "fw-race", { photo: [{ file_id: "P3" }] }),
+      groupForwardPart(404, 904, "fw-race", { photo: [{ file_id: "P4" }] }),
+    ];
+    const sharedEnv = albumSerializerEnv(kv);
+    await Promise.all(parts.map(part => worker.fetch(webhookUpdate({ message: part }), sharedEnv)));
+    assert.equal(reviewCardCount(calls), 1, "one album, one moderation card");
   });
 });

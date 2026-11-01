@@ -5,3 +5,12 @@ compatibility_date = "2026-10-23"
 [[kv_namespaces]]
 binding = "REVIEWS"
 id = "302a622dc2514025b2118c8f3216beac"
+
+# Исполнитель альбомов из пересланных постов группы: одна карточка на весь альбом.
+[[durable_objects.bindings]]
+name = "ALBUM_SERIALIZER"
+class_name = "AlbumSerializer"
+
+[[migrations]]
+tag = "v1-album-serializer"
+new_classes = ["AlbumSerializer"]
