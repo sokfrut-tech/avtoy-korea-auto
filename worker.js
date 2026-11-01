@@ -1608,6 +1608,23 @@ footer{border-top-color:#ffffff18}
 @media(max-width:780px){.review-carousel .reviews{gap:12px;padding-bottom:16px}.review-carousel .reviews>article{flex:0 0 min(82%,340px);padding:14px;border-radius:19px}.review-carousel .review-media{height:auto;aspect-ratio:4/3}.review-carousel video.review-media{aspect-ratio:16/9;object-fit:contain}.review-carousel .review-name{font-size:13px}.review-carousel .review-text{font-size:13px;line-height:1.55}.review-arrow{width:38px;height:38px}}
 @media(max-width:420px){.review-carousel .reviews>article{flex-basis:88%}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}.review-carousel .reviews{scroll-behavior:auto}}
+
+/* Машины: прокрутка вбок по одной машине; фото внутри машины — ряды миниатюр */
+.cars{display:flex!important;grid-template-columns:none!important;overflow-x:auto;scroll-snap-type:x mandatory;gap:14px!important;padding:4px 2px 18px;scrollbar-width:none;overscroll-behavior-x:contain}
+.cars::-webkit-scrollbar{display:none}
+.cars>article{flex:0 0 min(88%,420px);min-width:0;scroll-snap-align:start;height:auto}
+.car-thumbs{display:grid;grid-template-columns:repeat(auto-fill,56px);gap:6px;justify-content:start;margin:14px 0 0}
+.car-thumb{all:unset;cursor:zoom-in;box-sizing:border-box;width:56px;height:56px;border-radius:9px;overflow:hidden;background:#0b0c0f;border:1px solid #2a2e38;position:relative;display:block}
+.car-thumb img,.car-thumb video{width:100%;height:100%;object-fit:cover;display:block}
+.car-thumb.is-video:after{content:"▶";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;background:#0006}
+.car-text{white-space:pre-line;max-width:60ch;font-size:14px;line-height:1.6;color:#c7c9d0;margin:10px 0 0}
+.car-lightbox{position:fixed;inset:0;z-index:999;background:rgba(5,6,8,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:16px;box-sizing:border-box}
+.car-lightbox-bar{position:absolute;top:12px;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:0 16px;color:#c9ccd4;font-size:14px}
+.car-lightbox-stage{width:min(92vw,1000px);max-height:78vh;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;border-radius:14px;background:#0b0c0f;overflow:hidden}
+.car-lightbox-stage img,.car-lightbox-stage video{max-width:100%;max-height:100%;object-fit:contain}
+.car-lightbox-nav{display:flex;gap:12px}
+.car-lightbox button{all:unset;cursor:pointer;box-sizing:border-box;min-width:48px;height:48px;border-radius:999px;background:#1d2029;color:#f4f4f5;display:flex;align-items:center;justify-content:center;font-size:22px;padding:0 14px}
+
 </style>
 </head>
 <body>
@@ -1830,19 +1847,66 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
   list.addEventListener('scroll',updateReviewControls,{passive:true});window.addEventListener('resize',updateReviewControls);updateReviewControls();
 }).catch(function(){});
 // Каталог показывает только одобренные публикации из Telegram
-fetch('/api/cars',{cache:'no-store'}).then(r=>r.json()).then(data=>{
- const list=document.getElementById('cars-list'); if(!list || !data.cars || !data.cars.length)return; list.textContent='';
- data.cars.forEach(car=>{
-  const article=document.createElement('article'); article.className='card car-card';
-  (Array.isArray(car.mediaItems)&&car.mediaItems.length?car.mediaItems:(car.media?[car.media]:[])).forEach(function(mediaUrl,index){if(car.mediaType==='video'){const video=document.createElement('video');video.className='review-media';video.src=mediaUrl;video.controls=true;video.playsInline=true;video.preload='metadata';article.appendChild(video)}else{const img=document.createElement('img');img.className='review-media';img.src=mediaUrl;img.alt='Фотография автомобиля '+(index+1);img.loading='lazy';article.appendChild(img)}});
-  const body=document.createElement('div');body.className='car-body';
-  const title=document.createElement('h3');title.textContent=(car.caption||'Автомобиль из объявления').split('\\n')[0].slice(0,120);
-  const desc=document.createElement('div');desc.className='car-specs';desc.style.display='block';desc.style.whiteSpace='pre-line';desc.textContent=car.caption||'Описание не указано';
-  body.appendChild(title);body.appendChild(desc);
-
-  article.appendChild(body);list.appendChild(article);
+fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
+ var list=document.getElementById('cars-list'); if(!list || !data.cars || !data.cars.length)return; list.textContent='';
+ var NL=String.fromCharCode(10);
+ var lightbox=null, items=[], current=0;
+ function onKey(e){ if(e.key==='Escape')closeBox(); else if(e.key==='ArrowRight')show(current+1); else if(e.key==='ArrowLeft')show(current-1); }
+ function closeBox(){ if(lightbox){ lightbox.remove(); lightbox=null; } document.removeEventListener('keydown', onKey); }
+ function show(index){
+  if(!lightbox||!items.length)return;
+  current=(index+items.length)%items.length;
+  var item=items[current], stage=lightbox.querySelector('.car-lightbox-stage');
+  stage.textContent='';
+  var el=document.createElement(item.video?'video':'img'); el.src=item.url;
+  if(item.video){el.controls=true;el.playsInline=true;} else {el.alt='Фото автомобиля '+(current+1);}
+  stage.appendChild(el);
+  lightbox.querySelector('.car-lightbox-count').textContent=(current+1)+' / '+items.length;
+ }
+ function openBox(index){
+  closeBox();
+  lightbox=document.createElement('div'); lightbox.className='car-lightbox';
+  lightbox.setAttribute('role','dialog'); lightbox.setAttribute('aria-modal','true'); lightbox.setAttribute('aria-label','Просмотр фото');
+  var bar=document.createElement('div'); bar.className='car-lightbox-bar';
+  var count=document.createElement('span'); count.className='car-lightbox-count';
+  var close=document.createElement('button'); close.type='button'; close.setAttribute('aria-label','Закрыть просмотр'); close.textContent='×'; close.onclick=closeBox;
+  bar.appendChild(count); bar.appendChild(close);
+  var stage=document.createElement('div'); stage.className='car-lightbox-stage';
+  var nav=document.createElement('div'); nav.className='car-lightbox-nav';
+  var prev=document.createElement('button'); prev.type='button'; prev.setAttribute('aria-label','Предыдущее фото'); prev.textContent='‹'; prev.onclick=function(){show(current-1)};
+  var next=document.createElement('button'); next.type='button'; next.setAttribute('aria-label','Следующее фото'); next.textContent='›'; next.onclick=function(){show(current+1)};
+  nav.appendChild(prev); nav.appendChild(next);
+  lightbox.appendChild(bar); lightbox.appendChild(stage); lightbox.appendChild(nav);
+  lightbox.addEventListener('click', function(e){ if(e.target===lightbox) closeBox(); });
+  document.body.appendChild(lightbox);
+  document.addEventListener('keydown', onKey);
+  show(index);
+ }
+ data.cars.forEach(function(car){
+  var media=Array.isArray(car.mediaItems)&&car.mediaItems.length?car.mediaItems:(car.media?[car.media]:[]);
+  var isVideo=car.mediaType==='video';
+  var article=document.createElement('article'); article.className='card car-card';
+  var body=document.createElement('div'); body.className='car-body';
+  var title=document.createElement('h3'); title.textContent=(car.caption||'Автомобиль из объявления').split(NL)[0].slice(0,120);
+  var desc=document.createElement('p'); desc.className='car-text'; desc.textContent=car.caption||'Описание не указано';
+  body.appendChild(title); body.appendChild(desc);
+  if(media.length){
+   var thumbs=document.createElement('div'); thumbs.className='car-thumbs';
+   var carItems=media.map(function(url){return {url:url,video:isVideo};});
+   media.forEach(function(url,index){
+    var btn=document.createElement('button'); btn.type='button'; btn.className='car-thumb'+(isVideo?' is-video':'');
+    btn.setAttribute('aria-label','Открыть фото '+(index+1)+' на весь экран');
+    var t=document.createElement(isVideo?'video':'img'); t.src=url;
+    if(isVideo){t.muted=true;t.preload='metadata';} else {t.alt='';t.loading='lazy';}
+    btn.appendChild(t);
+    btn.onclick=function(){ items=carItems; openBox(index); };
+    thumbs.appendChild(btn);
+   });
+   body.appendChild(thumbs);
+  }
+  article.appendChild(body); list.appendChild(article);
  });
-}).catch(()=>{});
+}).catch(function(){});
 // Плавная смена фотографий в главном блоке
 (function(){
   var slides=document.querySelectorAll('.hero-slide');
