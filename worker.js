@@ -2012,8 +2012,8 @@ footer{background:#071321;color:#aeb9c8}
 <header class="topbar"><div class="wrap nav">
   <a class="brand" href="#" aria-label="AVTOY KOREA — главная">
     <svg class="brand-logo" viewBox="0 0 330 100" role="img" aria-label="AVTOY KOREA — автомобили из Кореи" xmlns="http://www.w3.org/2000/svg">
-      <path d="M24 31 Q72 1 118 22 Q158 5 202 28 Q238 31 285 43" fill="none" stroke="#f5f7fb" stroke-width="4" stroke-linecap="round"/>
-      <path d="M91 22 Q119 7 151 18 Q170 22 183 26" fill="none" stroke="#f5f7fb" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M22 43 C43 33 65 27 91 20 C112 13 133 10 153 12 C178 14 197 22 218 31 C237 35 260 38 288 42" fill="none" stroke="#f5f7fb" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M91 24 C111 15 132 13 153 15 C172 16 190 22 207 29" fill="none" stroke="#f5f7fb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
       <text x="165" y="66" text-anchor="middle" font-family="Arial,sans-serif" font-size="34" font-weight="900" letter-spacing="1"><tspan fill="#fff">AVTOY</tspan><tspan fill="#ef3038"> KOREA</tspan></text>
       <text x="165" y="88" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" letter-spacing="3.2" fill="#aeb9c8">АВТОМОБИЛИ ИЗ КОРЕИ</text>
     </svg>
