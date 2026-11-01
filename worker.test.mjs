@@ -1837,3 +1837,14 @@ test("buttons in the help run /site and show the help again, so admins need not 
     assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 Сейчас на сайте: 1")), "button shows the site list");
   });
 });
+
+test("album photos waiting for the /review command are kept for 30 days, not one day", async () => {
+  const stored = [];
+  const kv = { ...memoryKV(), async put(k, v, opts) { stored.push({ k, opts }); } };
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate({ message: { message_id: 950, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { id: 555 }, media_group_id: "7777", photo: [{ file_id: "G1", file_unique_id: "gu1" }] } }), reviewEnv(kv));
+  });
+  const stash = stored.find(x => x.k.startsWith("album_stash:"));
+  assert.ok(stash, "photo of the album is stashed");
+  assert.ok(stash.opts.expirationTtl >= 2592000, "stash lives at least 30 days");
+});
