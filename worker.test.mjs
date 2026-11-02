@@ -1968,11 +1968,11 @@ test("four album parts of a forwarded group post, sent at the same time, create 
 });
 
 
-test("static image assets are restored and non-empty", () => {
-  for (const file of ["public/assets/logo.jpg", "public/assets/kia-sportage.jpg"]) {
-    assert.ok(fs.existsSync(file), file + " exists");
-    assert.ok(fs.statSync(file).size > 0, file + " is non-empty");
-  }
+test("image asset sources exist and decode to expected binary sizes", () => {
+  const logo = Buffer.from(fs.readFileSync("assets-src/logo.jpg.b64", "utf8").replace(/\s+/g, ""), "base64");
+  const sportage = Buffer.from(fs.readFileSync("assets-src/kia-sportage.jpg.b64", "utf8").replace(/\s+/g, ""), "base64");
+  assert.equal(logo.length, 18979);
+  assert.equal(sportage.length, 16326);
 });
 
 test("homepage references externalized logo and Sportage asset", async () => {
