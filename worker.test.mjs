@@ -2219,3 +2219,79 @@ test("car catalogue exposes mixed photo and video media with separate playback U
   assert.ok(html.includes("item.type==='video'"), "each gallery item keeps its own media type");
   assert.ok(html.includes("createCarMedia"), "gallery creates photo and video elements per item");
 });
+
+
+test("car import removes byte-identical reuploads but keeps different angles", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  const bytesByPath = {
+    "photos/a.jpg": new Uint8Array([1, 2, 3, 4]),
+    "photos/b.jpg": new Uint8Array([1, 2, 3, 4]),
+    "photos/c.jpg": new Uint8Array([9, 8, 7, 6]),
+  };
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    // Telegram's file-download URL also starts with api.telegram.org; match it first.
+    if (url.includes("/file/bot")) {
+      const path = url.slice(url.indexOf("/file/bot"));
+      const key = path.endsWith("/photos/a.jpg") ? "photos/a.jpg" : path.endsWith("/photos/b.jpg") ? "photos/b.jpg" : "photos/c.jpg";
+      return new Response(bytesByPath[key], { headers: { "content-type": "image/jpeg" } });
+    }
+    if (url.startsWith("https://api.telegram.org/")) {
+      const method = new URL(url).pathname.split("/").pop();
+      const payload = JSON.parse(init.body || "{}");
+      if (method === "getFile") {
+        const suffix = payload.file_id.toLowerCase();
+        return Response.json({ ok: true, result: { file_path: "photos/" + suffix + ".jpg" } });
+      }
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    await kv.put("import_pending:-100555_601", JSON.stringify({
+      chat: { id: -100555, username: "avtoYkorea" },
+      message_id: 601,
+      sourceDate: Math.floor(Date.UTC(2026, 5, 1) / 1000),
+      caption: "Kia Sorento",
+      photo: [
+        { file_id: "A", file_unique_id: "UID_A" },
+        { file_id: "B", file_unique_id: "UID_B" },
+        { file_id: "C", file_unique_id: "UID_C" }
+      ]
+    }));
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_601")), reviewEnv(kv));
+    const car = JSON.parse(await kv.get("car_pending:car_100555_601"));
+    assert.deepEqual(car.photos.map(item => item.file_id), ["A", "C"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("car import keeps a photo when Telegram content verification fails", async () => {
+  const kv = memoryKV();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url.startsWith("https://api.telegram.org/")) {
+      const method = new URL(url).pathname.split("/").pop();
+      if (method === "getFile") return Response.json({ ok: false, description: "temporary error" });
+      return Response.json({ ok: true, result: {} });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    await kv.put("import_pending:-100555_602", JSON.stringify({
+      chat: { id: -100555, username: "avtoYkorea" },
+      message_id: 602,
+      sourceDate: Math.floor(Date.UTC(2026, 5, 1) / 1000),
+      caption: "Hyundai Tucson",
+      photo: [{ file_id: "KEEP_ME", file_unique_id: "KEEP_UID" }]
+    }));
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_602")), reviewEnv(kv));
+    const car = JSON.parse(await kv.get("car_pending:car_100555_602"));
+    assert.deepEqual(car.photos.map(item => item.file_id), ["KEEP_ME"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
