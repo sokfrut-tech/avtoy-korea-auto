@@ -2100,7 +2100,9 @@ footer{background:#071321;color:#aeb9c8}
  .benefit-grid b{font-size:10px}
  .cars{gap:8px}
 }
-#cars .cars>.card{background:var(--panel);border:1px solid var(--line);color:var(--text)}
+#cars{background:var(--bg);color:var(--text)}
+#cars .sub{color:var(--muted)}
+#cars .cars>.card{background:var(--panel);border:1px solid var(--line);color:var(--text);box-shadow:0 12px 34px #0005}
 #cars .cars>.card .car-body{color:var(--text)}
 #cars .cars>.card .car-body p{color:var(--muted)}
 #cars .cars>.card .car-body .car-specs{color:#c7c9d0}
