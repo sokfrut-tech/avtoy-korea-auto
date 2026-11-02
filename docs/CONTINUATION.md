@@ -143,3 +143,13 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Fix in current branch: route admin group media through one staged-import path only; group admin albums use the shared media_group_id, are serialized by the existing AlbumSerializer Durable Object, and merge unique photos into one import record/card. Preserve separate customer `/review` handling.
 - Added regression tests for concurrent admin group album parts, repeated media within the same album, one moderation card per admin, and prevention of the duplicate admin `/review` path.
 - The additional group-album changes have been committed to the PR branch; CI rerun is pending.
+
+
+## Final CI evidence for group album fix — 2026-11-02
+- Latest source/docs commit before this handoff: `738fa6616fffc9bddf323da72ba01c9f7c286cbe`.
+- Worker tests run `41470370392`: success.
+- Cloudflare Worker checks run `41470370052`: success.
+- AVTOY Korea — Factory Review run `41470370452`: success (functional/regression and selected privacy test jobs passed).
+- Deploy workflow run `41470370405`: success with deployment-secret check and `Deploy website Worker` skipped for the pull_request event; production unchanged.
+- PR #46 remains open; no merge or production deploy.
+- No independent Claude comment was present at final review; request remains in PR conversation.
