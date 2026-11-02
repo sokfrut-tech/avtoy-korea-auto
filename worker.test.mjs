@@ -2241,8 +2241,9 @@ test("car import removes byte-identical reuploads but keeps different angles", a
       return Response.json({ ok: true, result: {} });
     }
     if (url.includes("/file/bot")) {
-      const path = url.split("/").pop();
-      return new Response(bytesByPath[path], { headers: { "content-type": "image/jpeg" } });
+      const path = url.slice(url.indexOf("/file/bot"));
+      const key = path.endsWith("/photos/a.jpg") ? "photos/a.jpg" : path.endsWith("/photos/b.jpg") ? "photos/b.jpg" : "photos/c.jpg";
+      return new Response(bytesByPath[key], { headers: { "content-type": "image/jpeg" } });
     }
     return originalFetch(input, init);
   };
