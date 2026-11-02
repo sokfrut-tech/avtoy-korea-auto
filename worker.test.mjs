@@ -2195,3 +2195,27 @@ test("catalogue cards use the site's dark theme instead of white text-panel styl
   assert.match(html, /background:var\(--panel\);border:1px solid var\(--line\);color:var\(--text\)/);
   assert.doesNotMatch(html, /#cars \.cars&gt;\.card \.car-body\{color:#172033\}/);
 });
+
+
+test("car catalogue exposes mixed photo and video media with separate playback URLs", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:car_100555_777", JSON.stringify({
+    id: "car_100555_777",
+    caption: "Kia Sorento 2022",
+    photos: [{ file_id: "PHOTO1", file_unique_id: "PHOTO1_U" }],
+    videos: [{ file_id: "VIDEO1", file_unique_id: "VIDEO1_U" }],
+    mediaType: "photo",
+    publishedAt: "2026-11-02T10:00:00Z"
+  }));
+  const response = await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv));
+  const body = await response.json();
+  const car = body.cars.find(item => item.id === "car_100555_777");
+  assert.deepEqual(car.mediaItems, [
+    { url: "/api/car-media/car_100555_777/photo/0", type: "photo" },
+    { url: "/api/car-media/car_100555_777/video/0", type: "video" }
+  ]);
+  const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(kv))).text();
+  assert.ok(html.includes("max-height:none;min-height:220px"), "mobile gallery is no longer restricted to a short preview");
+  assert.ok(html.includes("item.type==='video'"), "each gallery item keeps its own media type");
+  assert.ok(html.includes("createCarMedia"), "gallery creates photo and video elements per item");
+});
