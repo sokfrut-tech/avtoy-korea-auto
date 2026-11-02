@@ -1999,3 +1999,43 @@ test("homepage references externalized logo and Sportage asset", async () => {
   assert.ok(!html.includes("data:image/jpeg;base64,"));
   assert.ok(html.includes("/assets/kia-sportage.jpg"));
 });
+
+
+test("Telegram photo intake selects the highest pixel resolution, not the last array item", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate({ channel_post: {
+      message_id: 9901,
+      date: 1790000000,
+      chat: { id: -100555, username: "avtoykorea", type: "channel" },
+      caption: "Проверка качества фотографии",
+      photo: [
+        { file_id: "HIGH_RES", file_unique_id: "HIGH_UID", width: 1600, height: 1200, file_size: 480000 },
+        { file_id: "LOW_RES", file_unique_id: "LOW_UID", width: 320, height: 240, file_size: 18000 }
+      ]
+    } }), reviewEnv(kv));
+    const entry = JSON.parse(await kv.get("import_pending:-100555_9901"));
+    assert.equal(entry.post.photo.length, 1);
+    assert.equal(entry.post.photo[0].file_id, "HIGH_RES");
+    assert.equal(entry.post.photo[0].width, 1600);
+    assert.equal(entry.post.photo[0].height, 1200);
+    assert.equal(entry.post.photo[0].file_size, 480000);
+  });
+});
+
+test("Telegram photo size selection uses file_size when pixel dimensions are unavailable", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate({ channel_post: {
+      message_id: 9902,
+      date: 1790000000,
+      chat: { id: -100555, username: "avtoykorea", type: "channel" },
+      photo: [
+        { file_id: "SMALL_BYTES", file_unique_id: "SMALL_BYTES_UID", file_size: 12000 },
+        { file_id: "LARGE_BYTES", file_unique_id: "LARGE_BYTES_UID", file_size: 180000 }
+      ]
+    } }), reviewEnv(kv));
+    const entry = JSON.parse(await kv.get("import_pending:-100555_9902"));
+    assert.equal(entry.post.photo[0].file_id, "LARGE_BYTES");
+  });
+});
