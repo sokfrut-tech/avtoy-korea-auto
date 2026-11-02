@@ -680,14 +680,14 @@ async function handleReviewSubmission(msg, env, adminIds) {
   if (review.kind === "video" && review.fileId) {
    await callTelegram(env, "sendVideo", { chat_id: adminId, video: review.fileId });
   } else {
-   for (let offset = 0; offset < ids.length; offset += 10) {
-    const chunk = ids.slice(offset, offset + 10);
-    if (chunk.length > 1) {
-     const media = chunk.map((file_id, index) => ({ type: "photo", media: file_id, ...(offset === 0 && index === 0 && text ? { caption: text.slice(0, 1024) } : {}) }));
-     await callTelegram(env, "sendMediaGroup", { chat_id: adminId, media });
-    } else {
-     await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: chunk[0], ...(offset === 0 && text ? { caption: text.slice(0, 1024) } : {}) });
-    }
+   const photoItems = uniqueFileItems(review.photos && review.photos.length ? review.photos : (review.fileId ? [{file_id:review.fileId}] : []));
+   let captionSent = false;
+   for (const photo of photoItems) {
+    const isDocument = Boolean(photo.mime_type);
+    const method = isDocument ? "sendDocument" : "sendPhoto";
+    const field = isDocument ? "document" : "photo";
+    await callTelegram(env, method, { chat_id: adminId, [field]: photo.file_id, ...(!captionSent && text ? { caption: text.slice(0, 1024) } : {}) });
+    if (text) captionSent = true;
    }
   }
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: formatReviewCard(review) + (ids.length > 1 ? "\nФотографий: " + ids.length : ""), reply_markup: keyboard });
@@ -930,11 +930,16 @@ async function sendChannelMedia(env, adminId, photos, videos, caption) {
  // Telegram принимает не больше 10 медиа в одной группе: отправляем все фото пачками.
  for (let offset = 0; offset < photos.length; offset += 10) {
   const chunk = photos.slice(offset, offset + 10);
-  if (chunk.length > 1) {
-   const media = chunk.map((photo, index) => ({ type: "photo", media: photo.file_id, ...(offset === 0 && index === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) }));
+  const documentItems = chunk.filter(photo => photo.mime_type);
+  const photoItems = chunk.filter(photo => !photo.mime_type);
+  for (const photo of documentItems) {
+   await callTelegram(env, "sendDocument", { chat_id: adminId, document: photo.file_id, ...(offset === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
+  }
+  if (photoItems.length > 1) {
+   const media = photoItems.map((photo, index) => ({ type: "photo", media: photo.file_id, ...(offset === 0 && documentItems.length === 0 && index === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) }));
    await callTelegram(env, "sendMediaGroup", { chat_id: adminId, media });
-  } else {
-   await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: chunk[0].file_id, ...(offset === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
+  } else if (photoItems.length === 1) {
+   await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: photoItems[0].file_id, ...(offset === 0 && documentItems.length === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
   }
  }
  for (const video of videos) await callTelegram(env, "sendVideo", { chat_id: adminId, video: video.file_id });
@@ -1217,7 +1222,9 @@ async function stageGroupMedia(msg, env, adminIds) {
    const identity = item.file_unique_id || item.file_id;
    if (status.mediaSentIds.includes(identity)) continue;
    const isVideo = state.post.videos && state.post.videos.some(video => video.file_id === item.file_id);
-   await callTelegram(env,isVideo ? "sendVideo" : "sendPhoto",{chat_id:adminId,[isVideo ? "video" : "photo"]:item.file_id});
+   const method = isVideo ? "sendVideo" : (item.mime_type ? "sendDocument" : "sendPhoto");
+   const field = isVideo ? "video" : (item.mime_type ? "document" : "photo");
+   await callTelegram(env,method,{chat_id:adminId,[field]:item.file_id});
    status.mediaSentIds.push(identity);
    state.notified[adminKey] = status;
    await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
