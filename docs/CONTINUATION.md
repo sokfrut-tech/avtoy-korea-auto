@@ -136,3 +136,10 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Independent Claude review was requested in PR #46; no Claude response was present at the last check.
 - Still unverified: production KV contents, real browser screenshots, CDN behavior outside the Worker response headers, actual production Telegram rendition quality, and whether historic duplicate records already exist.
 - Next: obtain independent review if available; inspect live website and production KV through authorized read-only access; only then decide whether any historic records need manual correction. No global cross-review deduplication is permitted without owner approval.
+
+
+## Group-review duplicate path found and fixed — 2026-11-02
+- Additional confirmed code defect: admin media from the configured review group passed through both `stageGroupMedia()` and `handleReviewSubmission()`; an admin message with `/review` could create a staged import and a separate pending review. Also, group album parts were keyed by individual `message_id`, not shared `media_group_id`, so one album could create multiple moderation entries.
+- Fix in current branch: route admin group media through one staged-import path only; group admin albums use the shared media_group_id, are serialized by the existing AlbumSerializer Durable Object, and merge unique photos into one import record/card. Preserve separate customer `/review` handling.
+- Added regression tests for concurrent admin group album parts, repeated media within the same album, one moderation card per admin, and prevention of the duplicate admin `/review` path.
+- The additional group-album changes have been committed to the PR branch; CI rerun is pending.
