@@ -2105,3 +2105,60 @@ test("review media URLs are never cached by index, so replaced photos cannot rea
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("admin image documents in the review group are staged once with original MIME metadata", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const id = REVIEW_GROUP + "_9930";
+    await worker.fetch(webhookUpdate({ message: {
+      message_id: 9930,
+      chat: { id: Number(REVIEW_GROUP), type: "supergroup" },
+      from: { id: ADMIN, first_name: "Admin" },
+      document: { file_id: "ORIGINAL_PNG", file_unique_id: "ORIGINAL_PNG_UID", file_size: 3456789, mime_type: "image/png", file_name: "buyer-original.png" },
+      caption: "Фото без сжатия"
+    } }), reviewEnv(kv));
+    const staged = JSON.parse(await kv.get("import_pending:" + id));
+    assert.equal(staged.post.photo.length, 1);
+    assert.equal(staged.post.photo[0].file_id, "ORIGINAL_PNG");
+    assert.equal(staged.post.photo[0].mime_type, "image/png");
+    assert.equal(staged.post.photo[0].file_name, "buyer-original.png");
+    assert.ok(calls.some(call => call.method === "sendDocument" && call.payload.document === "ORIGINAL_PNG"));
+    assert.equal(await kv.get("pending:" + id), null, "admin document must use only the admin import path");
+  });
+});
+
+test("customer image document can be moderated and served with its original MIME type", async () => {
+  const kv = memoryKV();
+  const id = REVIEW_GROUP + "_9931";
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate({ message: {
+      message_id: 9931,
+      chat: { id: Number(REVIEW_GROUP), type: "supergroup" },
+      from: { id: 333333333, first_name: "Client" },
+      document: { file_id: "CLIENT_ORIGINAL_PNG", file_unique_id: "CLIENT_ORIGINAL_PNG_UID", file_size: 4567890, mime_type: "image/png", file_name: "original.png" },
+      caption: "/review Фото автомобиля"
+    } }), reviewEnv(kv));
+    const pending = JSON.parse(await kv.get("pending:" + id));
+    assert.equal(pending.photos.length, 1);
+    assert.equal(pending.photos[0].mime_type, "image/png");
+    await worker.fetch(webhookUpdate(callback(ADMIN, "pub:" + id)), reviewEnv(kv));
+  });
+  const approved = JSON.parse(await kv.get("approved:" + id));
+  assert.equal(approved.photos[0].file_id, "CLIENT_ORIGINAL_PNG");
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = String(input);
+    if (url.includes("/getFile")) return Response.json({ ok: true, result: { file_path: "documents/original.png" } });
+    if (url.includes("/file/bot")) return new Response("original png bytes", { headers: { "content-type": "image/png" } });
+    return originalFetch(input);
+  };
+  try {
+    const response = await worker.fetch(new Request("https://worker.test/api/review-media/" + id + "/0"), reviewEnv(kv));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "image/png");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

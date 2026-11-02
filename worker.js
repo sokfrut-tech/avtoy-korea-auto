@@ -133,6 +133,7 @@ const ADMIN_HELP_TEXT = [
  "❌ Не публиковать — убрать из очереди",
  "🙈 Скрыть имя — только для отзывов",
  "✏️ Редактировать — правка текста",
+ "📎 Для исходного качества отправляйте фото как ФАЙЛ/ДОКУМЕНТ, не как обычное фото.",
  "",
  "Правка текста (ответом на сообщение бота):",
  "ЗАМЕНИТЬ: старое => новое",
@@ -392,7 +393,16 @@ function photoItemFrom(raw) {
   const value = Number(raw[field]);
   if (Number.isFinite(value) && value > 0) item[field] = value;
  }
+ if (typeof raw.mime_type === "string" && /^image\/(jpeg|png|webp|gif)$/i.test(raw.mime_type)) item.mime_type = raw.mime_type.toLowerCase();
+ if (typeof raw.file_name === "string" && raw.file_name.length <= 255) item.file_name = raw.file_name;
  return item;
+}
+
+// Telegram photo messages are compressed renditions. An image sent as a document
+// keeps the uploaded file bytes; accept only safe raster image MIME types.
+function imageDocumentItemFrom(document) {
+ if (!document || !document.file_id || typeof document.mime_type !== "string" || !/^image\/(jpeg|png|webp|gif)$/i.test(document.mime_type)) return null;
+ return photoItemFrom(document);
 }
 
 // Идентификатор отзыва для альбома: один отзыв на весь media_group_id, иначе — по сообщению.
@@ -614,7 +624,7 @@ async function handleReviewSubmission(msg, env, adminIds) {
  if (adminIds.includes(String((msg.from && msg.from.id) || ""))) return;
  const body = String(msg.text || msg.caption || "").trim();
  const isCommand = /^\/review(@\w+)?(\s|$)/i.test(body);
- const photoItem = largestPhotoItem(msg.photo);
+ const photoItem = largestPhotoItem(msg.photo) || imageDocumentItemFrom(msg.document);
  const chatId = String(msg.chat.id);
  if (!isCommand) {
   // Остальные фото альбома без команды: сохраняем к отзыву или ждём команду /review.
@@ -634,7 +644,7 @@ async function handleReviewSubmission(msg, env, adminIds) {
  }
  const text = body.replace(/^\/review(@\w+)?/i, "").trim().slice(0, 1000);
  const video = msg.video ? msg.video.file_id : null;
- if (!text && !video) return;
+ if (!text && !video && !photoItem) return;
  const id = reviewIdFor(chatId, msg);
  // Порядок фото сохраняется: сначала пришедшие раньше команды, затем фото из команды.
  const photos = [];
@@ -671,14 +681,14 @@ async function handleReviewSubmission(msg, env, adminIds) {
   if (review.kind === "video" && review.fileId) {
    await callTelegram(env, "sendVideo", { chat_id: adminId, video: review.fileId });
   } else {
-   for (let offset = 0; offset < ids.length; offset += 10) {
-    const chunk = ids.slice(offset, offset + 10);
-    if (chunk.length > 1) {
-     const media = chunk.map((file_id, index) => ({ type: "photo", media: file_id, ...(offset === 0 && index === 0 && text ? { caption: text.slice(0, 1024) } : {}) }));
-     await callTelegram(env, "sendMediaGroup", { chat_id: adminId, media });
-    } else {
-     await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: chunk[0], ...(offset === 0 && text ? { caption: text.slice(0, 1024) } : {}) });
-    }
+   const photoItems = uniqueFileItems(review.photos && review.photos.length ? review.photos : (review.fileId ? [{file_id:review.fileId}] : []));
+   let captionSent = false;
+   for (const photo of photoItems) {
+    const isDocument = Boolean(photo.mime_type);
+    const method = isDocument ? "sendDocument" : "sendPhoto";
+    const field = isDocument ? "document" : "photo";
+    await callTelegram(env, method, { chat_id: adminId, [field]: photo.file_id, ...(!captionSent && text ? { caption: text.slice(0, 1024) } : {}) });
+    if (text) captionSent = true;
    }
   }
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: formatReviewCard(review) + (ids.length > 1 ? "\nФотографий: " + ids.length : ""), reply_markup: keyboard });
@@ -921,11 +931,16 @@ async function sendChannelMedia(env, adminId, photos, videos, caption) {
  // Telegram принимает не больше 10 медиа в одной группе: отправляем все фото пачками.
  for (let offset = 0; offset < photos.length; offset += 10) {
   const chunk = photos.slice(offset, offset + 10);
-  if (chunk.length > 1) {
-   const media = chunk.map((photo, index) => ({ type: "photo", media: photo.file_id, ...(offset === 0 && index === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) }));
+  const documentItems = chunk.filter(photo => photo.mime_type);
+  const photoItems = chunk.filter(photo => !photo.mime_type);
+  for (const photo of documentItems) {
+   await callTelegram(env, "sendDocument", { chat_id: adminId, document: photo.file_id, ...(offset === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
+  }
+  if (photoItems.length > 1) {
+   const media = photoItems.map((photo, index) => ({ type: "photo", media: photo.file_id, ...(offset === 0 && documentItems.length === 0 && index === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) }));
    await callTelegram(env, "sendMediaGroup", { chat_id: adminId, media });
-  } else {
-   await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: chunk[0].file_id, ...(offset === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
+  } else if (photoItems.length === 1) {
+   await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: photoItems[0].file_id, ...(offset === 0 && documentItems.length === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
   }
  }
  for (const video of videos) await callTelegram(env, "sendVideo", { chat_id: adminId, video: video.file_id });
@@ -1178,6 +1193,8 @@ async function stageGroupMedia(msg, env, adminIds) {
  const groupId = String(env.TELEGRAM_REVIEW_GROUP_ID || "").trim();
  if (!groupId || String(msg.chat && msg.chat.id) !== groupId || !env.REVIEWS) return false;
  const photos = largestPhotoOf(msg.photo);
+ const documentPhoto = imageDocumentItemFrom(msg.document);
+ if (documentPhoto) photos.push(documentPhoto);
  const videos = postVideos(msg);
  if (!photos.length && !videos.length) return false;
  const id = reviewIdFor(msg.chat.id, msg);
@@ -1206,7 +1223,9 @@ async function stageGroupMedia(msg, env, adminIds) {
    const identity = item.file_unique_id || item.file_id;
    if (status.mediaSentIds.includes(identity)) continue;
    const isVideo = state.post.videos && state.post.videos.some(video => video.file_id === item.file_id);
-   await callTelegram(env,isVideo ? "sendVideo" : "sendPhoto",{chat_id:adminId,[isVideo ? "video" : "photo"]:item.file_id});
+   const method = isVideo ? "sendVideo" : (item.mime_type ? "sendDocument" : "sendPhoto");
+   const field = isVideo ? "video" : (item.mime_type ? "document" : "photo");
+   await callTelegram(env,method,{chat_id:adminId,[field]:item.file_id});
    status.mediaSentIds.push(identity);
    state.notified[adminKey] = status;
    await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
@@ -1658,14 +1677,17 @@ export default {
    const review = JSON.parse(raw);
    const index = Number(mediaMatch[2] || 0);
    const photos = uniqueFileItems(Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []));
-   const fileId = review.kind === "video" ? (index === 0 ? review.fileId : null) : (photos[index] && photos[index].file_id);
+   const photoItem = photos[index];
+   const fileId = review.kind === "video" ? (index === 0 ? review.fileId : null) : (photoItem && photoItem.file_id);
    if (!fileId) return new Response("Not found", { status: 404 });
    const info = await callTelegram(env, "getFile", { file_id: fileId }).catch(() => null);
    const path = info && info.result && info.result.file_path;
    if (!path) return new Response("Not found", { status: 404 });
    const upstream = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${path}`);
    if (!upstream.ok) return new Response("Bad Gateway", { status: 502 });
-   return new Response(upstream.body, { headers: { "content-type": review.kind === "video" ? "video/mp4" : "image/jpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+   const imageType = photoItem && photoItem.mime_type;
+   const contentType = review.kind === "video" ? "video/mp4" : (imageType || "image/jpeg");
+   return new Response(upstream.body, { headers: { "content-type": contentType, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
   }
   if(url.pathname==="/favicon.ico") return new Response(null,{status:204});
   const html = `<!doctype html>
