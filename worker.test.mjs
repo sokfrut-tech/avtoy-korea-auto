@@ -2162,3 +2162,36 @@ test("customer image document can be moderated and served with its original MIME
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("channel car image documents preserve original file metadata through moderation", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const update = { update_id: 7991, channel_post: {
+      message_id: 88, date: 1790000000,
+      chat: { id: -100555, username: "avtoYkorea", type: "channel" },
+      caption: "Kia Sorento — исходный файл",
+      document: { file_id: "CAR_ORIGINAL_JPEG", file_unique_id: "CAR_ORIGINAL_JPEG_UID", file_size: 4567890, mime_type: "image/jpeg", file_name: "sorento-original.jpg" }
+    }};
+    const response = await worker.fetch(webhookUpdate(update), reviewEnv(kv));
+    assert.equal(response.status, 200);
+    const staged = JSON.parse(await kv.get("import_pending:-100555_88"));
+    assert.equal(staged.post.photo.length, 1);
+    assert.equal(staged.post.photo[0].file_id, "CAR_ORIGINAL_JPEG");
+    assert.equal(staged.post.photo[0].mime_type, "image/jpeg");
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_88")), reviewEnv(kv));
+    const car = JSON.parse(await kv.get("car_pending:car_100555_88"));
+    assert.equal(car.photos[0].file_id, "CAR_ORIGINAL_JPEG");
+    assert.equal(car.photos[0].file_name, "sorento-original.jpg");
+    assert.ok(calls.some(call => call.method === "sendDocument" && call.payload.document === "CAR_ORIGINAL_JPEG"));
+  });
+});
+
+test("catalogue cards use the site's dark theme instead of white text-panel styling", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()));
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /#cars \.cars&gt;\.card/); // HTML may escape selector characters in source output
+  assert.match(html, /background:var\(--panel\);border:1px solid var\(--line\);color:var\(--text\)/);
+  assert.doesNotMatch(html, /#cars \.cars&gt;\.card \.car-body\{color:#172033\}/);
+});
