@@ -8,10 +8,6 @@ on:
       - "assets-src/**"
       - "wrangler.toml"
       - ".github/workflows/deploy-worker.yml"
-    paths:
-      - "worker.js"
-      - "wrangler.toml"
-      - ".github/workflows/deploy-worker.yml"
   pull_request:
     branches: [main]
     paths:
