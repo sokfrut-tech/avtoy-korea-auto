@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker, { AlbumSerializer } from "./worker.js";
@@ -1964,4 +1965,21 @@ test("four album parts of a forwarded group post, sent at the same time, create 
     await Promise.all(parts.map(part => worker.fetch(webhookUpdate({ message: part }), sharedEnv)));
     assert.equal(reviewCardCount(calls), 1, "one album, one moderation card");
   });
+});
+
+
+test("image asset sources exist and decode to expected binary sizes", () => {
+  const logo = Buffer.from(fs.readFileSync("assets-src/logo.jpg.b64", "utf8").replace(/\s+/g, ""), "base64");
+  const sportage = Buffer.from(fs.readFileSync("assets-src/kia-sportage.jpg.b64", "utf8").replace(/\s+/g, ""), "base64");
+  assert.equal(logo.length, 18979);
+  assert.equal(sportage.length, 16326);
+});
+
+test("homepage references externalized logo and Sportage asset", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/"), {});
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.ok(html.includes("/assets/logo.jpg"));
+  assert.ok(!html.includes("data:image/jpeg;base64,"));
+  assert.ok(html.includes("/assets/kia-sportage.jpg"));
 });

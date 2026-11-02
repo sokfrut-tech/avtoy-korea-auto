@@ -5,8 +5,17 @@ on:
     branches: [main]
     paths:
       - "worker.js"
+      - "assets-src/**"
       - "wrangler.toml"
       - ".github/workflows/deploy-worker.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "worker.js"
+      - "assets-src/**"
+      - "wrangler.toml"
+      - ".github/workflows/deploy-worker.yml"
+      - "worker.test.mjs"
   workflow_dispatch:
 
 permissions:
@@ -25,6 +34,33 @@ jobs:
         with:
           node-version: 22
 
+      - name: Restore binary assets and verify SHA-256
+        run: |
+          node << 'EOF'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          fs.mkdirSync('public/assets', { recursive: true });
+          const dir = 'assets-src';
+          const files = fs.existsSync(dir) ? fs.readdirSync(dir).sort() : [];
+          function readB64(prefixes) {
+            const matches = files.filter(f => prefixes.some(p => f.startsWith(p)));
+            if (!matches.length) throw new Error('Missing asset source: ' + prefixes.join(', '));
+            return matches.map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('').replace(/\\s+/g, '');
+          }
+          const targets = [
+            { prefixes: ['logo'], dest: 'public/assets/logo.jpg', size: 18979, sha: '2aa1fa2840857b09eff4a78b63935abeaaa692bef4801f87ce37b972d01fc453' },
+            { prefixes: ['kia-sportage', 'sportage'], dest: 'public/assets/kia-sportage.jpg', size: 16326, sha: 'd3bb08643743f759b1aedf87456fb7cae8dff550db285814d94cdc924459ee92' }
+          ];
+          for (const a of targets) {
+            const b = Buffer.from(readB64(a.prefixes), 'base64');
+            const h = crypto.createHash('sha256').update(b).digest('hex');
+            console.log(a.dest + ': ' + b.length + ' bytes, SHA-256: ' + h);
+            if (b.length !== a.size || h !== a.sha) throw new Error('Asset verification failed: ' + a.dest);
+            fs.writeFileSync(a.dest, b);
+          }
+          EOF
+
       - name: Check Worker syntax
         run: node --input-type=module --check < worker.js
 
@@ -32,6 +68,7 @@ jobs:
         run: node --test worker.test.mjs
 
       - name: Verify Cloudflare deployment secrets
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -47,6 +84,7 @@ jobs:
           echo "Cloudflare deployment secrets are present."
 
       - name: Deploy website Worker
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
