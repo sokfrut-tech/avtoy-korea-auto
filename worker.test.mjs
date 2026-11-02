@@ -2039,3 +2039,46 @@ test("Telegram photo size selection uses file_size when pixel dimensions are una
     assert.equal(entry.post.photo[0].file_id, "LARGE_BYTES");
   });
 });
+
+
+test("admin photo album in the review group becomes one staged review with every unique photo", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const sharedEnv = albumSerializerEnv(kv);
+    const parts = [
+      { message_id: 9911, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { id: ADMIN, first_name: "Admin" }, media_group_id: "991199", caption: "Фото клиента", photo: [{ file_id: "GROUP_A", file_unique_id: "GROUP_A_UID", width: 1200, height: 900 }] },
+      { message_id: 9912, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { id: ADMIN, first_name: "Admin" }, media_group_id: "991199", photo: [{ file_id: "GROUP_B", file_unique_id: "GROUP_B_UID", width: 1200, height: 900 }] },
+      { message_id: 9913, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { id: ADMIN, first_name: "Admin" }, media_group_id: "991199", photo: [{ file_id: "GROUP_B_RETRY", file_unique_id: "GROUP_B_UID", width: 1200, height: 900 }] }
+    ];
+    await Promise.all(parts.map(message => worker.fetch(webhookUpdate({ message }), sharedEnv)));
+    const id = REVIEW_GROUP + "_991199";
+    const staged = JSON.parse(await kv.get("import_pending:" + id));
+    assert.deepEqual(staged.post.photo.map(photo => photo.file_id), ["GROUP_A", "GROUP_B"]);
+    assert.equal((await kv.list({ prefix: "import_pending:" })).keys.length, 1, "one album has one import record");
+    const cards = calls.filter(call => call.method === "sendMessage" && call.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:review:" + id);
+    assert.equal(cards.length, 2, "one moderation card per configured admin, not one per photo");
+    await worker.fetch(webhookUpdate(callback(ADMIN, "imp:review:" + id)), sharedEnv);
+    const pending = JSON.parse(await kv.get("pending:" + id));
+    assert.deepEqual(pending.photos.map(photo => photo.file_id), ["GROUP_A", "GROUP_B"]);
+    assert.equal(await kv.get("import_pending:" + id), null);
+  });
+});
+
+test("admin /review media uses the admin import path only and cannot create a duplicate review", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    const id = REVIEW_GROUP + "_9920";
+    await worker.fetch(webhookUpdate({ message: {
+      message_id: 9920,
+      chat: { id: Number(REVIEW_GROUP), type: "supergroup" },
+      from: { id: ADMIN, first_name: "Admin" },
+      caption: "/review Проверка от администратора",
+      photo: [{ file_id: "ADMIN_GROUP_PHOTO", file_unique_id: "ADMIN_GROUP_PHOTO_UID" }]
+    } }), reviewEnv(kv));
+    assert.ok(await kv.get("import_pending:" + id));
+    assert.equal(await kv.get("pending:" + id), null, "admin message is not processed by the parallel customer /review path");
+    await worker.fetch(webhookUpdate(callback(ADMIN, "imp:review:" + id)), reviewEnv(kv));
+    assert.ok(await kv.get("pending:" + id));
+    assert.equal((await kv.list({ prefix: "pending:" })).keys.length, 1);
+  });
+});
