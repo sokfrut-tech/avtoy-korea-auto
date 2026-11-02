@@ -1627,7 +1627,7 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId ? [{file_id:car.fileId}] : [])); const photos = photoItems.map((_,index)=>"/api/car-media/"+car.id+"/"+index); cars.push({id:car.id,caption:publicCarCaption(car.caption),media:photos[0] || null,mediaItems:photos,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : [])); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))]; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
@@ -1635,18 +1635,19 @@ export default {
    return Response.json({cars},{headers:{"cache-control":"no-store"}});
   }
   const carMediaPath = url.pathname.startsWith("/api/car-media/") ? url.pathname.slice("/api/car-media/".length) : "";
-  const carMediaMatch = carMediaPath.match(/^(car_-?[0-9]+_[0-9]+)(?:\/(\d+))?$/);
+  const carMediaMatch = carMediaPath.match(/^(car_-?[0-9]+_[0-9]+)(?:\/(photo|video)\/(\d+)|(\d+))?$/);
   if (request.method === "GET" && carMediaMatch) {
    if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found",{status:404});
    const raw = await env.REVIEWS.get("car_approved:" + carMediaMatch[1]); if (!raw) return new Response("Not found",{status:404});
-   const car = JSON.parse(raw); const index = Number(carMediaMatch[2] || 0);
-   const photos = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId ? [{file_id:car.fileId}] : []));
-   const selected = photos[index]; const fileId = selected && selected.file_id ? selected.file_id : (!photos.length && index === 0 ? car.fileId : null);
+   const car = JSON.parse(raw); const mediaType = carMediaMatch[2] || (car.mediaType === "video" ? "video" : "photo"); const index = Number(carMediaMatch[3] || carMediaMatch[4] || 0);
+   const photos = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []));
+   const videos = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : []));
+   const selected = (mediaType === "video" ? videos : photos)[index]; const fileId = selected && selected.file_id ? selected.file_id : null;
    if (!fileId) return new Response("Not found",{status:404});
    const info = await callTelegram(env,"getFile",{file_id:fileId}).catch(()=>null); const path = info && info.result && info.result.file_path;
    if (!path) return new Response("Not found",{status:404});
    const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path); if (!upstream.ok) return new Response("Bad Gateway",{status:502});
-   const contentType = /\.(mp4|webm)$/i.test(path) ? "video/mp4" : ((selected && selected.mime_type) || "image/jpeg");
+   const contentType = mediaType === "video" ? (/\.webm$/i.test(path) ? "video/webm" : "video/mp4") : ((selected && selected.mime_type) || "image/jpeg");
    // Media URLs use positional indexes. A car can be replaced while its URL stays the same, so never cache by index.
    return new Response(upstream.body,{headers:{"content-type":contentType,"cache-control":"no-store","x-content-type-options":"nosniff"}});
   }
@@ -1978,14 +1979,14 @@ footer{border-top-color:#ffffff18}
  .cars>article{flex:none;width:auto}
  .cars-hint{display:none!important}
 }
-.car-gallery{position:relative;width:100%;margin:16px 0 0;overflow:hidden;border-radius:16px;background:#080d14;aspect-ratio:4/3;max-height:340px}
+.car-gallery{position:relative;width:100%;margin:16px 0 0;overflow:hidden;border-radius:16px;background:#080d14;aspect-ratio:16/10;max-height:none;min-height:240px}
 .car-gallery-stage{all:unset;box-sizing:border-box;display:flex;width:100%;height:100%;align-items:center;justify-content:center;cursor:zoom-in}
 .car-gallery-main{display:block;width:100%;height:100%;object-fit:contain;object-position:center}
 .car-gallery-arrow{position:absolute;top:50%;transform:translateY(-50%);width:38px;height:38px;border:1px solid #ffffff55;border-radius:50%;background:#090d14c9;color:#fff;font-size:26px;line-height:1;display:grid;place-items:center;cursor:pointer;z-index:2}
 .car-gallery-arrow.is-prev{left:10px}.car-gallery-arrow.is-next{right:10px}
 .car-gallery-count{position:absolute;right:11px;bottom:10px;padding:5px 10px;border-radius:20px;background:#090d14d9;color:#fff;font-size:12px;font-weight:700}
 .car-gallery-arrow[hidden],.car-gallery-count[hidden]{display:none}
-@media(max-width:780px){.car-gallery{aspect-ratio:4/3;max-height:280px;border-radius:13px}.car-gallery-arrow{width:34px;height:34px}}
+@media(max-width:780px){.car-gallery{aspect-ratio:16/10;max-height:none;min-height:220px;border-radius:13px}.car-gallery-stage{min-height:220px}.car-gallery-arrow{width:34px;height:34px}}
 .car-text{white-space:pre-line;max-width:60ch;font-size:14px;line-height:1.6;color:#c7c9d0;margin:10px 0 0}
 .car-lightbox{position:fixed;inset:0;z-index:999;background:rgba(5,6,8,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:16px;box-sizing:border-box}
 .car-lightbox-bar{position:absolute;top:12px;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:0 16px;color:#c9ccd4;font-size:14px}
@@ -2412,10 +2413,10 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(fu
   body.appendChild(title); body.appendChild(desc);
   if(media.length){
    var gallery=document.createElement('div'); gallery.className='car-gallery';
-   var carItems=media.map(function(url){return {url:url,video:isVideo};});
-   var stage=document.createElement('button'); stage.type='button'; stage.className='car-gallery-stage'; stage.setAttribute('aria-label','Открыть фотографию автомобиля на весь экран');
-   var current=document.createElement(isVideo?'video':'img'); current.className='car-gallery-main'; current.src=media[0];
-   if(isVideo){current.controls=true;current.playsInline=true;current.preload='metadata';}else{current.alt='Фотография автомобиля';current.loading='lazy';}
+   var carItems=media.map(function(item){return typeof item==='string'?{url:item,video:isVideo}:{url:item.url,video:item.type==='video'};});
+   var stage=document.createElement('div'); stage.className='car-gallery-stage';
+   function createCarMedia(item,index){var el=document.createElement(item.video?'video':'img');el.className='car-gallery-main';el.src=item.url;if(item.video){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео автомобиля '+(index+1));}else{el.alt='Фотография автомобиля '+(index+1);el.loading='lazy';}return el;}
+   var current=createCarMedia(carItems[0],0);
    stage.appendChild(current); gallery.appendChild(stage);
    var photoIndex=0;
    var count=document.createElement('span');count.className='car-gallery-count';count.textContent='1 / '+media.length;
@@ -2424,8 +2425,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(fu
    function showCarPhoto(nextIndex){
     photoIndex=(nextIndex+media.length)%media.length;
     var previous=current;
-    current=document.createElement(isVideo?'video':'img');current.className='car-gallery-main';current.src=media[photoIndex];
-    if(isVideo){current.controls=true;current.playsInline=true;current.preload='metadata';}else{current.alt='Фотография автомобиля '+(photoIndex+1);current.loading='lazy';}
+    current=createCarMedia(carItems[photoIndex],photoIndex);
     stage.replaceChild(current,previous);count.textContent=(photoIndex+1)+' / '+media.length;
    }
    back.hidden=forward.hidden=count.hidden=media.length<2;
@@ -2434,7 +2434,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(fu
    var touchStart=0;
    gallery.addEventListener('touchstart',function(e){touchStart=e.changedTouches[0].clientX},{passive:true});
    gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showCarPhoto(photoIndex+(delta<0?1:-1))},{passive:true});
-   stage.onclick=function(){items=carItems;openBox(photoIndex)};
+   stage.addEventListener('click',function(e){if(e.target&&e.target.tagName==='VIDEO')return;items=carItems;openBox(photoIndex)});
    gallery.appendChild(back);gallery.appendChild(forward);gallery.appendChild(count);body.appendChild(gallery);
   }
   article.appendChild(body); list.appendChild(article);
