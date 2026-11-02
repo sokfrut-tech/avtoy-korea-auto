@@ -2191,7 +2191,7 @@ test("catalogue cards use the site's dark theme instead of white text-panel styl
   const response = await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()));
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /#cars \.cars&gt;\.card/); // HTML may escape selector characters in source output
+  assert.match(html, /#cars \.cars>\.card/);
   assert.match(html, /background:var\(--panel\);border:1px solid var\(--line\);color:var\(--text\)/);
   assert.doesNotMatch(html, /#cars \.cars&gt;\.card \.car-body\{color:#172033\}/);
 });
