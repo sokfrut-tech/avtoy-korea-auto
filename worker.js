@@ -353,19 +353,45 @@ function formatReviewCard(review) {
 
 // Бот читает только одну группу (TELEGRAM_REVIEW_GROUP_ID) и только сообщения с командой /review.
 
-// Фото одного сообщения Telegram приходит несколькими размерами: берём только самый большой.
-function largestPhotoItem(photos) {
- if (!Array.isArray(photos) || !photos.length) return null;
- const last = photos[photos.length - 1];
- return last && last.file_id ? photoItemFrom(last) : null;
+// Telegram PhotoSize contains several renditions of one image. Never rely on array
+// position: choose the greatest pixel area, then file_size; preserve original order
+// only as a deterministic tie-breaker for older fixtures/records without metadata.
+function largestPhotoSize(photos) {
+ if (!Array.isArray(photos)) return null;
+ let best = null;
+ let bestArea = -1;
+ let bestBytes = -1;
+ let bestIndex = -1;
+ photos.forEach((item, index) => {
+  if (!item || !item.file_id) return;
+  const width = Number(item.width) || 0;
+  const height = Number(item.height) || 0;
+  const area = width > 0 && height > 0 ? width * height : -1;
+  const bytes = Number(item.file_size) || -1;
+  if (area > bestArea || (area === bestArea && bytes > bestBytes) || (area === bestArea && bytes === bestBytes && index > bestIndex)) {
+   best = item;
+   bestArea = area;
+   bestBytes = bytes;
+   bestIndex = index;
+  }
+ });
+ return best;
 }
 
-// Telegram отдаёт один и тот же снимок под разными file_id, но с одним file_unique_id.
+function largestPhotoItem(photos) {
+ const best = largestPhotoSize(photos);
+ return best ? photoItemFrom(best) : null;
+}
+
+// Keep Telegram's stable media identity and rendition metadata in storage.
+// file_id can differ for the same original image; file_unique_id identifies it.
 function photoItemFrom(raw) {
  const item = { file_id: String(raw.file_id) };
- // Keep Telegram's stable media identity across retries and album merges.
- // file_id can differ for the same original image; file_unique_id does not.
  if (raw.file_unique_id) item.file_unique_id = String(raw.file_unique_id);
+ for (const field of ["width", "height", "file_size"]) {
+  const value = Number(raw[field]);
+  if (Number.isFinite(value) && value > 0) item[field] = value;
+ }
  return item;
 }
 
@@ -515,7 +541,9 @@ export class AlbumSerializer {
   // Очередь: каждая часть альбома ждёт завершения предыдущей, даже если KV отвечает медленно.
   const run = this.chain.then(() => type === "channel"
    ? stageChannelPost(msg, this.env, adminIds)
-   : handleForwardedGroupPost(msg, this.env, adminIds));
+   : type === "group_media"
+    ? stageGroupMedia(msg, this.env, adminIds)
+    : handleForwardedGroupPost(msg, this.env, adminIds));
   this.chain = run.catch(() => {});
   const handled = await run;
   return Response.json({ handled });
@@ -582,6 +610,8 @@ async function handleAdminMediaUpload(msg, env, adminIds) {
 async function handleReviewSubmission(msg, env, adminIds) {
  const reviewGroupId = String(env.TELEGRAM_REVIEW_GROUP_ID || "").trim();
  if (!reviewGroupId || String(msg.chat.id) !== reviewGroupId) return;
+ // Admin media is handled by stageGroupMedia; do not create a second parallel review record.
+ if (adminIds.includes(String((msg.from && msg.from.id) || ""))) return;
  const body = String(msg.text || msg.caption || "").trim();
  const isCommand = /^\/review(@\w+)?(\s|$)/i.test(body);
  const photoItem = largestPhotoItem(msg.photo);
@@ -880,11 +910,10 @@ function postVideos(post) {
  return uniqueFileItems(post.video && post.video.file_id ? [post.video] : []);
 }
 
-// Фото одного сообщения Telegram приходят несколькими размерами: берём самый большой.
+// Один исходный снимок Telegram = один элемент альбома; берём его максимальную rendition.
 function largestPhotoOf(photo) {
- return Array.isArray(photo) && photo.length && photo[photo.length - 1] && photo[photo.length - 1].file_id
-  ? [photoItemFrom(photo[photo.length - 1])]
-  : [];
+ const best = largestPhotoSize(photo);
+ return best ? [photoItemFrom(best)] : [];
 }
 
 // Отправка всех фото и видео записи администратору.
@@ -1147,34 +1176,63 @@ async function stageChannelPost(post, env, adminIds) {
 // Администратор может отправить фото/видео в настроенную группу отзывов; публикация всё равно проходит личную модерацию.
 async function stageGroupMedia(msg, env, adminIds) {
  const groupId = String(env.TELEGRAM_REVIEW_GROUP_ID || "").trim();
- if (!groupId || String(msg.chat && msg.chat.id) !== groupId || !env.REVIEWS) return;
- const photo = Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
- const video = msg.video || null;
- if (!photo && !video) return;
- const id = String(msg.chat.id) + "_" + String(msg.message_id);
- if (await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) return;
+ if (!groupId || String(msg.chat && msg.chat.id) !== groupId || !env.REVIEWS) return false;
+ const photos = largestPhotoOf(msg.photo);
+ const videos = postVideos(msg);
+ if (!photos.length && !videos.length) return false;
+ const id = reviewIdFor(msg.chat.id, msg);
+ if (await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) return true;
  const key = "import_pending:" + id;
  let state = JSON.parse(await env.REVIEWS.get(key) || "null");
  if (!state || !state.post) {
-  state = {type:"group_media",post:{...msg,sourceType:"group"},notified:{}};
-  await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
+  const albumNumber = msg.media_group_id ? String(msg.media_group_id).replace(/[^0-9]/g, "").slice(0, 40) : String(msg.message_id);
+  state = {type:"group_media",post:{...msg,message_id:albumNumber,photo:photos,videos,sourceType:"group"},notified:{}};
+ } else {
+  const saved = state.post;
+  saved.photo = uniqueFileItems([...(Array.isArray(saved.photo) ? saved.photo : []), ...photos]);
+  saved.videos = uniqueFileItems([...(Array.isArray(saved.videos) ? saved.videos : []), ...videos]);
+  if (!saved.caption && msg.caption) saved.caption = msg.caption;
+  state.post = saved;
  }
+ state.notified = state.notified || {};
+ await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"⭐ Передать в модерацию отзывов",callback_data:"imp:review:" + id}]]};
  for (const adminId of adminIds) {
-  const status = state.notified[String(adminId)] || {mediaSent:false,cardSent:false};
-  if (!status.mediaSent) {
-   await callTelegram(env,video ? "sendVideo" : "sendPhoto",{chat_id:adminId,[video ? "video" : "photo"]:(video ? video.file_id : photo.file_id)});
-   status.mediaSent = true;
-   state.notified[String(adminId)] = status;
+  const adminKey = String(adminId);
+  const status = state.notified[adminKey] || {mediaSentIds:[],cardSent:false};
+  status.mediaSentIds = Array.isArray(status.mediaSentIds) ? status.mediaSentIds : [];
+  const mediaItems = [...postPhotos(state.post), ...postVideos(state.post)];
+  for (const item of mediaItems) {
+   const identity = item.file_unique_id || item.file_id;
+   if (status.mediaSentIds.includes(identity)) continue;
+   const isVideo = state.post.videos && state.post.videos.some(video => video.file_id === item.file_id);
+   await callTelegram(env,isVideo ? "sendVideo" : "sendPhoto",{chat_id:adminId,[isVideo ? "video" : "photo"]:item.file_id});
+   status.mediaSentIds.push(identity);
+   state.notified[adminKey] = status;
    await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
   }
   if (!status.cardSent) {
-   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Медиа из группы отзывов. Выберите, передавать ли его на модерацию сайта.\n\n" + String(msg.caption || "").slice(0,1000),reply_markup:keyboard});
+   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Медиа из группы отзывов. Выберите, передавать ли его на модерацию сайта.\n\n" + String(state.post.caption || "").slice(0,1000) + "\n\nФотографий: " + postPhotos(state.post).length + (postVideos(state.post).length ? "\nВидео: " + postVideos(state.post).length : ""),reply_markup:keyboard});
    status.cardSent = true;
-   state.notified[String(adminId)] = status;
-   await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
+  } else {
+   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"Добавлено медиа в альбом. Всего фотографий: " + postPhotos(state.post).length + (postVideos(state.post).length ? ", видео: " + postVideos(state.post).length : "") + ". Кнопка модерации осталась в предыдущем сообщении."});
   }
+  state.notified[adminKey] = status;
+  await env.REVIEWS.put(key,JSON.stringify(state),{expirationTtl:2592000});
  }
+ return true;
+}
+
+async function stageGroupMediaSerialized(msg, env, adminIds) {
+ if (!msg.media_group_id || !env.ALBUM_SERIALIZER) return stageGroupMedia(msg, env, adminIds);
+ const albumKey = "review-group-media:" + String(msg.chat && msg.chat.id || "") + "_" + String(msg.media_group_id);
+ const stub = env.ALBUM_SERIALIZER.get(env.ALBUM_SERIALIZER.idFromName(albumKey));
+ const response = await stub.fetch("https://album.internal/process", {
+  method: "POST", headers: {"content-type":"application/json"},
+  body: JSON.stringify({type:"group_media",msg,adminIds})
+ });
+ if (!response.ok) throw new Error("Review group media serializer failed: " + response.status);
+ return (await response.json()).handled === true;
 }
 
 async function handleCarCallback(callback, env, adminIds) {
@@ -1324,7 +1382,7 @@ export default {
    // Groups/channels: only the one review group, only /review messages. Everything else is ignored.
    if (msg.chat.type !== "private") {
     try {
-     if (adminIds.includes(String((msg.from && msg.from.id) || ""))) await stageGroupMedia(msg, env, adminIds);
+     if (adminIds.includes(String((msg.from && msg.from.id) || ""))) await stageGroupMediaSerialized(msg, env, adminIds);
      await handleReviewSubmission(msg, env, adminIds);
     } catch { return new Response("Telegram processing failed", { status: 502 }); }
     return Response.json({ ok: true });
@@ -1606,7 +1664,7 @@ export default {
    if (!path) return new Response("Not found", { status: 404 });
    const upstream = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${path}`);
    if (!upstream.ok) return new Response("Bad Gateway", { status: 502 });
-   return new Response(upstream.body, { headers: { "content-type": review.kind === "video" ? "video/mp4" : "image/jpeg", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" } });
+   return new Response(upstream.body, { headers: { "content-type": review.kind === "video" ? "video/mp4" : "image/jpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
   }
   if(url.pathname==="/favicon.ico") return new Response(null,{status:204});
   const html = `<!doctype html>

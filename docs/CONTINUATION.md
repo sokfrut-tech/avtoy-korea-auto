@@ -121,3 +121,35 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Live Worker URL open check through the available web fetch was inaccessible; this is not evidence of a site outage and does not prove the new version is live.
 - No Telegram webhook or secret values were changed. Live Telegram `/start`, website form submission, KV binding, and device/browser visual checks remain unverified.
 - Next: confirm the GitHub Actions deploy workflow completed successfully, then refresh the live site on phone and test tablet/desktop layouts; run a controlled Telegram smoke test only after the live deployment is confirmed.
+
+
+## Review-photo quality guard — 2026-11-02
+- Branch: `fix/review-photo-quality-guard-2026-11-02`
+- Base: `main` at `ca4ea5cdee27fd6b1ace1c3018d4437af75a5ddf`
+- Implemented: Telegram photo rendition selection now ranks by pixel area, then `file_size`, rather than assuming the last PhotoSize is largest; selected rendition metadata is preserved.
+- Implemented: review-media responses use `Cache-Control: no-store` to prevent stale content being served under an unchanged album index URL.
+- Added regression tests for reversed PhotoSize ordering and file-size fallback.
+- Added permanent review-media quality/duplicate-prevention rules to README and AGENTS.md.
+- Verification passed on PR commit `2ac992027600133c7e8a1a5b66bd7a0bf6610e59`: syntax check, full Worker regression suite, privacy regression suite, Cloudflare Worker checks, and Worker tests all succeeded. Factory Review run `41469701274` completed green; it is CI evidence, not an independent AI audit.
+- No production KV, secrets, webhook, merge, or deployment changes.
+- Deployment workflow run `41469701365` completed with `Deploy website Worker` skipped (pull_request event); no production deployment occurred.
+- Independent Claude review was requested in PR #46; no Claude response was present at the last check.
+- Still unverified: production KV contents, real browser screenshots, CDN behavior outside the Worker response headers, actual production Telegram rendition quality, and whether historic duplicate records already exist.
+- Next: obtain independent review if available; inspect live website and production KV through authorized read-only access; only then decide whether any historic records need manual correction. No global cross-review deduplication is permitted without owner approval.
+
+
+## Group-review duplicate path found and fixed — 2026-11-02
+- Additional confirmed code defect: admin media from the configured review group passed through both `stageGroupMedia()` and `handleReviewSubmission()`; an admin message with `/review` could create a staged import and a separate pending review. Also, group album parts were keyed by individual `message_id`, not shared `media_group_id`, so one album could create multiple moderation entries.
+- Fix in current branch: route admin group media through one staged-import path only; group admin albums use the shared media_group_id, are serialized by the existing AlbumSerializer Durable Object, and merge unique photos into one import record/card. Preserve separate customer `/review` handling.
+- Added regression tests for concurrent admin group album parts, repeated media within the same album, one moderation card per admin, and prevention of the duplicate admin `/review` path.
+- The additional group-album changes have been committed to the PR branch; CI rerun is pending.
+
+
+## Final CI evidence for group album fix — 2026-11-02
+- Latest source/docs commit before this handoff: `738fa6616fffc9bddf323da72ba01c9f7c286cbe`.
+- Worker tests run `41470370392`: success.
+- Cloudflare Worker checks run `41470370052`: success.
+- AVTOY Korea — Factory Review run `41470370452`: success (functional/regression and selected privacy test jobs passed).
+- Deploy workflow run `41470370405`: success with deployment-secret check and `Deploy website Worker` skipped for the pull_request event; production unchanged.
+- PR #46 remains open; no merge or production deploy.
+- No independent Claude comment was present at final review; request remains in PR conversation.
