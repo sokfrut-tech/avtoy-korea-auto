@@ -121,3 +121,15 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Live Worker URL open check through the available web fetch was inaccessible; this is not evidence of a site outage and does not prove the new version is live.
 - No Telegram webhook or secret values were changed. Live Telegram `/start`, website form submission, KV binding, and device/browser visual checks remain unverified.
 - Next: confirm the GitHub Actions deploy workflow completed successfully, then refresh the live site on phone and test tablet/desktop layouts; run a controlled Telegram smoke test only after the live deployment is confirmed.
+
+
+## Review-photo quality guard — 2026-11-02
+- Branch: `fix/review-photo-quality-guard-2026-11-02`
+- Base: `main` at `ca4ea5cdee27fd6b1ace1c3018d4437af75a5ddf`
+- Implemented: Telegram photo rendition selection now ranks by pixel area, then `file_size`, rather than assuming the last PhotoSize is largest; selected rendition metadata is preserved.
+- Implemented: review-media responses use `Cache-Control: no-store` to prevent stale content being served under an unchanged album index URL.
+- Added regression tests for reversed PhotoSize ordering and file-size fallback.
+- Added permanent review-media quality/duplicate-prevention rules to README and AGENTS.md.
+- Not yet verified: complete test suite, live KV data, real browser screenshots, CDN behavior, production Telegram media rendition quality, and independent Claude review.
+- No production KV, secrets, webhook, merge, or deployment changes.
+- Next: run full tests and syntax check; obtain Factory CI via PR; request independent review; inspect final diff and then report remaining live-only verification.
