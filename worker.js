@@ -353,19 +353,45 @@ function formatReviewCard(review) {
 
 // Бот читает только одну группу (TELEGRAM_REVIEW_GROUP_ID) и только сообщения с командой /review.
 
-// Фото одного сообщения Telegram приходит несколькими размерами: берём только самый большой.
-function largestPhotoItem(photos) {
- if (!Array.isArray(photos) || !photos.length) return null;
- const last = photos[photos.length - 1];
- return last && last.file_id ? photoItemFrom(last) : null;
+// Telegram PhotoSize contains several renditions of one image. Never rely on array
+// position: choose the greatest pixel area, then file_size; preserve original order
+// only as a deterministic tie-breaker for older fixtures/records without metadata.
+function largestPhotoSize(photos) {
+ if (!Array.isArray(photos)) return null;
+ let best = null;
+ let bestArea = -1;
+ let bestBytes = -1;
+ let bestIndex = -1;
+ photos.forEach((item, index) => {
+  if (!item || !item.file_id) return;
+  const width = Number(item.width) || 0;
+  const height = Number(item.height) || 0;
+  const area = width > 0 && height > 0 ? width * height : -1;
+  const bytes = Number(item.file_size) || -1;
+  if (area > bestArea || (area === bestArea && bytes > bestBytes) || (area === bestArea && bytes === bestBytes && index > bestIndex)) {
+   best = item;
+   bestArea = area;
+   bestBytes = bytes;
+   bestIndex = index;
+  }
+ });
+ return best;
 }
 
-// Telegram отдаёт один и тот же снимок под разными file_id, но с одним file_unique_id.
+function largestPhotoItem(photos) {
+ const best = largestPhotoSize(photos);
+ return best ? photoItemFrom(best) : null;
+}
+
+// Keep Telegram's stable media identity and rendition metadata in storage.
+// file_id can differ for the same original image; file_unique_id identifies it.
 function photoItemFrom(raw) {
  const item = { file_id: String(raw.file_id) };
- // Keep Telegram's stable media identity across retries and album merges.
- // file_id can differ for the same original image; file_unique_id does not.
  if (raw.file_unique_id) item.file_unique_id = String(raw.file_unique_id);
+ for (const field of ["width", "height", "file_size"]) {
+  const value = Number(raw[field]);
+  if (Number.isFinite(value) && value > 0) item[field] = value;
+ }
  return item;
 }
 
@@ -880,11 +906,10 @@ function postVideos(post) {
  return uniqueFileItems(post.video && post.video.file_id ? [post.video] : []);
 }
 
-// Фото одного сообщения Telegram приходят несколькими размерами: берём самый большой.
+// Один исходный снимок Telegram = один элемент альбома; берём его максимальную rendition.
 function largestPhotoOf(photo) {
- return Array.isArray(photo) && photo.length && photo[photo.length - 1] && photo[photo.length - 1].file_id
-  ? [photoItemFrom(photo[photo.length - 1])]
-  : [];
+ const best = largestPhotoSize(photo);
+ return best ? [photoItemFrom(best)] : [];
 }
 
 // Отправка всех фото и видео записи администратору.
@@ -1606,7 +1631,7 @@ export default {
    if (!path) return new Response("Not found", { status: 404 });
    const upstream = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${path}`);
    if (!upstream.ok) return new Response("Bad Gateway", { status: 502 });
-   return new Response(upstream.body, { headers: { "content-type": review.kind === "video" ? "video/mp4" : "image/jpeg", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" } });
+   return new Response(upstream.body, { headers: { "content-type": review.kind === "video" ? "video/mp4" : "image/jpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
   }
   if(url.pathname==="/favicon.ico") return new Response(null,{status:204});
   const html = `<!doctype html>
