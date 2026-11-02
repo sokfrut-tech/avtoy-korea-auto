@@ -1646,10 +1646,12 @@ export default {
    if (!fileId) return new Response("Not found",{status:404});
    const info = await callTelegram(env,"getFile",{file_id:fileId}).catch(()=>null); const path = info && info.result && info.result.file_path;
    if (!path) return new Response("Not found",{status:404});
-   const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path); if (!upstream.ok) return new Response("Bad Gateway",{status:502});
+   const range = request.headers.get("range"); const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path, range ? {headers:{range}} : {}); if (!upstream.ok && upstream.status !== 206) return new Response("Bad Gateway",{status:502});
    const contentType = mediaType === "video" ? (/\.webm$/i.test(path) ? "video/webm" : "video/mp4") : ((selected && selected.mime_type) || "image/jpeg");
    // Media URLs use positional indexes. A car can be replaced while its URL stays the same, so never cache by index.
-   return new Response(upstream.body,{headers:{"content-type":contentType,"cache-control":"no-store","x-content-type-options":"nosniff"}});
+   const mediaHeaders = {"content-type":contentType,"cache-control":"no-store","x-content-type-options":"nosniff"};
+   for (const name of ["content-length","content-range","accept-ranges"]) { const value = upstream.headers.get(name); if (value) mediaHeaders[name] = value; }
+   return new Response(upstream.body,{status:upstream.status,headers:mediaHeaders});
   }
   if (request.method === "GET" && url.pathname === "/api/reviews") {
    const reviews = [];
