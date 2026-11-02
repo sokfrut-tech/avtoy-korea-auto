@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import worker, { AlbumSerializer } from "./worker.js";
 
 const env = {
@@ -1964,4 +1965,21 @@ test("four album parts of a forwarded group post, sent at the same time, create 
     await Promise.all(parts.map(part => worker.fetch(webhookUpdate({ message: part }), sharedEnv)));
     assert.equal(reviewCardCount(calls), 1, "one album, one moderation card");
   });
+});
+
+
+test("static image assets are restored and non-empty", () => {
+  for (const file of ["public/assets/logo.jpg", "public/assets/kia-sportage.jpg"]) {
+    assert.ok(fs.existsSync(file), `${file} exists`);
+    assert.ok(fs.statSync(file).size > 0, `${file} is non-empty`);
+  }
+});
+
+test("homepage references externalized original logo and Kia Sportage hero asset", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/"), {});
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.ok(html.includes('/assets/logo.jpg'), "logo asset path is present");
+  assert.ok(!html.includes('data:image/jpeg;base64,'), "logo is not embedded as a data URL");
+  assert.ok(html.includes("background-image:url('/assets/kia-sportage.jpg')"), "first hero slide uses Kia Sportage asset");
 });
