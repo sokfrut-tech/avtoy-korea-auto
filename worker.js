@@ -1626,7 +1626,8 @@ export default {
    if (!path) return new Response("Not found",{status:404});
    const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path); if (!upstream.ok) return new Response("Bad Gateway",{status:502});
    const contentType = /\.(mp4|webm)$/i.test(path) ? "video/mp4" : "image/jpeg";
-   return new Response(upstream.body,{headers:{"content-type":contentType,"cache-control":"public, max-age=3600","x-content-type-options":"nosniff"}});
+   // Media URLs use positional indexes. A review can be replaced while its URL stays the same, so never cache by index.
+   return new Response(upstream.body,{headers:{"content-type":contentType,"cache-control":"no-store","x-content-type-options":"nosniff"}});
   }
   if (request.method === "GET" && url.pathname === "/api/reviews") {
    const reviews = [];

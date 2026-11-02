@@ -2082,3 +2082,26 @@ test("admin /review media uses the admin import path only and cannot create a du
     assert.equal((await kv.list({ prefix: "pending:" })).keys.length, 1);
   });
 });
+
+test("review media URLs are never cached by index, so replaced photos cannot reappear from cache", async () => {
+  const kv = memoryKV();
+  const id = "-1001234567890_987";
+  await kv.put("approved:" + id, JSON.stringify({
+    id, kind: "text", text: "Проверка", fileId: "PHOTO_NEW",
+    photos: [{ file_id: "PHOTO_NEW", file_unique_id: "PHOTO_NEW_UID" }]
+  }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url.includes("/getFile")) return Response.json({ ok: true, result: { file_path: "photos/new.jpg" } });
+    if (url.includes("/file/bot")) return new Response("image bytes", { headers: { "content-type": "image/jpeg" } });
+    return originalFetch(input, init);
+  };
+  try {
+    const response = await worker.fetch(new Request("https://worker.test/api/review-media/" + id + "/0"), reviewEnv(kv));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
