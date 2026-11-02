@@ -2162,3 +2162,12 @@ test("customer image document can be moderated and served with its original MIME
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("homepage contains no unapproved warranty promise", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()));
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.doesNotMatch(html, /гарант/i);
+  assert.match(html, /Подбор автомобиля и доставка из Кореи/);
+});
