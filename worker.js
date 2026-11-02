@@ -490,6 +490,20 @@ async function handleForwardedGroupPostSerialized(msg, env, adminIds) {
  return (await response.json()).handled === true;
 }
 
+// Channel album parts can arrive as parallel webhook requests too. Serialize them
+// by media_group_id so every photo is merged before the next part reads/writes KV.
+async function stageChannelPostSerialized(post, env, adminIds) {
+ if (!post.media_group_id || !env.ALBUM_SERIALIZER) return stageChannelPost(post, env, adminIds);
+ const albumKey = "channel-album:" + String(post.chat && post.chat.id || "") + "_" + String(post.media_group_id);
+ const stub = env.ALBUM_SERIALIZER.get(env.ALBUM_SERIALIZER.idFromName(albumKey));
+ const response = await stub.fetch("https://album.internal/process", {
+  method: "POST", headers: { "content-type": "application/json" },
+  body: JSON.stringify({ type: "channel", msg: post, adminIds })
+ });
+ if (!response.ok) throw new Error("Channel album serializer failed: " + response.status);
+ return (await response.json()).handled === true;
+}
+
 export class AlbumSerializer {
  constructor(state, env) {
   this.env = env;
@@ -497,9 +511,11 @@ export class AlbumSerializer {
  }
 
  async fetch(request) {
-  const { msg, adminIds } = await request.json();
+  const { msg, adminIds, type } = await request.json();
   // Очередь: каждая часть альбома ждёт завершения предыдущей, даже если KV отвечает медленно.
-  const run = this.chain.then(() => handleForwardedGroupPost(msg, this.env, adminIds));
+  const run = this.chain.then(() => type === "channel"
+   ? stageChannelPost(msg, this.env, adminIds)
+   : handleForwardedGroupPost(msg, this.env, adminIds));
   this.chain = run.catch(() => {});
   const handled = await run;
   return Response.json({ handled });
@@ -1302,7 +1318,7 @@ export default {
     return Response.json({ ok: true });
    }
    const channelPost = update.channel_post;
-   if (channelPost) { try { await stageChannelPost({...channelPost,sourceDate:channelPost.date}, env, adminIds); } catch { return new Response("Telegram import staging failed", {status:502}); } return Response.json({ok:true}); }
+   if (channelPost) { try { await stageChannelPostSerialized({...channelPost,sourceDate:channelPost.date}, env, adminIds); } catch { return new Response("Telegram import staging failed", {status:502}); } return Response.json({ok:true}); }
    const msg = update.message;
    if (!msg || !msg.chat || !msg.chat.id) return Response.json({ ok: true });
    // Groups/channels: only the one review group, only /review messages. Everything else is ignored.

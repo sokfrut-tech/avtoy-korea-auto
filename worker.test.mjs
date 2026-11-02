@@ -1968,6 +1968,22 @@ test("four album parts of a forwarded group post, sent at the same time, create 
 });
 
 
+test("parallel Telegram channel album parts are serialized and all photos are retained", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async () => {
+    const sharedEnv = albumSerializerEnv(kv);
+    const parts = [
+      { message_id: 701, date: 1790000000, media_group_id: "channel-race", chat: { id: -100777, username: "avtoykorea" }, caption: "KG MOBILITY TIBOLI V3", photo: [{ file_id: "C1", file_unique_id: "U1" }] },
+      { message_id: 702, date: 1790000000, media_group_id: "channel-race", chat: { id: -100777, username: "avtoykorea" }, photo: [{ file_id: "C2", file_unique_id: "U2" }] },
+      { message_id: 703, date: 1790000000, media_group_id: "channel-race", chat: { id: -100777, username: "avtoykorea" }, photo: [{ file_id: "C3", file_unique_id: "U3" }] },
+      { message_id: 704, date: 1790000000, media_group_id: "channel-race", chat: { id: -100777, username: "avtoykorea" }, photo: [{ file_id: "C4", file_unique_id: "U4" }] },
+    ];
+    await Promise.all(parts.map(post => worker.fetch(webhookUpdate({ channel_post: post }), sharedEnv)));
+    const stored = JSON.parse(await kv.get("import_pending:-100777_701"));
+    assert.deepEqual(stored.post.photo.map(photo => photo.file_id), ["C1", "C2", "C3", "C4"]);
+  });
+});
+
 test("image asset sources exist and decode to expected binary sizes", () => {
   const logo = Buffer.from(fs.readFileSync("assets-src/logo.jpg.b64", "utf8").replace(/\s+/g, ""), "base64");
   const sportage = Buffer.from(fs.readFileSync("assets-src/kia-sportage.jpg.b64", "utf8").replace(/\s+/g, ""), "base64");
