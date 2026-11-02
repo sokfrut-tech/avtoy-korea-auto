@@ -2123,7 +2123,7 @@ test("admin image documents in the review group are staged once with original MI
     assert.equal(staged.post.photo[0].file_id, "ORIGINAL_PNG");
     assert.equal(staged.post.photo[0].mime_type, "image/png");
     assert.equal(staged.post.photo[0].file_name, "buyer-original.png");
-    assert.ok(calls.some(call => call.method === "sendPhoto" && call.payload.photo === "ORIGINAL_PNG"));
+    assert.ok(calls.some(call => call.method === "sendDocument" && call.payload.document === "ORIGINAL_PNG"));
     assert.equal(await kv.get("pending:" + id), null, "admin document must use only the admin import path");
   });
 });
