@@ -948,6 +948,46 @@ async function sendChannelMedia(env, adminId, photos, videos, caption) {
  for (const video of videos) await callTelegram(env, "sendVideo", { chat_id: adminId, video: video.file_id });
 }
 
+// Exact-byte deduplication is scoped to one car publication. Telegram's
+// stable IDs catch ordinary re-forwards; SHA-256 catches identical bytes
+// uploaded again under a new ID. Verification failures keep the image (fail open).
+async function uniquePhotoFilesByContent(items, env) {
+ const seen = new Set();
+ const output = [];
+ const maxBytes = 12 * 1024 * 1024;
+ let inspected = 0;
+ for (const item of uniqueFileItems(items)) {
+  let digest = null;
+  if (inspected < 30 && env.TELEGRAM_BOT_TOKEN && item.file_id && globalThis.crypto && crypto.subtle) {
+   inspected++;
+   try {
+    const info = await callTelegram(env, "getFile", { file_id: item.file_id });
+    const path = info && info.result && info.result.file_path;
+    if (path) {
+     const response = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path);
+     if (response.ok) {
+      const declaredSize = Number(response.headers.get("content-length") || 0);
+      if (!declaredSize || declaredSize <= maxBytes) {
+       const bytes = await response.arrayBuffer();
+       if (bytes.byteLength > 0 && bytes.byteLength <= maxBytes) {
+        const hash = await crypto.subtle.digest("SHA-256", bytes);
+        digest = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("");
+       }
+      }
+     }
+    }
+   } catch (_) {
+    // Never discard media just because the verification service failed.
+   }
+  }
+  const key = digest ? "sha256:" + digest : null;
+  if (key && seen.has(key)) continue;
+  if (key) seen.add(key);
+  output.push(item);
+ }
+ return output;
+}
+
 async function handleCarPost(post, env, adminIds) {
  const chat = post.chat || {};
  if (String(chat.username || "").toLowerCase() !== "avtoykorea") return;
@@ -961,7 +1001,7 @@ async function handleCarPost(post, env, adminIds) {
   return;
  }
  const caption = cleanPublicationText(post.caption || post.text).slice(0, 3000);
- const photos = postPhotos(post);
+ const photos = await uniquePhotoFilesByContent(postPhotos(post), env);
  const videos = postVideos(post);
  const fileId = photos.length ? photos[photos.length - 1].file_id : (videos.length ? videos[0].file_id : null);
  if (!caption && !fileId) return;
