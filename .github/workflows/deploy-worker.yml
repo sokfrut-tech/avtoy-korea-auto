@@ -1,13 +1,6 @@
 name: Deploy AVTOY KOREA Worker
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "worker.js"
-      - "assets-src/**"
-      - "wrangler.toml"
-      - ".github/workflows/deploy-worker.yml"
   pull_request:
     branches: [main]
     paths:
@@ -16,6 +9,10 @@ on:
       - "wrangler.toml"
       - ".github/workflows/deploy-worker.yml"
       - "worker.test.mjs"
+  workflow_run:
+    workflows: ["Worker tests"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -26,8 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
+      - name: Checkout tested commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -68,7 +67,7 @@ jobs:
         run: node --test worker.test.mjs
 
       - name: Verify Cloudflare deployment secrets
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -84,7 +83,7 @@ jobs:
           echo "Cloudflare deployment secrets are present."
 
       - name: Deploy website Worker
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
