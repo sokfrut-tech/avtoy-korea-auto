@@ -28,3 +28,6 @@ After every substantial change, update `docs/CONTINUATION.md` on the active bran
 - Review gallery rendering must map one stored unique media item to one gallery item; do not add duplicate DOM nodes or CSS thumbnail copies. Keep photos uncropped.
 - Do not cache indexed review-media URLs unless the URL is versioned by the actual media identity. Until then, return `Cache-Control: no-store`.
 - Before marking the media pipeline fixed, add regression tests for shuffled PhotoSize arrays, resolution selection, album retries, unique-id deduplication within one review, preservation across separate reviews, and API/gallery mapping.
+
+- Admin media from the configured review group must be aggregated by `media_group_id` into one staged import and one moderation card. Serialize album parts through the album Durable Object and deduplicate retry delivery within that album.
+- Do not process an admin's group media a second time through the customer `/review` submission path; one Telegram update must create only one moderation record.
