@@ -2231,6 +2231,10 @@ test("car import removes byte-identical reuploads but keeps different angles", a
   };
   globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
+    if (url.includes("/file/bot")) {
+      const key = url.endsWith("/photos/a.jpg") ? "photos/a.jpg" : url.endsWith("/photos/b.jpg") ? "photos/b.jpg" : "photos/c.jpg";
+      return new Response(bytesByPath[key], { headers: { "content-type": "image/jpeg" } });
+    }
     if (url.startsWith("https://api.telegram.org/")) {
       const method = new URL(url).pathname.split("/").pop();
       const payload = JSON.parse(init.body || "{}");
@@ -2239,11 +2243,6 @@ test("car import removes byte-identical reuploads but keeps different angles", a
         return Response.json({ ok: true, result: { file_path: "photos/" + suffix + ".jpg" } });
       }
       return Response.json({ ok: true, result: {} });
-    }
-    if (url.includes("/file/bot")) {
-      const path = url.slice(url.indexOf("/file/bot"));
-      const key = path.endsWith("/photos/a.jpg") ? "photos/a.jpg" : path.endsWith("/photos/b.jpg") ? "photos/b.jpg" : "photos/c.jpg";
-      return new Response(bytesByPath[key], { headers: { "content-type": "image/jpeg" } });
     }
     return originalFetch(input, init);
   };
