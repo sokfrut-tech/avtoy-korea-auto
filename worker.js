@@ -912,7 +912,9 @@ function uniqueFileItems(list) {
 }
 
 function postPhotos(post) {
- return uniqueFileItems(Array.isArray(post.photos) ? post.photos : (Array.isArray(post.photo) ? post.photo : []));
+ const items = Array.isArray(post.photos) ? post.photos : (Array.isArray(post.photo) ? post.photo : []);
+ const documentPhoto = imageDocumentItemFrom(post.document);
+ return uniqueFileItems([...items, ...(documentPhoto ? [documentPhoto] : [])]);
 }
 
 function postVideos(post) {
@@ -1083,7 +1085,7 @@ async function resendChannelImportEntry(entry, id, env, adminIds) {
 
 // Другие части той же пересылки альбома: добавляем фото и видео к уже существующей записи, без новых карточек.
 async function mergeChannelPartMedia(post, id, env) {
- const photos = largestPhotoOf(post.photo);
+ const photos = [...largestPhotoOf(post.photo), ...(imageDocumentItemFrom(post.document) ? [imageDocumentItemFrom(post.document)] : [])];
  const videos = postVideos(post);
  if (!photos.length && !videos.length) return;
  const importKey = "import_pending:" + id;
@@ -1178,7 +1180,7 @@ async function stageChannelPost(post, env, adminIds) {
   await resendChannelImportEntry(JSON.parse(existingImport),id,env,adminIds);
   return;
  }
- const photos = largestPhotoOf(post.photo);
+ const photos = [...largestPhotoOf(post.photo), ...(imageDocumentItemFrom(post.document) ? [imageDocumentItemFrom(post.document)] : [])];
  const videos = postVideos(post);
  const stored = {...post,chat,message_id:Number(number),albumId:post.media_group_id ? String(post.media_group_id) : "",photo:photos,videos};
  await env.REVIEWS.put("import_pending:" + id,JSON.stringify({...stored,post:stored}),{expirationTtl:2592000});
@@ -1644,8 +1646,8 @@ export default {
    const info = await callTelegram(env,"getFile",{file_id:fileId}).catch(()=>null); const path = info && info.result && info.result.file_path;
    if (!path) return new Response("Not found",{status:404});
    const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path); if (!upstream.ok) return new Response("Bad Gateway",{status:502});
-   const contentType = /\.(mp4|webm)$/i.test(path) ? "video/mp4" : "image/jpeg";
-   // Media URLs use positional indexes. A review can be replaced while its URL stays the same, so never cache by index.
+   const contentType = /\.(mp4|webm)$/i.test(path) ? "video/mp4" : ((selected && selected.mime_type) || "image/jpeg");
+   // Media URLs use positional indexes. A car can be replaced while its URL stays the same, so never cache by index.
    return new Response(upstream.body,{headers:{"content-type":contentType,"cache-control":"no-store","x-content-type-options":"nosniff"}});
   }
   if (request.method === "GET" && url.pathname === "/api/reviews") {
@@ -2098,9 +2100,13 @@ footer{background:#071321;color:#aeb9c8}
  .benefit-grid b{font-size:10px}
  .cars{gap:8px}
 }
-#cars .cars>.card .car-body{color:#172033}
-#cars .cars>.card .car-body p{color:#475467}
-#cars .cars>.card .car-body .car-specs{color:#667085}
+#cars{background:var(--bg);color:var(--text)}
+#cars .sub{color:var(--muted)}
+#cars .cars>.card{background:var(--panel);border:1px solid var(--line);color:var(--text);box-shadow:0 12px 34px #0005}
+#cars .cars>.card .car-body{color:var(--text)}
+#cars .cars>.card .car-body p{color:var(--muted)}
+#cars .cars>.card .car-body .car-specs{color:#c7c9d0}
+#cars .cars>.card .car-text{color:#c7c9d0}
 .brand-logo{display:block;width:250px;max-width:100%;height:auto}
 @media(max-width:900px){.brand-logo{width:205px}}
 </style>
