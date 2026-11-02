@@ -2,12 +2,20 @@ name: Deploy AVTOY KOREA Worker
 
 on:
   push:
+    branches: [main, fix/use-original-logo-image-2026-11-01]
+    paths:
+      - "worker.js"
+      - "assets-src/**"
+      - "wrangler.toml"
+      - ".github/workflows/deploy-worker.yml"
+  pull_request:
     branches: [main]
     paths:
       - "worker.js"
       - "assets-src/**"
       - "wrangler.toml"
       - ".github/workflows/deploy-worker.yml"
+      - "worker.test.mjs"
   workflow_dispatch:
 
 permissions:
@@ -78,6 +86,7 @@ jobs:
         run: node --test worker.test.mjs
 
       - name: Verify Cloudflare deployment secrets
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -93,6 +102,7 @@ jobs:
           echo "Cloudflare deployment secrets are present."
 
       - name: Deploy website Worker
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
