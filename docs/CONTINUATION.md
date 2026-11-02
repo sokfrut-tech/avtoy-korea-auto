@@ -130,6 +130,9 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Implemented: review-media responses use `Cache-Control: no-store` to prevent stale content being served under an unchanged album index URL.
 - Added regression tests for reversed PhotoSize ordering and file-size fallback.
 - Added permanent review-media quality/duplicate-prevention rules to README and AGENTS.md.
-- Not yet verified: complete test suite, live KV data, real browser screenshots, CDN behavior, production Telegram media rendition quality, and independent Claude review.
+- Verification passed on PR commit `2ac992027600133c7e8a1a5b66bd7a0bf6610e59`: syntax check, full Worker regression suite, privacy regression suite, Cloudflare Worker checks, and Worker tests all succeeded. Factory Review run `41469701274` completed green; it is CI evidence, not an independent AI audit.
 - No production KV, secrets, webhook, merge, or deployment changes.
-- Next: run full tests and syntax check; obtain Factory CI via PR; request independent review; inspect final diff and then report remaining live-only verification.
+- Deployment workflow run `41469701365` completed with `Deploy website Worker` skipped (pull_request event); no production deployment occurred.
+- Independent Claude review was requested in PR #46; no Claude response was present at the last check.
+- Still unverified: production KV contents, real browser screenshots, CDN behavior outside the Worker response headers, actual production Telegram rendition quality, and whether historic duplicate records already exist.
+- Next: obtain independent review if available; inspect live website and production KV through authorized read-only access; only then decide whether any historic records need manual correction. No global cross-review deduplication is permitted without owner approval.
