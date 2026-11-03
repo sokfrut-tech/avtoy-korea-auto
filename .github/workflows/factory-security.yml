@@ -42,9 +42,20 @@ jobs:
       - uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4
         with:
           languages: javascript-typescript
-      - uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4
+      - id: codeql-analyze
+        uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4
         with:
           category: /language:javascript-typescript
+          upload: never
+          output: codeql-results
+      - name: Archive CodeQL SARIF (Code Scanning upload unavailable on this repository)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: codeql-sarif-${{ github.sha }}
+          path: codeql-results/
+          if-no-files-found: warn
+          retention-days: 14
 
   factory-toolchain:
     name: Factory shared static toolchain
