@@ -45,3 +45,18 @@ jobs:
       - uses: github/codeql-action/analyze@v4
         with:
           category: /language:javascript-typescript
+          # This repository does not have GitHub code scanning enabled.
+          # Keep the CodeQL analysis and preserve SARIF as a downloadable artifact.
+          upload: false
+      - name: Stage CodeQL SARIF results
+        if: success()
+        run: |
+          mkdir -p codeql-artifacts
+          cp ../results/*.sarif codeql-artifacts/
+      - name: Archive CodeQL SARIF results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif-${{ github.sha }}
+          path: codeql-artifacts/*.sarif
+          if-no-files-found: warn
