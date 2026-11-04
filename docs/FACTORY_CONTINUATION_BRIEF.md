@@ -38,3 +38,23 @@ Read this brief and README/AGENTS; inspect latest feature branch and PRs before 
 ## Documentation handoff PR
 - Continuation brief PR: [#58](https://github.com/sokfrut-tech/avtoy-korea-auto/pull/58) (draft; not merged).
 - Review this brief against current main before code changes.
+## Refreshed verification — 2026-11-04 19:35 UTC
+
+- Current main deployment source commit observed: 8b505475d2745bb7d24d5675b32ee0f85266b81f.
+- Main-branch Cloudflare Worker deployment run [41521125734](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41521125734) succeeded on 2026-11-02.
+- Main-branch Worker tests [41521081679](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41521081679) passed.
+- Main-branch Factory Security Baseline [41521080933](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41521080933) failed because CodeQL upload was attempted while GitHub code scanning is unavailable for this repository.
+- PR #56 corrects SARIF handling by keeping CodeQL analysis as a downloadable artifact (upload=false); exact-head CodeQL/Security, Worker and Factory review runs [41696829149](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41696829149), [41696829152](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41696829152), [41696829214](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41696829214) all passed.
+- PR #57 shared security toolchain onboarding is open and mergeable. PR #56 is open, ready for review and mergeable. Neither was merged in this session.
+- The current Worker source contains /telegram/webhook, /api/request, /api/reviews, /api/cars and media routes. Automated tests cover private admin-only enquiry routing, group silence, Telegram ok:false, admin moderation and album/media paths.
+- The live website response and Telegram webhook registration were NOT independently verified in this session. A web fetch of the Cloudflare Worker hostname was inaccessible to the available web viewer; this is not evidence that the site is down. Telegram getWebhookInfo cannot be checked without a secure bot-token path. Do not ask the owner to paste tokens into chat.
+- Production secrets, KV bindings, webhook configuration and deployment were not changed.
+
+## Immediate next actions
+
+1. Review and reconcile PR #56 and #57 with PR #58's documented state; do not merge automatically.
+2. Add a non-secret Cloudflare runtime health endpoint or use an authenticated Cloudflare dashboard check to verify current Worker version and KV binding presence.
+3. Verify Telegram webhook URL and last_error_message using the Cloudflare/Telegram deployment environment without exposing the bot token.
+4. Run a controlled /start and one private test enquiry using a test administrator account; confirm private admin delivery and group silence.
+5. Verify a full review album: import → one moderation card per album → admin publish → website shows exactly the selected unique photos/videos.
+6. Only after those checks, prepare a production change plan and request explicit owner approval.
