@@ -33,3 +33,8 @@ Professional AVTOY KOREA vehicle-import / vehicle-order website with working Tel
 
 ## Resume
 Read this brief and README/AGENTS; inspect latest feature branch and PRs before changing anything. If Claude/Gemini are unavailable, ChatGPT performs code and CI investigation directly, recording exact evidence.
+
+
+## Documentation handoff PR
+- Continuation brief PR: [#58](https://github.com/sokfrut-tech/avtoy-korea-auto/pull/58) (draft; not merged).
+- Review this brief against current main before code changes.
