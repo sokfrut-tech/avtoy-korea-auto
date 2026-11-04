@@ -58,3 +58,18 @@ Read this brief and README/AGENTS; inspect latest feature branch and PRs before 
 4. Run a controlled /start and one private test enquiry using a test administrator account; confirm private admin delivery and group silence.
 5. Verify a full review album: import → one moderation card per album → admin publish → website shows exactly the selected unique photos/videos.
 6. Only after those checks, prepare a production change plan and request explicit owner approval.
+
+## Fresh exact-head verification — 2026-11-04 19:40 UTC
+
+- PR #58 head `d72b950e5539439b92e865ffb8d031ad4e19533b`: Worker tests [41898381015](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41898381015) and AVTOY Factory Review [41898381010](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41898381010) passed.
+- PR #58 Factory Security Baseline [41898381023](https://github.com/sokfrut-tech/avtoy-korea-auto/actions/runs/41898381023) failed at CodeQL SARIF upload because GitHub Code Scanning is not enabled. The log confirms CodeQL successfully scanned 4/4 JavaScript files and generated SARIF; failure is the upload configuration, not a reported source vulnerability.
+- Root cause of the PR #58 failure: its branch is based on `main` and still contains the old `.github/workflows/factory-security.yml` CodeQL step with default upload enabled. The correction exists separately in PR #56 (`upload: false` plus SARIF artifact archival). PR #56 exact-head security/Worker/review checks all passed (runs 41696829149, 41696829152, 41696829214). Do not describe PR #58's security gate as green until the fix is integrated or the workflow is otherwise corrected.
+- PR #57 exact-head security, Worker checks, Worker tests, Factory Review and Cloudflare deploy all passed (runs 41706682505, 41706681318, 41706681320, 41706681374, 41706681160). This does not verify Telegram webhook registration or user-visible bot responses.
+- No production change was made. The live site response, webhook URL/last_error_message, private admin delivery and group silence remain NOT VERIFIED.
+
+## Next actions (refreshed)
+1. Reconcile PR #56 CodeQL artifact-only workflow fix with PR #57 shared security toolchain and PR #58 documentation; avoid merging overlapping workflow changes without checking the combined diff.
+2. After integration, require fresh exact-head security + Worker + review checks.
+3. Add/verify a non-secret health diagnostic and a secure webhook diagnostic using the deployment environment; never expose or request bot tokens in chat.
+4. Run controlled /start and private enquiry tests, proving administrator-only delivery and group silence; then verify review album import/moderation/publish with all unique media retained.
+5. Keep production changes behind explicit owner approval.
