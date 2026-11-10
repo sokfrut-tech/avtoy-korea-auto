@@ -186,3 +186,18 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Initial Worker syntax checks failed before the test suite could run. The Factory Review privacy job also failed at test-module import because the Worker module did not parse.
 - Gitleaks scanned the PR commits and reported \`no leaks found\`, but the action failed while uploading its SARIF artifact because GitHub Actions artifact storage quota is full. This is an infrastructure failure, not a detected secret.
 - Rerun of exact-head syntax/tests and Factory Review is still required. Do not merge while CI is red or unconfirmed.
+
+
+## Exact-head verification — 2026-11-10 19:52 UTC
+- Code/test head verified: \`6fb129554b135010fe42aa992b7a4593c3aae7b5\`.
+- Worker tests run #141 (\`42889383089\`): syntax check passed; full suite passed **129/129, 0 failed**.
+- Cloudflare Worker checks run #246 (\`42889383083\`): syntax and private-admin routing passed; embedded regression suite passed **129/129, 0 failed**.
+- Factory Review run #155 (\`42889382954\`):
+  - Functional/regression tests passed **129/129**.
+  - Security/privacy regression tests passed.
+  - Director/release-evidence job failed only at artifact upload: GitHub Actions artifact storage quota is full.
+- Deploy workflow run #108 (\`42889383220\`) completed successfully for the PR but correctly skipped both secret verification and the production deploy step because this was a pull_request event. **No production deployment occurred.**
+- Gitleaks in the earlier security baseline reported \`no leaks found\`; its SARIF upload was blocked by the same GitHub Actions artifact quota.
+- The initial failing test on this branch was a stale assertion that expected the delete button in the first keyboard column. The site list now intentionally has an edit button first and a remove button second; the test was corrected to inspect all buttons in each row. The latest exact-code run is green.
+- Current PR #60 remains open and mergeable. Do not merge/deploy until owner approval and the separate live-runtime checks are complete.
+- Outstanding: browser-based admin console is not implemented; current safe edit/unpublish workflow is in the private Telegram admin \`/site\` menu. Live Worker HTTP, production \`REVIEWS\` binding, actual active vehicle records, webhook and real-device visual review are not verified from this environment.
