@@ -2366,3 +2366,11 @@ test("catalogue page shows an explicit retry state when the car API request fail
   assert.match(html, /Автомобили в продаже и под заказ/);
   assert.match(html, /Не удалось загрузить автомобили/);
 });
+
+
+test("car catalogue reports missing KV storage instead of silently returning an empty list", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/api/cars"), env);
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.match(body.error, /Catalogue storage unavailable/);
+});
