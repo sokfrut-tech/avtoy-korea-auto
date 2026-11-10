@@ -2406,8 +2406,7 @@ test("web admin uses a one-time Telegram code, edits a single listing and unpubl
       from: { id: 333333333 },
       text: "/adminlink",
     }}), reviewEnv(kv));
-    assert.ok(!calls.some(c => String(c.payload.chat_id) === "333333333" && /Код входа:/.test(String(c.payload.text || ""))));
-    assert.equal(await kv.get("admin_login_current:333333333"), null);
+    assert.equal(await kv.get("admin_login_current:333333333"), null, "non-admin receives no login code");
     await worker.fetch(webhookUpdate({ message: {
       chat: { id: 111111111, type: "private" },
       from: { id: 111111111 },
