@@ -313,9 +313,7 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
   await env.REVIEWS.delete("moderation_edit:" + adminId);
   await callTelegram(env, "sendMessage", {
    chat_id: adminId,
-   text: "✅ Текст обновлён на сайте. Остальные объявления и фотографии не затронуты.
-
-" + (isCar ? item.caption : item.text).slice(0, 3000)
+   text: "✅ Текст обновлён на сайте. Остальные объявления и фотографии не затронуты.\n\n" + (isCar ? item.caption : item.text).slice(0, 3000)
   });
   return true;
  }
