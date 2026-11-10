@@ -1646,7 +1646,7 @@ test("/site lists what is on the site for an admin and nothing for a client", as
     await worker.fetch(webhookUpdate({ message: { message_id: 20, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text: "/site" } }), reviewEnv(kv));
     const list = calls.find(c => c.payload.text && c.payload.text.startsWith("🌐 Сейчас на сайте: 2"));
     assert.ok(list, "admin gets the list with two items");
-    const buttons = list.payload.reply_markup.inline_keyboard.map(row => row[0].callback_data);
+    const buttons = list.payload.reply_markup.inline_keyboard.flat().map(button => button.callback_data);
     assert.ok(buttons.includes("sitedel:" + CAR_ID) && buttons.includes("sitedel:" + REVIEW_ID), "each item has a remove button");
   });
   await withTelegramMock(async calls => {
