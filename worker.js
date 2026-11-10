@@ -124,7 +124,9 @@ const ADMIN_HELP_TEXT = [
  "❓ Подсказка администратора",
  "",
  "Сайт:",
- "/site — что сейчас опубликовано. Убрать: 🗑 → Да.",
+ "/site — список опубликованных автомобилей и отзывов.",
+ "✏️ Изменить текст — нажмите у нужной публикации; ответьте командой ЗАМЕНИТЬ или УДАЛИТЬ.",
+ "🗑 Снять с сайта — нажмите у нужной публикации и подтвердите действие.",
  "/log — журнал действий, последние 20.",
  "↩️ Отменить — 2 минуты после публикации или снятия.",
  "",
@@ -156,6 +158,7 @@ async function sendAdminHelp(env, chatId) {
 async function setAdminCommands(env, adminId) {
  await callTelegram(env, "setMyCommands", {
   commands: [
+   { command: "admin", description: "Меню администратора" },
    { command: "site", description: "Что опубликовано на сайте" },
    { command: "log", description: "Журнал действий администраторов" },
    { command: "help", description: "Подсказка администратора" },
@@ -179,7 +182,9 @@ async function showSiteList(chatId, env) {
  if (!items.length) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "На сайте сейчас ничего не опубликовано." });
  const shown = items.slice(0, 30);
  const text = "🌐 Сейчас на сайте: " + items.length + "\n\n" + shown.map((item, index) => (index + 1) + ". " + item.label).join("\n") + (items.length > shown.length ? "\n\nПоказаны первые " + shown.length + "." : "");
- const keyboard = { inline_keyboard: [...shown.map(item => [{ text: "🗑 " + item.label.slice(0, 40), callback_data: "sitedel:" + item.id }]), [{ text: "❓ Подсказка", callback_data: "adminhelp" }]] };
+ const keyboard = { inline_keyboard: [...shown.flatMap(item => [
+  [{ text: "✏️ Изменить текст", callback_data: "siteedit:" + item.id }, { text: "🗑 Снять с сайта", callback_data: "sitedel:" + item.id }]
+ ]), [{ text: "❓ Подсказка", callback_data: "adminhelp" }]] };
  return callTelegram(env, "sendMessage", { chat_id: chatId, text, reply_markup: keyboard });
 }
 
@@ -224,6 +229,35 @@ async function handleSiteDeleteCallback(callback, env, adminIds) {
  return answer("Снято с сайта. Материал вернулся в ожидание");
 }
 
+async function handleSiteEditCallback(callback, env, adminIds) {
+ const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
+ const adminId = String((callback.from && callback.from.id) || "");
+ if (!adminIds.includes(adminId) || !env.REVIEWS) return answer("Нет доступа", true);
+ const match = String(callback.data || "").match(/^siteedit:(car_-?\d+_\d+|-?\d+_\d+)$/);
+ if (!match) return answer("Материал не найден", true);
+ const id = match[1];
+ const isCar = id.startsWith("car_");
+ const key = (isCar ? "car_approved:" : "approved:") + id;
+ const raw = await env.REVIEWS.get(key);
+ if (!raw) return answer("Публикация уже снята с сайта", true);
+ const record = JSON.parse(raw);
+ const session = { type: isCar ? "car_site" : "review_site", id, createdAt: new Date().toISOString() };
+ await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 86400 });
+ const label = isCar ? "АВТОМОБИЛЯ" : "ОТЗЫВА";
+ const currentText = String(isCar ? record.caption || "" : record.text || "");
+ const instructions = "Текущий опубликованный текст ниже. Ответьте на это сообщение одной командой:\n" +
+  "• ЗАМЕНИТЬ: старый фрагмент => новый фрагмент\n" +
+  "• УДАЛИТЬ: ненужный фрагмент\n" +
+  "• ДОБАВИТЬ В КОНЕЦ: новый текст\n" +
+  "Или отправьте полный исправленный текст. Изменится только текст этой публикации; фотографии и другие объявления останутся без изменений.";
+ await callTelegram(env, "sendMessage", {
+  chat_id: adminId,
+  text: "✏️ РЕДАКТИРОВАНИЕ ОПУБЛИКОВАННОГО " + label + "\n\n" + instructions + "\n\nТЕКУЩИЙ ТЕКСТ:\n" + (currentText || "— пусто —").slice(0, 3000),
+  reply_markup: { force_reply: true, input_field_placeholder: "Команда правки или новый текст" }
+ });
+ return answer("Отправьте правку ответом на сообщение бота");
+}
+
 async function handleAdminModerationEditReply(msg, env, adminIds) {
  const adminId = String(msg.chat && msg.chat.id || "");
  if (!adminIds.includes(adminId) || !env.REVIEWS || !msg.reply_to_message) return false;
@@ -232,14 +266,17 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
  const promptText = String(msg.reply_to_message.text || msg.reply_to_message.caption || "");
  if (!promptText.startsWith("✏️ РЕДАКТИРОВАНИЕ ")) return false;
  const session = JSON.parse(rawSession);
- if (!session || !["review", "car"].includes(session.type) || !session.id) return false;
+ if (!session || !["review", "car", "car_site", "review_site"].includes(session.type) || !session.id) return false;
  const instruction = String(msg.text || msg.caption || "").trim();
  if (!instruction) {
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Правка пустая. Отправьте команду изменения или полный текст ответом на сообщение редактирования." });
   return true;
  }
- const isCar = session.type === "car";
- const key = (isCar ? "car_pending:" : "pending:") + session.id;
+ const isPublished = session.type === "car_site" || session.type === "review_site";
+ const isCar = session.type === "car" || session.type === "car_site";
+ const key = isPublished
+  ? (isCar ? "car_approved:" : "approved:") + session.id
+  : (isCar ? "car_pending:" : "pending:") + session.id;
  const raw = await env.REVIEWS.get(key);
  if (!raw) {
   await env.REVIEWS.delete("moderation_edit:" + adminId);
@@ -249,7 +286,7 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
  const item = JSON.parse(raw);
  const currentText = String(isCar ? item.caption || "" : item.text || "");
  const photoCommand = instruction.match(/^УДАЛИТЬ\s+ФОТО\s*:?\s*([\d\s,]+)$/i);
- if (photoCommand) { await requestPhotoDelete(session, adminId, photoCommand[1], env); return true; }
+ if (photoCommand && !isPublished) { await requestPhotoDelete(session, adminId, photoCommand[1], env); return true; }
  const editResult = applyModerationTextEdit(currentText, instruction);
  if (editResult.error) {
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: editResult.error + "\n\nПопробуйте ещё раз ответом на сообщение редактирования." });
@@ -258,6 +295,28 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
  const edited = cleanPublicationText(editResult.text);
  if (!edited) {
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: "После правки текст пустой. Материал не изменён." });
+  return true;
+ }
+ if (isPublished) {
+  if (isCar) {
+   item.originalCaption = item.originalCaption === undefined ? item.caption : item.originalCaption;
+   item.caption = edited.slice(0, 3000);
+  } else {
+   item.originalText = item.originalText === undefined ? item.text : item.originalText;
+   item.text = edited.slice(0, 1000);
+   item.hasThanks = THANKS_PATTERN.test(item.text);
+  }
+  item.editedAt = new Date().toISOString();
+  item.editedBy = adminId;
+  await env.REVIEWS.put(key, JSON.stringify(item));
+  await writeLog(env, adminId, "изменён текст опубликованного материала", isCar ? "машина" : "отзыв", session.id, siteLabel(session.id, item));
+  await env.REVIEWS.delete("moderation_edit:" + adminId);
+  await callTelegram(env, "sendMessage", {
+   chat_id: adminId,
+   text: "✅ Текст обновлён на сайте. Остальные объявления и фотографии не затронуты.
+
+" + (isCar ? item.caption : item.text).slice(0, 3000)
+  });
   return true;
  }
  if (isCar) {
@@ -1425,6 +1484,7 @@ export default {
      if (String(cb.data || "").startsWith("ord:") || String(cb.data || "").startsWith("ordinfo:")) await handleOrderCallback(cb, env, adminIds);
       else if (String(cb.data || "").startsWith("orddone:")) await handleOrderDoneCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("imp:")) await handleImportChoice(cb, env, adminIds);
+     else if (String(cb.data || "").startsWith("siteedit:")) await handleSiteEditCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("sitedel")) await handleSiteDeleteCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("mphoto:")) await handlePhotoDeleteCallback(cb, env, adminIds);
      else if (String(cb.data || "") === "adminhelp") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); await sendAdminHelp(env, cb.message.chat.id); }
@@ -1547,6 +1607,9 @@ export default {
       const notice = "👋 Новый пользователь бота AVTOY KOREA\nИмя: " + String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано") + "\nChat ID: " + chatId;
       await Promise.all(adminIds.map(id => send(id, notice)));
      }
+    } else if (text === "/admin" && adminIds.includes(chatId)) {
+     await setAdminCommands(env, chatId);
+     await sendAdminHelp(env, chatId);
     } else if (text === "/site" && adminIds.includes(chatId)) {
      await showSiteList(chatId, env);
     } else if (text === "/log" && adminIds.includes(chatId)) {
@@ -1559,7 +1622,7 @@ export default {
     } else if (text === "/countries") {
      await send(chatId, "🌍 Подбираем автомобили из:\n🇰🇷 Южной Кореи\n🇨🇳 Китая\n🇦🇪 ОАЭ\n\nНапишите, какая страна вас интересует.");
     } else if (text === "/catalog") {
-     await send(chatId, "🚘 Как проходит подбор AVTOY KOREA:\n1. Уточняем бюджет и пожелания.\n2. Ищем подходящие варианты.\n3. Обсуждаем проверку, покупку и доставку.\n\nГотового каталога объявлений пока нет — напишите желаемую марку, модель и бюджет, и менеджер поможет с подбором.");
+     await send(chatId, "🚘 Актуальные автомобили AVTOY KOREA\n\nПосмотреть опубликованные предложения: https://avtoy-korea-auto.sokfrut.workers.dev/#cars\n\nВсе объявления появляются на сайте после проверки. Если подходящего автомобиля нет, напишите марку, модель и бюджет — менеджер поможет с подбором.");
     } else if (text === "/contact") {
      await send(chatId, "Оставьте сообщение прямо в этом чате или заполните форму на сайте: https://avtoy-korea-auto.sokfrut.workers.dev/\nКанал: https://t.me/avtoYkorea");
     } else if (text && !adminIds.includes(chatId)) {
@@ -2192,9 +2255,9 @@ footer{background:#071321;color:#aeb9c8}
 <section class="wrap section" id="about" style="padding-bottom:20px"><div class="eyebrow">AVTOY KOREA</div><h2>Автомобили из Кореи под ваш запрос</h2><p class="sub">Помогаем выбрать автомобиль, проверить его перед покупкой и организовать доставку. Сопровождаем на каждом этапе.</p></section>
 <section class="wrap section" id="cars" style="padding-top:20px">
   <div class="eyebrow">Наши автомобили</div>
-  <h2>Примеры выполненных заказов</h2>
-  <p class="sub">Точная стоимость зависит от курса и условий. Уточняйте у администратора.</p>
-  <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Объявления из Telegram появятся после проверки и одобрения администратором.</div></article></div>
+  <h2>Автомобили в продаже и под заказ</h2>
+  <p class="sub">Актуальные предложения из нашего Telegram-канала. На сайт попадают только объявления, проверенные администратором.</p>
+  <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Загружаем актуальные предложения…</div></article></div>
   <p class="cars-hint">← Листайте пальцем, справа видно следующую машину →</p>
 </section>
 <section class="wrap section" id="order" style="padding-top:40px">
@@ -2409,8 +2472,12 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
   list.addEventListener('scroll',updateReviewControls,{passive:true});window.addEventListener('resize',updateReviewControls);updateReviewControls();
 }).catch(function(){});
 // Каталог показывает только одобренные публикации из Telegram
-fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
- var list=document.getElementById('cars-list'); if(!list || !data.cars || !data.cars.length)return; list.textContent='';
+function loadCars(){
+fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
+ var list=document.getElementById('cars-list'); if(!list)return;
+ if(!Array.isArray(data.cars))throw new Error('Invalid catalogue response');
+ if(!data.cars.length){list.textContent='';var empty=document.createElement('article');empty.className='card dashed';var emptyBody=document.createElement('div');emptyBody.className='car-body';emptyBody.textContent='Сейчас нет активных объявлений. Новые предложения появятся после проверки администратора.';empty.appendChild(emptyBody);list.appendChild(empty);return;}
+ list.textContent='';
  var NL=String.fromCharCode(10);
  var hint=document.querySelector('.cars-hint'); if(hint)hint.classList.add('is-on');
  var lightbox=null, items=[], current=0;
@@ -2481,7 +2548,17 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(fu
   }
   article.appendChild(body); list.appendChild(article);
  });
-}).catch(function(){});
+}).catch(function(){
+ var list=document.getElementById('cars-list'); if(!list)return;
+ list.textContent='';
+ var card=document.createElement('article'); card.className='card dashed';
+ var body=document.createElement('div'); body.className='car-body';
+ var message=document.createElement('p'); message.className='car-text'; message.textContent='Не удалось загрузить автомобили. Проверьте соединение и попробуйте ещё раз.';
+ var retry=document.createElement('button'); retry.type='button'; retry.className='btn btn-dark'; retry.textContent='Повторить загрузку'; retry.addEventListener('click',loadCars);
+ body.appendChild(message); body.appendChild(retry); card.appendChild(body); list.appendChild(card);
+});
+}
+loadCars();
 // Главный слайдер: автоматическая смена, точки и стрелки
 (function(){
   if(typeof document.querySelector!=='function')return;
