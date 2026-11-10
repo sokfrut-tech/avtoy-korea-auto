@@ -12,6 +12,7 @@ on:
       - feature/reviews-moderation
       - feature/admin-edit-before-publish
       - fix/review-album-and-inline-edit
+      - fix/avtoy-site-catalog-and-admin-ux-2026-11-10
 
 permissions:
   contents: read
