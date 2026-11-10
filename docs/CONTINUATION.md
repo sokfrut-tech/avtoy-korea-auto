@@ -153,3 +153,19 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Deploy workflow run `41470370405`: success with deployment-secret check and `Deploy website Worker` skipped for the pull_request event; production unchanged.
 - PR #46 remains open; no merge or production deploy.
 - No independent Claude comment was present at final review; request remains in PR conversation.
+
+
+## AVTOY KOREA repair continuation — 2026-11-10 19:45 UTC
+- Active branch: \`fix/avtoy-site-catalog-and-admin-ux-2026-11-10\`.
+- Base: \`main\` after warranty-removal PR #59 was squash-merged as \`33615f1610843562424b02afdc1a6ba760c06495\`.
+- Changes under development:
+  - \`worker.js\`: published items in \`/site\` now have separate edit-text and unpublish controls; admins can remove/replace/append an exact text fragment on an already-published car/review without altering its media or other listings.
+  - \`worker.js\`: \`/admin\` opens a concise admin guide; \`/catalog\` points to the real live website catalogue instead of incorrectly claiming there is no catalogue.
+  - \`worker.js\`: catalogue section copy is clarified; API errors now show a visible retry control and empty catalogues show an explicit empty state instead of silently leaving a placeholder.
+  - \`worker.test.mjs\`: added tests for the live catalogue link, published car text editing/media preservation, and visible catalogue retry state.
+  - \`README.md\`: update admin and catalogue operating instructions.
+- Commits: worker \`661001c08726bc68546ba02507058cd4345e08c6\`; tests \`98a297bc1902351f0b723e0b78050e8f07401970\`.
+- Verification: pending exact-branch Worker syntax, full regression tests, privacy/security checks, and Factory Review.
+- Runtime status: live Cloudflare Worker response, live /api/cars payload, Telegram webhook registration, KV contents and real device rendering remain unverified. No production Worker deploy, webhook change, KV mutation, or secret change was performed by this branch.
+- Known product gap: there is not yet a browser-based website admin console. Published text editing and unpublishing are safely available through the private Telegram admin \`/site\` workflow; a web console requires a separately designed admin authentication/session boundary before it can expose destructive actions.
+- Next: wait for CI on this branch, inspect exact diff, then present PR and clear admin steps. Do not deploy or merge without explicit confirmation.
