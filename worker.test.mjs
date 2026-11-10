@@ -2398,7 +2398,7 @@ test("web admin uses a one-time Telegram code, edits a single listing and unpubl
   const page = await worker.fetch(new Request("https://worker.test/admin"), reviewEnv(kv));
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);
-  assert.match(await page.text(), /одноразовый код из Telegram/);
+  assert.match(await page.text(), /одноразовый код в личном чате Telegram/);
 
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate({ message: {
