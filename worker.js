@@ -2216,6 +2216,13 @@ footer{background:#071321;color:#aeb9c8}
 #cars .cars>.card .car-text{color:#c7c9d0}
 .brand-logo{display:block;width:250px;max-width:100%;height:auto}
 @media(max-width:900px){.brand-logo{width:205px}}
+#cars .car-card .car-gallery{margin:0 0 16px;aspect-ratio:16/10;min-height:220px;border:1px solid #ffffff16}
+#cars .car-card .car-body{padding:18px 20px 20px}
+#cars .car-card .car-body h3{font-size:clamp(17px,1.8vw,21px);line-height:1.25;margin:0 0 10px}
+#cars .car-card .car-text{max-width:none;font-size:14px;line-height:1.6;margin:0 0 14px;overflow-wrap:anywhere}
+#cars .car-card .car-link{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:9px 14px;border:1px solid #ff4b3566;border-radius:12px;background:#ff4b3514;font-size:13px;font-weight:800}
+#cars .car-card .car-link:hover{background:#ff4b35;color:#fff}
+@media(max-width:780px){#cars .car-card .car-gallery{min-height:180px;margin-bottom:13px}#cars .car-card .car-body{padding:13px}#cars .car-card .car-text{font-size:13px}}
 </style>
 </head>
 <body>
@@ -2521,6 +2528,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
   var title=document.createElement('h3'); title.textContent=(car.caption||'Автомобиль из объявления').split(NL)[0].slice(0,120);
   var desc=document.createElement('p'); desc.className='car-text'; desc.textContent=car.caption||'Описание не указано';
   body.appendChild(title); body.appendChild(desc);
+  var discuss=document.createElement('a');discuss.className='car-link';discuss.href='#request';discuss.textContent='Обсудить этот автомобиль →';body.appendChild(discuss);
   if(media.length){
    var gallery=document.createElement('div'); gallery.className='car-gallery';
    var carItems=media.map(function(item){return typeof item==='string'?{url:item,video:isVideo}:{url:item.url,video:item.type==='video'};});
@@ -2545,7 +2553,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
    gallery.addEventListener('touchstart',function(e){touchStart=e.changedTouches[0].clientX},{passive:true});
    gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showCarPhoto(photoIndex+(delta<0?1:-1))},{passive:true});
    stage.addEventListener('click',function(e){if(e.target&&e.target.tagName==='VIDEO')return;items=carItems;openBox(photoIndex)});
-   gallery.appendChild(back);gallery.appendChild(forward);gallery.appendChild(count);body.appendChild(gallery);
+   gallery.appendChild(back);gallery.appendChild(forward);gallery.appendChild(count);body.insertBefore(gallery,title);
   }
   article.appendChild(body); list.appendChild(article);
  });
