@@ -178,3 +178,11 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - The repair branch now returns HTTP 503 when \`REVIEWS\` is missing; the catalogue frontend displays an explicit retry action on API errors and a separate empty state when the API succeeds with zero published cars.
 - Vehicle card layout was reordered so the photo gallery is shown before the description, and every car card has a direct “Обсудить этот автомобиль” action leading to the enquiry form.
 - Added regression tests for the missing-KV response and the photo-first card/CTA layout. Exact-head CI evidence is still pending/unavailable through the current GitHub workflow-run/status connector; do not treat source changes as fully verified until the workflow result is confirmed.
+
+
+## CI diagnosis and correction — 2026-11-10 19:50 UTC
+- First PR #60 validation on merge ref \`add34f993fc98e0bd7c592358514c59b0843ce62\` found a real syntax error: an actual newline had been inserted inside a quoted Telegram response string in \`worker.js\`.
+- Corrected the source string to use escaped newlines in commit \`3bed85b31b5f1791d4d6ba3943504ced752896f3\`.
+- Initial Worker syntax checks failed before the test suite could run. The Factory Review privacy job also failed at test-module import because the Worker module did not parse.
+- Gitleaks scanned the PR commits and reported \`no leaks found\`, but the action failed while uploading its SARIF artifact because GitHub Actions artifact storage quota is full. This is an infrastructure failure, not a detected secret.
+- Rerun of exact-head syntax/tests and Factory Review is still required. Do not merge while CI is red or unconfirmed.
