@@ -174,30 +174,42 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 
 
 ## Additional catalogue diagnosis — 2026-11-10 20:05 UTC
-- Confirmed silent failure mode: \`GET /api/cars\` previously returned HTTP 200 with an empty \`cars\` array when the \`REVIEWS\` KV binding was absent. The homepage then kept its generic placeholder and did not distinguish configuration failure from a genuinely empty catalogue.
-- The repair branch now returns HTTP 503 when \`REVIEWS\` is missing; the catalogue frontend displays an explicit retry action on API errors and a separate empty state when the API succeeds with zero published cars.
+- Confirmed silent failure mode: `GET /api/cars` previously returned HTTP 200 with an empty `cars` array when the `REVIEWS` KV binding was absent. The homepage then kept its generic placeholder and did not distinguish configuration failure from a genuinely empty catalogue.
+- The repair branch now returns HTTP 503 when `REVIEWS` is missing; the catalogue frontend displays an explicit retry action on API errors and a separate empty state when the API succeeds with zero published cars.
 - Vehicle card layout was reordered so the photo gallery is shown before the description, and every car card has a direct “Обсудить этот автомобиль” action leading to the enquiry form.
 - Added regression tests for the missing-KV response and the photo-first card/CTA layout. Exact-head CI evidence is still pending/unavailable through the current GitHub workflow-run/status connector; do not treat source changes as fully verified until the workflow result is confirmed.
 
 
 ## CI diagnosis and correction — 2026-11-10 19:50 UTC
-- First PR #60 validation on merge ref \`add34f993fc98e0bd7c592358514c59b0843ce62\` found a real syntax error: an actual newline had been inserted inside a quoted Telegram response string in \`worker.js\`.
-- Corrected the source string to use escaped newlines in commit \`3bed85b31b5f1791d4d6ba3943504ced752896f3\`.
+- First PR #60 validation on merge ref `add34f993fc98e0bd7c592358514c59b0843ce62` found a real syntax error: an actual newline had been inserted inside a quoted Telegram response string in `worker.js`.
+- Corrected the source string to use escaped newlines in commit `3bed85b31b5f1791d4d6ba3943504ced752896f3`.
 - Initial Worker syntax checks failed before the test suite could run. The Factory Review privacy job also failed at test-module import because the Worker module did not parse.
-- Gitleaks scanned the PR commits and reported \`no leaks found\`, but the action failed while uploading its SARIF artifact because GitHub Actions artifact storage quota is full. This is an infrastructure failure, not a detected secret.
+- Gitleaks scanned the PR commits and reported `no leaks found`, but the action failed while uploading its SARIF artifact because GitHub Actions artifact storage quota is full. This is an infrastructure failure, not a detected secret.
 - Rerun of exact-head syntax/tests and Factory Review is still required. Do not merge while CI is red or unconfirmed.
 
 
 ## Exact-head verification — 2026-11-10 19:52 UTC
-- Code/test head verified: \`6fb129554b135010fe42aa992b7a4593c3aae7b5\`.
-- Worker tests run #141 (\`42889383089\`): syntax check passed; full suite passed **129/129, 0 failed**.
-- Cloudflare Worker checks run #246 (\`42889383083\`): syntax and private-admin routing passed; embedded regression suite passed **129/129, 0 failed**.
-- Factory Review run #155 (\`42889382954\`):
+- Code/test head verified: `6fb129554b135010fe42aa992b7a4593c3aae7b5`.
+- Worker tests run #141 (`42889383089`): syntax check passed; full suite passed **129/129, 0 failed**.
+- Cloudflare Worker checks run #246 (`42889383083`): syntax and private-admin routing passed; embedded regression suite passed **129/129, 0 failed**.
+- Factory Review run #155 (`42889382954`):
   - Functional/regression tests passed **129/129**.
   - Security/privacy regression tests passed.
   - Director/release-evidence job failed only at artifact upload: GitHub Actions artifact storage quota is full.
-- Deploy workflow run #108 (\`42889383220\`) completed successfully for the PR but correctly skipped both secret verification and the production deploy step because this was a pull_request event. **No production deployment occurred.**
-- Gitleaks in the earlier security baseline reported \`no leaks found\`; its SARIF upload was blocked by the same GitHub Actions artifact quota.
+- Deploy workflow run #108 (`42889383220`) completed successfully for the PR but correctly skipped both secret verification and the production deploy step because this was a pull_request event. **No production deployment occurred.**
+- Gitleaks in the earlier security baseline reported `no leaks found`; its SARIF upload was blocked by the same GitHub Actions artifact quota.
 - The initial failing test on this branch was a stale assertion that expected the delete button in the first keyboard column. The site list now intentionally has an edit button first and a remove button second; the test was corrected to inspect all buttons in each row. The latest exact-code run is green.
 - Current PR #60 remains open and mergeable. Do not merge/deploy until owner approval and the separate live-runtime checks are complete.
-- Outstanding: browser-based admin console is not implemented; current safe edit/unpublish workflow is in the private Telegram admin \`/site\` menu. Live Worker HTTP, production \`REVIEWS\` binding, actual active vehicle records, webhook and real-device visual review are not verified from this environment.
+- Browser-based admin console is implemented on this branch at `/admin`; it is not yet deployed to production. The private Telegram `/site` menu remains available. Live Worker HTTP, production `REVIEWS` binding, actual active vehicle records, webhook and real-device visual review are not verified from this environment.
+
+
+## Secure browser admin panel — 2026-11-10 20:00 UTC
+- Added a mobile-responsive browser admin page at \`/admin\` on the same Cloudflare Worker origin.
+- Private Telegram command \`/adminlink\` sends the configured admin a one-time 8-digit code and the direct panel URL. Codes expire in 5 minutes, are hashed in KV, and only the most recent code per admin is valid.
+- Successful login creates an 8-hour KV-backed session; the browser receives only an HttpOnly, Secure, SameSite=Strict cookie. Session token is stored as SHA-256 hash. The configured admin ID is checked again on every request.
+- Mutating API calls require a matching Origin header; login attempts are limited to 10 per source IP per 5-minute window. Admin API responses are no-store and do not return Telegram source URLs or media file IDs.
+- Panel supports full-text replacement, exact-fragment removal/replacement, unpublishing one selected item back to moderation while preserving media, and listing published cars/reviews.
+- Latest exact-code verification: Worker regression suite **131/131**; Cloudflare Worker checks **131/131**; Factory Review functional **131/131**, security/privacy subset **13/13**, Director/release-evidence job succeeded with handoff preserved in the job summary.
+- Factory Security Baseline run #45 was still running at this handoff; Gitleaks v3 and CodeQL result must be confirmed before merge.
+- The PR deploy workflow passed but skipped Cloudflare secret verification and production deployment because the event was a pull request. Production has not yet been changed.
+- Live admin login, production KV binding, active vehicle records, Telegram webhook delivery, and real-device rendering still require post-merge runtime verification.
