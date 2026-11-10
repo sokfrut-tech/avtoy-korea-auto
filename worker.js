@@ -124,7 +124,10 @@ const ADMIN_HELP_TEXT = [
  "❓ Подсказка администратора",
  "",
  "Сайт:",
- "/site — что сейчас опубликовано. Убрать: 🗑 → Да.",
+ "/site — список опубликованных автомобилей и отзывов.",
+ "/adminlink — получить одноразовый код для входа в панель сайта.",
+ "✏️ Изменить текст — нажмите у нужной публикации; ответьте командой ЗАМЕНИТЬ или УДАЛИТЬ.",
+ "🗑 Снять с сайта — нажмите у нужной публикации и подтвердите действие.",
  "/log — журнал действий, последние 20.",
  "↩️ Отменить — 2 минуты после публикации или снятия.",
  "",
@@ -149,13 +152,18 @@ async function sendAdminHelp(env, chatId) {
  await callTelegram(env, "sendMessage", {
   chat_id: chatId,
   text: ADMIN_HELP_TEXT,
-  reply_markup: { inline_keyboard: [[{ text: "🌐 Что на сайте", callback_data: "admincmd:site" }]] }
+  reply_markup: { inline_keyboard: [
+  [{ text: "🌐 Что на сайте", callback_data: "admincmd:site" }],
+  [{ text: "🔐 Открыть панель сайта", url: "https://avtoy-korea-auto.sokfrut.workers.dev/admin" }]
+ ] }
  });
 }
 
 async function setAdminCommands(env, adminId) {
  await callTelegram(env, "setMyCommands", {
   commands: [
+   { command: "admin", description: "Меню администратора" },
+   { command: "adminlink", description: "Одноразовый вход в панель сайта" },
    { command: "site", description: "Что опубликовано на сайте" },
    { command: "log", description: "Журнал действий администраторов" },
    { command: "help", description: "Подсказка администратора" },
@@ -179,7 +187,9 @@ async function showSiteList(chatId, env) {
  if (!items.length) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "На сайте сейчас ничего не опубликовано." });
  const shown = items.slice(0, 30);
  const text = "🌐 Сейчас на сайте: " + items.length + "\n\n" + shown.map((item, index) => (index + 1) + ". " + item.label).join("\n") + (items.length > shown.length ? "\n\nПоказаны первые " + shown.length + "." : "");
- const keyboard = { inline_keyboard: [...shown.map(item => [{ text: "🗑 " + item.label.slice(0, 40), callback_data: "sitedel:" + item.id }]), [{ text: "❓ Подсказка", callback_data: "adminhelp" }]] };
+ const keyboard = { inline_keyboard: [...shown.flatMap(item => [
+  [{ text: "✏️ Изменить текст", callback_data: "siteedit:" + item.id }, { text: "🗑 Снять с сайта", callback_data: "sitedel:" + item.id }]
+ ]), [{ text: "❓ Подсказка", callback_data: "adminhelp" }]] };
  return callTelegram(env, "sendMessage", { chat_id: chatId, text, reply_markup: keyboard });
 }
 
@@ -224,6 +234,35 @@ async function handleSiteDeleteCallback(callback, env, adminIds) {
  return answer("Снято с сайта. Материал вернулся в ожидание");
 }
 
+async function handleSiteEditCallback(callback, env, adminIds) {
+ const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
+ const adminId = String((callback.from && callback.from.id) || "");
+ if (!adminIds.includes(adminId) || !env.REVIEWS) return answer("Нет доступа", true);
+ const match = String(callback.data || "").match(/^siteedit:(car_-?\d+_\d+|-?\d+_\d+)$/);
+ if (!match) return answer("Материал не найден", true);
+ const id = match[1];
+ const isCar = id.startsWith("car_");
+ const key = (isCar ? "car_approved:" : "approved:") + id;
+ const raw = await env.REVIEWS.get(key);
+ if (!raw) return answer("Публикация уже снята с сайта", true);
+ const record = JSON.parse(raw);
+ const session = { type: isCar ? "car_site" : "review_site", id, createdAt: new Date().toISOString() };
+ await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 86400 });
+ const label = isCar ? "АВТОМОБИЛЯ" : "ОТЗЫВА";
+ const currentText = String(isCar ? record.caption || "" : record.text || "");
+ const instructions = "Текущий опубликованный текст ниже. Ответьте на это сообщение одной командой:\n" +
+  "• ЗАМЕНИТЬ: старый фрагмент => новый фрагмент\n" +
+  "• УДАЛИТЬ: ненужный фрагмент\n" +
+  "• ДОБАВИТЬ В КОНЕЦ: новый текст\n" +
+  "Или отправьте полный исправленный текст. Изменится только текст этой публикации; фотографии и другие объявления останутся без изменений.";
+ await callTelegram(env, "sendMessage", {
+  chat_id: adminId,
+  text: "✏️ РЕДАКТИРОВАНИЕ ОПУБЛИКОВАННОГО " + label + "\n\n" + instructions + "\n\nТЕКУЩИЙ ТЕКСТ:\n" + (currentText || "— пусто —").slice(0, 3000),
+  reply_markup: { force_reply: true, input_field_placeholder: "Команда правки или новый текст" }
+ });
+ return answer("Отправьте правку ответом на сообщение бота");
+}
+
 async function handleAdminModerationEditReply(msg, env, adminIds) {
  const adminId = String(msg.chat && msg.chat.id || "");
  if (!adminIds.includes(adminId) || !env.REVIEWS || !msg.reply_to_message) return false;
@@ -232,14 +271,17 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
  const promptText = String(msg.reply_to_message.text || msg.reply_to_message.caption || "");
  if (!promptText.startsWith("✏️ РЕДАКТИРОВАНИЕ ")) return false;
  const session = JSON.parse(rawSession);
- if (!session || !["review", "car"].includes(session.type) || !session.id) return false;
+ if (!session || !["review", "car", "car_site", "review_site"].includes(session.type) || !session.id) return false;
  const instruction = String(msg.text || msg.caption || "").trim();
  if (!instruction) {
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Правка пустая. Отправьте команду изменения или полный текст ответом на сообщение редактирования." });
   return true;
  }
- const isCar = session.type === "car";
- const key = (isCar ? "car_pending:" : "pending:") + session.id;
+ const isPublished = session.type === "car_site" || session.type === "review_site";
+ const isCar = session.type === "car" || session.type === "car_site";
+ const key = isPublished
+  ? (isCar ? "car_approved:" : "approved:") + session.id
+  : (isCar ? "car_pending:" : "pending:") + session.id;
  const raw = await env.REVIEWS.get(key);
  if (!raw) {
   await env.REVIEWS.delete("moderation_edit:" + adminId);
@@ -249,7 +291,7 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
  const item = JSON.parse(raw);
  const currentText = String(isCar ? item.caption || "" : item.text || "");
  const photoCommand = instruction.match(/^УДАЛИТЬ\s+ФОТО\s*:?\s*([\d\s,]+)$/i);
- if (photoCommand) { await requestPhotoDelete(session, adminId, photoCommand[1], env); return true; }
+ if (photoCommand && !isPublished) { await requestPhotoDelete(session, adminId, photoCommand[1], env); return true; }
  const editResult = applyModerationTextEdit(currentText, instruction);
  if (editResult.error) {
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: editResult.error + "\n\nПопробуйте ещё раз ответом на сообщение редактирования." });
@@ -258,6 +300,26 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
  const edited = cleanPublicationText(editResult.text);
  if (!edited) {
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: "После правки текст пустой. Материал не изменён." });
+  return true;
+ }
+ if (isPublished) {
+  if (isCar) {
+   item.originalCaption = item.originalCaption === undefined ? item.caption : item.originalCaption;
+   item.caption = edited.slice(0, 3000);
+  } else {
+   item.originalText = item.originalText === undefined ? item.text : item.originalText;
+   item.text = edited.slice(0, 1000);
+   item.hasThanks = THANKS_PATTERN.test(item.text);
+  }
+  item.editedAt = new Date().toISOString();
+  item.editedBy = adminId;
+  await env.REVIEWS.put(key, JSON.stringify(item));
+  await writeLog(env, adminId, "изменён текст опубликованного материала", isCar ? "машина" : "отзыв", session.id, siteLabel(session.id, item));
+  await env.REVIEWS.delete("moderation_edit:" + adminId);
+  await callTelegram(env, "sendMessage", {
+   chat_id: adminId,
+   text: "✅ Текст обновлён на сайте. Остальные объявления и фотографии не затронуты.\n\n" + (isCar ? item.caption : item.text).slice(0, 3000)
+  });
   return true;
  }
  if (isCar) {
@@ -1376,6 +1438,200 @@ async function readBodyLimited(request, maxBytes) {
  for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.byteLength; }
  return new TextDecoder("utf-8", {fatal:true}).decode(merged);
 }
+
+async function sha256Hex(value) {
+ const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value)));
+ return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function randomHex(bytes = 32) {
+ const data = new Uint8Array(bytes);
+ crypto.getRandomValues(data);
+ return Array.from(data, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function cookieValue(request, name) {
+ const cookie = String(request.headers.get("Cookie") || "");
+ const match = cookie.match(new RegExp("(?:^|;\\s*)" + name + "=([a-f0-9]{64})(?:;|$)", "i"));
+ return match ? match[1] : null;
+}
+
+function hasSameOrigin(request) {
+ const origin = request.headers.get("Origin");
+ return Boolean(origin && origin === new URL(request.url).origin);
+}
+
+async function getWebAdminSession(request, env, adminIds) {
+ if (!env.REVIEWS) return null;
+ const token = cookieValue(request, "avtoy_admin");
+ if (!token) return null;
+ const tokenHash = await sha256Hex(token);
+ const raw = await env.REVIEWS.get("admin_session:" + tokenHash);
+ if (!raw) return null;
+ let session;
+ try { session = JSON.parse(raw); } catch { return null; }
+ if (!session || !adminIds.includes(String(session.adminId))) return null;
+ return { ...session, tokenHash };
+}
+
+async function sendAdminLoginCode(env, adminId) {
+ if (!env.REVIEWS) {
+  return callTelegram(env, "sendMessage", { chat_id: adminId, text: "Хранилище REVIEWS не настроено. Вход в панель сайта недоступен." });
+ }
+ const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 100000000).padStart(8, "0");
+ const codeHash = await sha256Hex(code);
+ const currentKey = "admin_login_current:" + adminId;
+ const oldHash = await env.REVIEWS.get(currentKey);
+ if (oldHash) await env.REVIEWS.delete("admin_login:" + oldHash);
+ await env.REVIEWS.put("admin_login:" + codeHash, JSON.stringify({ adminId: String(adminId) }), { expirationTtl: 300 });
+ await env.REVIEWS.put(currentKey, codeHash, { expirationTtl: 300 });
+ return callTelegram(env, "sendMessage", {
+  chat_id: adminId,
+  text: "🔐 ДОСТУП К ПАНЕЛИ AVTOY KOREA\n\nОткройте сайт: https://avtoy-korea-auto.sokfrut.workers.dev/admin\n\nКод входа: " + code + "\n\nКод одноразовый, действует 5 минут. Не пересылайте его другим людям."
+ });
+}
+
+async function handleWebAdminApi(request, url, env, adminIds) {
+ const path = url.pathname;
+ if (!path.startsWith("/api/admin/")) return null;
+ const baseHeaders = {
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer"
+ };
+ const json = (body, status = 200, extraHeaders = {}) => Response.json(body, {
+  status,
+  headers: { ...baseHeaders, ...extraHeaders }
+ });
+ if (!env.REVIEWS) return json({ error: "Admin storage unavailable" }, 503);
+
+ if (path === "/api/admin/login" && request.method === "POST") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const attemptKey = "admin_login_attempts:" + await sha256Hex(ip);
+  const attempts = Number(await env.REVIEWS.get(attemptKey) || "0");
+  if (attempts >= 10) return json({ error: "Too many attempts. Request a new code in Telegram later." }, 429);
+  await env.REVIEWS.put(attemptKey, String(attempts + 1), { expirationTtl: 300 });
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "Invalid request" }, 400); }
+  const code = String(body && body.code || "").trim();
+  if (!/^\d{8}$/.test(code)) return json({ error: "Invalid or expired code" }, 401);
+  const codeHash = await sha256Hex(code);
+  const raw = await env.REVIEWS.get("admin_login:" + codeHash);
+  if (!raw) return json({ error: "Invalid or expired code" }, 401);
+  let login;
+  try { login = JSON.parse(raw); } catch { return json({ error: "Invalid or expired code" }, 401); }
+  const adminId = String(login && login.adminId || "");
+  const currentHash = await env.REVIEWS.get("admin_login_current:" + adminId);
+  if (!adminIds.includes(adminId) || currentHash !== codeHash) return json({ error: "Invalid or expired code" }, 401);
+  await env.REVIEWS.delete("admin_login:" + codeHash);
+  await env.REVIEWS.delete("admin_login_current:" + adminId);
+  await env.REVIEWS.delete(attemptKey);
+  const token = randomHex(32);
+  const tokenHash = await sha256Hex(token);
+  await env.REVIEWS.put("admin_session:" + tokenHash, JSON.stringify({
+   adminId,
+   createdAt: new Date().toISOString()
+  }), { expirationTtl: 28800 });
+  return json({ authenticated: true }, 200, {
+   "set-cookie": "avtoy_admin=" + token + "; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800"
+  });
+ }
+
+ if (path === "/api/admin/session" && request.method === "GET") {
+  const session = await getWebAdminSession(request, env, adminIds);
+  return session ? json({ authenticated: true }) : json({ error: "Unauthorized" }, 401);
+ }
+
+ if (path === "/api/admin/logout" && request.method === "POST") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  const session = await getWebAdminSession(request, env, adminIds);
+  if (session) await env.REVIEWS.delete("admin_session:" + session.tokenHash);
+  return json({ ok: true }, 200, {
+   "set-cookie": "avtoy_admin=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0"
+  });
+ }
+
+ const session = await getWebAdminSession(request, env, adminIds);
+ if (!session) return json({ error: "Unauthorized" }, 401);
+
+ if (path === "/api/admin/items" && request.method === "GET") {
+  const items = [];
+  for (const [prefix, isCar] of [["car_approved:", true], ["approved:", false]]) {
+   let cursor;
+   do {
+    const page = await env.REVIEWS.list({ prefix, ...(cursor ? { cursor } : {}) });
+    for (const key of page.keys) {
+     const raw = await env.REVIEWS.get(key.name);
+     if (!raw) continue;
+     let record;
+     try { record = JSON.parse(raw); } catch { continue; }
+     const id = key.name.slice(prefix.length);
+     const photos = Array.isArray(record.photos) ? record.photos.length : (record.fileId ? 1 : 0);
+     const videos = Array.isArray(record.videos) ? record.videos.length : 0;
+     items.push({
+      id,
+      kind: isCar ? "car" : "review",
+      label: siteLabel(id, record),
+      text: String(isCar ? record.caption || "" : record.text || ""),
+      mediaCount: photos + videos,
+      publishedAt: record.publishedAt || ""
+     });
+     if (items.length >= 100) break;
+    }
+    cursor = items.length >= 100 || page.list_complete ? null : page.cursor;
+   } while (cursor);
+  }
+  items.sort((a, b) => String(b.publishedAt).localeCompare(String(a.publishedAt)));
+  return json({ items });
+ }
+
+ const itemMatch = path.match(/^\/api\/admin\/items\/(car_-?\d+_\d+|-?\d+_\d+)$/);
+ if (itemMatch && request.method === "PATCH") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "Invalid request" }, 400); }
+  const id = itemMatch[1];
+  const isCar = id.startsWith("car_");
+  const key = (isCar ? "car_approved:" : "approved:") + id;
+  const raw = await env.REVIEWS.get(key);
+  if (!raw) return json({ error: "Publication not found" }, 404);
+  const record = JSON.parse(raw);
+  const currentText = String(isCar ? record.caption || "" : record.text || "");
+  const instruction = String(body && body.instruction || "").trim();
+  if (!instruction) return json({ error: "Text is required" }, 400);
+  const edit = applyModerationTextEdit(currentText, instruction);
+  if (edit.error) return json({ error: edit.error }, 422);
+  const edited = cleanPublicationText(edit.text);
+  if (!edited) return json({ error: "Publication text cannot be empty" }, 422);
+  if (isCar) {
+   record.originalCaption = record.originalCaption === undefined ? record.caption : record.originalCaption;
+   record.caption = edited.slice(0, 3000);
+  } else {
+   record.originalText = record.originalText === undefined ? record.text : record.originalText;
+   record.text = edited.slice(0, 1000);
+   record.hasThanks = THANKS_PATTERN.test(record.text);
+  }
+  record.editedAt = new Date().toISOString();
+  record.editedBy = session.adminId;
+  await env.REVIEWS.put(key, JSON.stringify(record));
+  await writeLog(env, session.adminId, "изменён текст через веб-панель", isCar ? "машина" : "отзыв", id, siteLabel(id, record));
+  return json({ ok: true });
+ }
+
+ if (itemMatch && request.method === "DELETE") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  const id = itemMatch[1];
+  const record = await unpublishItem(env, adminIds, id);
+  if (!record) return json({ error: "Publication not found" }, 404);
+  await writeLog(env, session.adminId, "снят с сайта через веб-панель", id.startsWith("car_") ? "машина" : "отзыв", id, siteLabel(id, record));
+  return json({ ok: true });
+ }
+ return json({ error: "Not found" }, 404);
+}
+
+const ADMIN_PAGE_HTML = "<!doctype html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<meta name=\"robots\" content=\"noindex,nofollow\">\n<title>AVTOY KOREA — управление сайтом</title>\n<style>\n:root{color-scheme:dark;--bg:#0b1018;--panel:#151d29;--line:#2a3545;--text:#f3f6fb;--muted:#9eacbd;--accent:#f04c36;--ok:#6ed5a0}\n*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#1d2a3b 0,transparent 38%),var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}\nmain{width:min(980px,calc(100% - 28px));margin:0 auto;padding:28px 0 60px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:26px}h1{font-size:clamp(23px,4vw,34px);line-height:1.12;margin:0}header p,.muted{color:var(--muted);margin:7px 0 0}.panel,.item{background:linear-gradient(145deg,#192433,#121a25);border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:0 18px 45px #0003}\n#login{max-width:460px;margin:8vh auto 0}label{display:block;color:#d7e0ec;font-weight:650;margin:14px 0 7px}input,textarea{width:100%;border:1px solid #354256;background:#0d1520;color:var(--text);border-radius:12px;padding:12px 13px;font:inherit}textarea{min-height:150px;resize:vertical}input:focus,textarea:focus{outline:2px solid #f04c3680;border-color:var(--accent)}\nbutton{border:0;border-radius:12px;padding:11px 15px;font:700 14px system-ui;cursor:pointer;background:var(--accent);color:white;min-height:42px}button.secondary{background:#293649;color:#e8eef7;border:1px solid #40506a}button.danger{background:#542b31;border:1px solid #8e3f48}button:disabled{opacity:.55;cursor:wait}.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}.status{min-height:24px;color:var(--muted);margin:10px 0}.status.error{color:#ff958c}.status.ok{color:var(--ok)}.items{display:grid;gap:16px}.item h2{font-size:18px;margin:0 0 4px}.item .meta{color:var(--muted);font-size:12px;margin-bottom:14px}.item .fragments{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.top-actions{display:flex;gap:8px;align-items:center}#app[hidden],#login[hidden]{display:none!important}\n@media(max-width:600px){main{width:min(100% - 20px,980px);padding-top:18px}header{align-items:flex-start;flex-direction:column}.panel,.item{padding:16px;border-radius:16px}.item .fragments{grid-template-columns:1fr}.top-actions{width:100%}.top-actions button{flex:1}}\n</style>\n</head>\n<body>\n<main>\n<header><div><h1>AVTOY KOREA</h1><p>Управление опубликованными автомобилями и отзывами</p></div><div class=\"top-actions\"><button id=\"logout\" class=\"secondary\" hidden>Выйти</button></div></header>\n<section id=\"login\" class=\"panel\">\n<h2>Вход администратора</h2>\n<p class=\"muted\">Получите одноразовый код в личном чате Telegram-бота командой /adminlink.</p>\n<form id=\"login-form\">\n<label for=\"code\">Код из Telegram</label>\n<input id=\"code\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"8\" pattern=\"[0-9]{8}\" placeholder=\"8 цифр\" required>\n<div class=\"actions\"><button type=\"submit\">Войти</button></div>\n</form>\n<p id=\"login-status\" class=\"status\" role=\"status\"></p>\n</section>\n<section id=\"app\" hidden>\n<div class=\"panel\" style=\"margin-bottom:16px\"><div class=\"top-actions\"><h2 style=\"margin:0;flex:1\">Публикации на сайте</h2><button id=\"refresh\" class=\"secondary\">Обновить</button></div><p class=\"muted\">Редактирование меняет только текст выбранной публикации. Снятие с сайта возвращает её в очередь модерации.</p><p id=\"status\" class=\"status\" role=\"status\"></p></div>\n<div id=\"items\" class=\"items\"></div>\n</section>\n</main>\n<script>\nconst loginSection=document.getElementById(\"login\"),appSection=document.getElementById(\"app\"),itemsRoot=document.getElementById(\"items\"),statusNode=document.getElementById(\"status\"),loginStatus=document.getElementById(\"login-status\"),logoutButton=document.getElementById(\"logout\");\nasync function api(path,method,body){\n const options={method:method||\"GET\",credentials:\"same-origin\",headers:{}};\n if(body!==undefined){options.headers[\"content-type\"]=\"application/json\";options.body=JSON.stringify(body);}\n const response=await fetch(path,options);let data={};try{data=await response.json();}catch{}\n if(!response.ok)throw new Error(data.error||(\"HTTP \"+response.status));return data;\n}\nfunction status(message,error){statusNode.textContent=message||\"\";statusNode.className=\"status\"+(error?\" error\":\" ok\");}\nfunction makeButton(label,kind,handler){const b=document.createElement(\"button\");b.type=\"button\";b.textContent=label;if(kind)b.className=kind;b.addEventListener(\"click\",handler);return b;}\nfunction showLogin(message){loginSection.hidden=false;appSection.hidden=true;logoutButton.hidden=true;loginStatus.textContent=message||\"\";loginStatus.className=\"status error\";}\nfunction showApp(){loginSection.hidden=true;appSection.hidden=false;logoutButton.hidden=false;loadItems();}\nfunction renderItem(item){\n const card=document.createElement(\"article\");card.className=\"item\";\n const heading=document.createElement(\"h2\");heading.textContent=item.label||\"Публикация\";\n const meta=document.createElement(\"div\");meta.className=\"meta\";meta.textContent=(item.kind===\"car\"?\"Автомобиль\":\"Отзыв\")+\" · медиа: \"+item.mediaCount+\" · \"+(item.publishedAt||\"дата не указана\");\n const text=document.createElement(\"textarea\");text.value=item.text||\"\";text.setAttribute(\"aria-label\",\"Текст публикации\");\n const save=makeButton(\"Сохранить весь текст\",\"\",async()=>{try{await api(\"/api/admin/items/\"+encodeURIComponent(item.id),\"PATCH\",{instruction:text.value});status(\"Текст сохранён: \"+(item.label||item.id));await loadItems();}catch(e){status(e.message,true);}});\n const fragment=document.createElement(\"input\");fragment.placeholder=\"Фрагмент для удаления или замены\";\n const replacement=document.createElement(\"input\");replacement.placeholder=\"Новый текст (для замены)\";\n const removeFragment=makeButton(\"Удалить фрагмент\",\"secondary\",async()=>{if(!fragment.value.trim())return status(\"Укажите точный фрагмент\",true);try{await api(\"/api/admin/items/\"+encodeURIComponent(item.id),\"PATCH\",{instruction:\"УДАЛИТЬ: \"+fragment.value});status(\"Фрагмент удалён\");await loadItems();}catch(e){status(e.message,true);}});\n const replaceFragment=makeButton(\"Заменить фрагмент\",\"secondary\",async()=>{if(!fragment.value.trim())return status(\"Укажите старый фрагмент\",true);try{await api(\"/api/admin/items/\"+encodeURIComponent(item.id),\"PATCH\",{instruction:\"ЗАМЕНИТЬ: \"+fragment.value+\" => \"+replacement.value});status(\"Фрагмент заменён\");await loadItems();}catch(e){status(e.message,true);}});\n const remove=makeButton(\"Снять публикацию\",\"danger\",async()=>{if(!confirm(\"Снять только эту публикацию с сайта? Она вернётся в очередь модерации.\"))return;try{await api(\"/api/admin/items/\"+encodeURIComponent(item.id),\"DELETE\");status(\"Публикация снята с сайта\");await loadItems();}catch(e){status(e.message,true);}});\n const fragments=document.createElement(\"div\");fragments.className=\"fragments\";fragments.appendChild(fragment);fragments.appendChild(replacement);\n const actions=document.createElement(\"div\");actions.className=\"actions\";actions.appendChild(save);actions.appendChild(removeFragment);actions.appendChild(replaceFragment);actions.appendChild(remove);\n card.appendChild(heading);card.appendChild(meta);card.appendChild(text);card.appendChild(fragments);card.appendChild(actions);return card;\n}\nasync function loadItems(){\n status(\"Загружаем публикации…\");\n try{const data=await api(\"/api/admin/items\");itemsRoot.replaceChildren();if(!data.items||!data.items.length){const empty=document.createElement(\"p\");empty.className=\"muted\";empty.textContent=\"На сайте пока нет опубликованных материалов.\";itemsRoot.appendChild(empty);}else{data.items.forEach(item=>itemsRoot.appendChild(renderItem(item)));}status(\"Загружено публикаций: \"+(data.items||[]).length);}\n catch(e){if(e.message===\"Unauthorized\"){showLogin(\"Сессия завершена. Получите новый код в Telegram командой /adminlink.\");return;}status(e.message,true);}\n}\ndocument.getElementById(\"login-form\").addEventListener(\"submit\",async e=>{e.preventDefault();loginStatus.textContent=\"Проверяем код…\";try{await api(\"/api/admin/login\",\"POST\",{code:document.getElementById(\"code\").value.trim()});document.getElementById(\"code\").value=\"\";showApp();}catch(err){loginStatus.textContent=err.message;loginStatus.className=\"status error\";}});\ndocument.getElementById(\"refresh\").addEventListener(\"click\",loadItems);\nlogoutButton.addEventListener(\"click\",async()=>{try{await api(\"/api/admin/logout\",\"POST\");showLogin(\"Вы вышли из панели.\");}catch(e){status(e.message,true);}});\n(async()=>{try{await api(\"/api/admin/session\");showApp();}catch{showLogin(\"\");}})();\n</script>\n</body>\n</html>";
+
 export default {
  async fetch(request, env) {
   const url = new URL(request.url);
@@ -1425,6 +1681,7 @@ export default {
      if (String(cb.data || "").startsWith("ord:") || String(cb.data || "").startsWith("ordinfo:")) await handleOrderCallback(cb, env, adminIds);
       else if (String(cb.data || "").startsWith("orddone:")) await handleOrderDoneCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("imp:")) await handleImportChoice(cb, env, adminIds);
+     else if (String(cb.data || "").startsWith("siteedit:")) await handleSiteEditCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("sitedel")) await handleSiteDeleteCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("mphoto:")) await handlePhotoDeleteCallback(cb, env, adminIds);
      else if (String(cb.data || "") === "adminhelp") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); await sendAdminHelp(env, cb.message.chat.id); }
@@ -1547,6 +1804,11 @@ export default {
       const notice = "👋 Новый пользователь бота AVTOY KOREA\nИмя: " + String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано") + "\nChat ID: " + chatId;
       await Promise.all(adminIds.map(id => send(id, notice)));
      }
+    } else if (text === "/admin" && adminIds.includes(chatId)) {
+     await setAdminCommands(env, chatId);
+     await sendAdminHelp(env, chatId);
+    } else if (text === "/adminlink" && adminIds.includes(chatId)) {
+     await sendAdminLoginCode(env, chatId);
     } else if (text === "/site" && adminIds.includes(chatId)) {
      await showSiteList(chatId, env);
     } else if (text === "/log" && adminIds.includes(chatId)) {
@@ -1559,7 +1821,7 @@ export default {
     } else if (text === "/countries") {
      await send(chatId, "🌍 Подбираем автомобили из:\n🇰🇷 Южной Кореи\n🇨🇳 Китая\n🇦🇪 ОАЭ\n\nНапишите, какая страна вас интересует.");
     } else if (text === "/catalog") {
-     await send(chatId, "🚘 Как проходит подбор AVTOY KOREA:\n1. Уточняем бюджет и пожелания.\n2. Ищем подходящие варианты.\n3. Обсуждаем проверку, покупку и доставку.\n\nГотового каталога объявлений пока нет — напишите желаемую марку, модель и бюджет, и менеджер поможет с подбором.");
+     await send(chatId, "🚘 Актуальные автомобили AVTOY KOREA\n\nПосмотреть опубликованные предложения: https://avtoy-korea-auto.sokfrut.workers.dev/#cars\n\nВсе объявления появляются на сайте после проверки. Если подходящего автомобиля нет, напишите марку, модель и бюджет — менеджер поможет с подбором.");
     } else if (text === "/contact") {
      await send(chatId, "Оставьте сообщение прямо в этом чате или заполните форму на сайте: https://avtoy-korea-auto.sokfrut.workers.dev/\nКанал: https://t.me/avtoYkorea");
     } else if (text && !adminIds.includes(chatId)) {
@@ -1598,6 +1860,18 @@ export default {
    }
    return Response.json({ ok: true });
   }
+  if (request.method === "GET" && url.pathname === "/admin") {
+   return new Response(ADMIN_PAGE_HTML, { headers: {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "no-referrer",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+   }});
+  }
+  const webAdminResponse = await handleWebAdminApi(request, url, env, adminIds);
+  if (webAdminResponse) return webAdminResponse;
   if (request.method === "POST" && url.pathname === "/api/request") {
    const headers = {"cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"no-referrer"};
    const fail = (status,error) => Response.json({ok:false,error},{status,headers});
@@ -1662,6 +1936,7 @@ export default {
    return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+bindToken:null},{headers});
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
+   if (!env.REVIEWS) return Response.json({error:"Catalogue storage unavailable"},{status:503,headers:{"cache-control":"no-store","x-content-type-options":"nosniff"}});
    const cars = [];
    if (env.REVIEWS) {
     let cursor;
@@ -2152,6 +2427,13 @@ footer{background:#071321;color:#aeb9c8}
 #cars .cars>.card .car-text{color:#c7c9d0}
 .brand-logo{display:block;width:250px;max-width:100%;height:auto}
 @media(max-width:900px){.brand-logo{width:205px}}
+#cars .car-card .car-gallery{margin:0 0 16px;aspect-ratio:16/10;min-height:220px;border:1px solid #ffffff16}
+#cars .car-card .car-body{padding:18px 20px 20px}
+#cars .car-card .car-body h3{font-size:clamp(17px,1.8vw,21px);line-height:1.25;margin:0 0 10px}
+#cars .car-card .car-text{max-width:none;font-size:14px;line-height:1.6;margin:0 0 14px;overflow-wrap:anywhere}
+#cars .car-card .car-link{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:9px 14px;border:1px solid #ff4b3566;border-radius:12px;background:#ff4b3514;font-size:13px;font-weight:800}
+#cars .car-card .car-link:hover{background:#ff4b35;color:#fff}
+@media(max-width:780px){#cars .car-card .car-gallery{min-height:180px;margin-bottom:13px}#cars .car-card .car-body{padding:13px}#cars .car-card .car-text{font-size:13px}}
 </style>
 </head>
 <body>
@@ -2192,9 +2474,9 @@ footer{background:#071321;color:#aeb9c8}
 <section class="wrap section" id="about" style="padding-bottom:20px"><div class="eyebrow">AVTOY KOREA</div><h2>Автомобили из Кореи под ваш запрос</h2><p class="sub">Помогаем выбрать автомобиль, проверить его перед покупкой и организовать доставку. Сопровождаем на каждом этапе.</p></section>
 <section class="wrap section" id="cars" style="padding-top:20px">
   <div class="eyebrow">Наши автомобили</div>
-  <h2>Примеры выполненных заказов</h2>
-  <p class="sub">Точная стоимость зависит от курса и условий. Уточняйте у администратора.</p>
-  <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Объявления из Telegram появятся после проверки и одобрения администратором.</div></article></div>
+  <h2>Автомобили в продаже и под заказ</h2>
+  <p class="sub">Актуальные предложения из нашего Telegram-канала. На сайт попадают только объявления, проверенные администратором.</p>
+  <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Загружаем актуальные предложения…</div></article></div>
   <p class="cars-hint">← Листайте пальцем, справа видно следующую машину →</p>
 </section>
 <section class="wrap section" id="order" style="padding-top:40px">
@@ -2409,8 +2691,12 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
   list.addEventListener('scroll',updateReviewControls,{passive:true});window.addEventListener('resize',updateReviewControls);updateReviewControls();
 }).catch(function(){});
 // Каталог показывает только одобренные публикации из Telegram
-fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
- var list=document.getElementById('cars-list'); if(!list || !data.cars || !data.cars.length)return; list.textContent='';
+function loadCars(){
+fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){
+ var list=document.getElementById('cars-list'); if(!list)return;
+ if(!Array.isArray(data.cars))throw new Error('Invalid catalogue response');
+ if(!data.cars.length){list.textContent='';var empty=document.createElement('article');empty.className='card dashed';var emptyBody=document.createElement('div');emptyBody.className='car-body';emptyBody.textContent='Сейчас нет активных объявлений. Новые предложения появятся после проверки администратора.';empty.appendChild(emptyBody);list.appendChild(empty);return;}
+ list.textContent='';
  var NL=String.fromCharCode(10);
  var hint=document.querySelector('.cars-hint'); if(hint)hint.classList.add('is-on');
  var lightbox=null, items=[], current=0;
@@ -2453,6 +2739,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(fu
   var title=document.createElement('h3'); title.textContent=(car.caption||'Автомобиль из объявления').split(NL)[0].slice(0,120);
   var desc=document.createElement('p'); desc.className='car-text'; desc.textContent=car.caption||'Описание не указано';
   body.appendChild(title); body.appendChild(desc);
+  var discuss=document.createElement('a');discuss.className='car-link';discuss.href='#request';discuss.textContent='Обсудить этот автомобиль →';body.appendChild(discuss);
   if(media.length){
    var gallery=document.createElement('div'); gallery.className='car-gallery';
    var carItems=media.map(function(item){return typeof item==='string'?{url:item,video:isVideo}:{url:item.url,video:item.type==='video'};});
@@ -2477,11 +2764,21 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){return r.json()}).then(fu
    gallery.addEventListener('touchstart',function(e){touchStart=e.changedTouches[0].clientX},{passive:true});
    gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showCarPhoto(photoIndex+(delta<0?1:-1))},{passive:true});
    stage.addEventListener('click',function(e){if(e.target&&e.target.tagName==='VIDEO')return;items=carItems;openBox(photoIndex)});
-   gallery.appendChild(back);gallery.appendChild(forward);gallery.appendChild(count);body.appendChild(gallery);
+   gallery.appendChild(back);gallery.appendChild(forward);gallery.appendChild(count);body.insertBefore(gallery,title);
   }
   article.appendChild(body); list.appendChild(article);
  });
-}).catch(function(){});
+}).catch(function(){
+ var list=document.getElementById('cars-list'); if(!list)return;
+ list.textContent='';
+ var card=document.createElement('article'); card.className='card dashed';
+ var body=document.createElement('div'); body.className='car-body';
+ var message=document.createElement('p'); message.className='car-text'; message.textContent='Не удалось загрузить автомобили. Проверьте соединение и попробуйте ещё раз.';
+ var retry=document.createElement('button'); retry.type='button'; retry.className='btn btn-dark'; retry.textContent='Повторить загрузку'; retry.addEventListener('click',loadCars);
+ body.appendChild(message); body.appendChild(retry); card.appendChild(body); list.appendChild(card);
+});
+}
+loadCars();
 // Главный слайдер: автоматическая смена, точки и стрелки
 (function(){
   if(typeof document.querySelector!=='function')return;

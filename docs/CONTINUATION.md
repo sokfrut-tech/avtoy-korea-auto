@@ -153,3 +153,63 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Deploy workflow run `41470370405`: success with deployment-secret check and `Deploy website Worker` skipped for the pull_request event; production unchanged.
 - PR #46 remains open; no merge or production deploy.
 - No independent Claude comment was present at final review; request remains in PR conversation.
+
+
+## AVTOY KOREA repair continuation — 2026-11-10 19:45 UTC
+- Active branch: `fix/avtoy-site-catalog-and-admin-ux-2026-11-10`.
+- Base: `main` after warranty-removal PR #59 was squash-merged as `33615f1610843562424b02afdc1a6ba760c06495`.
+- Changes under development:
+  - `worker.js`: published items in `/site` now have separate edit-text and unpublish controls; admins can remove/replace/append an exact text fragment on an already-published car/review without altering its media or other listings.
+  - `worker.js`: `/admin` opens a concise admin guide; `/catalog` points to the real live website catalogue instead of incorrectly claiming there is no catalogue.
+  - `worker.js`: catalogue section copy is clarified; API errors now show a visible retry control and empty catalogues show an explicit empty state instead of silently leaving a placeholder.
+  - `/api/cars` now returns HTTP 503 when the `REVIEWS` KV binding is missing instead of silently returning an empty list.
+  - Vehicle photo galleries now appear before the description, with a clear per-car enquiry action.
+  - `worker.test.mjs`: added tests for the live catalogue link, published car text editing/media preservation, and visible catalogue retry state.
+  - `README.md`: update admin and catalogue operating instructions.
+- Latest source commit: `889bb59fd44f99dde063e666275598022c0babbd`; latest tests commit: `dde5551a2fdc92b089bf1b9f3ac806c0030433c5`; workflow trigger commit: `8817d55538771681f81498ef70641619aad9dae1`.
+- Verification: regression tests added, including a missing-KV 503 check and gallery order/CTA checks. The GitHub connector currently reports no PR-triggered workflow runs or commit status contexts for this head, so syntax/full-suite/Factory Review completion is not yet independently confirmed.
+- Runtime status: live Cloudflare Worker response, live /api/cars payload, Telegram webhook registration, KV contents and real device rendering remain unverified. No production Worker deploy, webhook change, KV mutation, or secret change was performed by this branch.
+- Known product gap: there is not yet a browser-based website admin console. Published text editing and unpublishing are safely available through the private Telegram admin `/site` workflow; a web console requires a separately designed admin authentication/session boundary before it can expose destructive actions.
+- Next: obtain exact-head CI evidence and inspect exact diff, then present PR and clear admin steps. Do not deploy or merge without explicit confirmation.
+
+
+## Additional catalogue diagnosis — 2026-11-10 20:05 UTC
+- Confirmed silent failure mode: `GET /api/cars` previously returned HTTP 200 with an empty `cars` array when the `REVIEWS` KV binding was absent. The homepage then kept its generic placeholder and did not distinguish configuration failure from a genuinely empty catalogue.
+- The repair branch now returns HTTP 503 when `REVIEWS` is missing; the catalogue frontend displays an explicit retry action on API errors and a separate empty state when the API succeeds with zero published cars.
+- Vehicle card layout was reordered so the photo gallery is shown before the description, and every car card has a direct “Обсудить этот автомобиль” action leading to the enquiry form.
+- Added regression tests for the missing-KV response and the photo-first card/CTA layout. Exact-head CI evidence is still pending/unavailable through the current GitHub workflow-run/status connector; do not treat source changes as fully verified until the workflow result is confirmed.
+
+
+## CI diagnosis and correction — 2026-11-10 19:50 UTC
+- First PR #60 validation on merge ref `add34f993fc98e0bd7c592358514c59b0843ce62` found a real syntax error: an actual newline had been inserted inside a quoted Telegram response string in `worker.js`.
+- Corrected the source string to use escaped newlines in commit `3bed85b31b5f1791d4d6ba3943504ced752896f3`.
+- Initial Worker syntax checks failed before the test suite could run. The Factory Review privacy job also failed at test-module import because the Worker module did not parse.
+- Gitleaks scanned the PR commits and reported `no leaks found`, but the action failed while uploading its SARIF artifact because GitHub Actions artifact storage quota is full. This is an infrastructure failure, not a detected secret.
+- Rerun of exact-head syntax/tests and Factory Review is still required. Do not merge while CI is red or unconfirmed.
+
+
+## Exact-head verification — 2026-11-10 19:52 UTC
+- Code/test head verified: `6fb129554b135010fe42aa992b7a4593c3aae7b5`.
+- Worker tests run #141 (`42889383089`): syntax check passed; full suite passed **129/129, 0 failed**.
+- Cloudflare Worker checks run #246 (`42889383083`): syntax and private-admin routing passed; embedded regression suite passed **129/129, 0 failed**.
+- Factory Review run #155 (`42889382954`):
+  - Functional/regression tests passed **129/129**.
+  - Security/privacy regression tests passed.
+  - Director/release-evidence job failed only at artifact upload: GitHub Actions artifact storage quota is full.
+- Deploy workflow run #108 (`42889383220`) completed successfully for the PR but correctly skipped both secret verification and the production deploy step because this was a pull_request event. **No production deployment occurred.**
+- Gitleaks in the earlier security baseline reported `no leaks found`; its SARIF upload was blocked by the same GitHub Actions artifact quota.
+- The initial failing test on this branch was a stale assertion that expected the delete button in the first keyboard column. The site list now intentionally has an edit button first and a remove button second; the test was corrected to inspect all buttons in each row. The latest exact-code run is green.
+- Current PR #60 remains open and mergeable. Do not merge/deploy until owner approval and the separate live-runtime checks are complete.
+- Browser-based admin console is implemented on this branch at `/admin`; it is not yet deployed to production. The private Telegram `/site` menu remains available. Live Worker HTTP, production `REVIEWS` binding, actual active vehicle records, webhook and real-device visual review are not verified from this environment.
+
+
+## Secure browser admin panel — 2026-11-10 20:00 UTC
+- Added a mobile-responsive browser admin page at \`/admin\` on the same Cloudflare Worker origin.
+- Private Telegram command \`/adminlink\` sends the configured admin a one-time 8-digit code and the direct panel URL. Codes expire in 5 minutes, are hashed in KV, and only the most recent code per admin is valid.
+- Successful login creates an 8-hour KV-backed session; the browser receives only an HttpOnly, Secure, SameSite=Strict cookie. Session token is stored as SHA-256 hash. The configured admin ID is checked again on every request.
+- Mutating API calls require a matching Origin header; login attempts are limited to 10 per source IP per 5-minute window. Admin API responses are no-store and do not return Telegram source URLs or media file IDs.
+- Panel supports full-text replacement, exact-fragment removal/replacement, unpublishing one selected item back to moderation while preserving media, and listing published cars/reviews.
+- Latest exact-code verification: Worker regression suite **131/131**; Cloudflare Worker checks **131/131**; Factory Review functional **131/131**, security/privacy subset **13/13**, Director/release-evidence job succeeded with handoff preserved in the job summary.
+- Factory Security Baseline run #45 was still running at this handoff; Gitleaks v3 and CodeQL result must be confirmed before merge.
+- The PR deploy workflow passed but skipped Cloudflare secret verification and production deployment because the event was a pull request. Production has not yet been changed.
+- Live admin login, production KV binding, active vehicle records, Telegram webhook delivery, and real-device rendering still require post-merge runtime verification.

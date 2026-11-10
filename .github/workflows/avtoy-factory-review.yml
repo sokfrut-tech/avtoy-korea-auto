@@ -78,7 +78,21 @@ jobs:
           - production_deploy: NOT AUTHORIZED BY THIS WORKFLOW
           - release_rule: passing CI is not proof of live Telegram or website operation
           EOF
-      - uses: actions/upload-artifact@v4
+      - name: Publish factory handoff in job summary
+        if: always()
+        run: |
+          if [ -f build/factory/AVTOY_HANDOFF.md ]; then
+            cat build/factory/AVTOY_HANDOFF.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Factory handoff file was not created; inspect the functional/security jobs above." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Archive factory handoff
+        id: archive_handoff
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
         with:
           name: avtoy-factory-handoff
           path: build/factory/AVTOY_HANDOFF.md
+      - name: Record artifact storage fallback
+        if: steps.archive_handoff.outcome == 'failure'
+        run: echo "The handoff is preserved in this job summary; GitHub artifact storage is currently unavailable or over quota." >> "$GITHUB_STEP_SUMMARY"

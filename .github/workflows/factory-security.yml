@@ -22,13 +22,15 @@ jobs:
     name: Secret scanning
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Scan repository history for exposed secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_SUMMARY: "true"
 
   codeql:
     name: CodeQL static analysis
@@ -38,7 +40,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
@@ -54,9 +56,14 @@ jobs:
           mkdir -p codeql-artifacts
           cp ../results/*.sarif codeql-artifacts/
       - name: Archive CodeQL SARIF results
+        id: archive_codeql
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: codeql-sarif-${{ github.sha }}
           path: codeql-artifacts/*.sarif
           if-no-files-found: warn
+      - name: Record SARIF storage fallback
+        if: steps.archive_codeql.outcome == 'failure'
+        run: echo "CodeQL analysis completed; SARIF could not be archived because GitHub artifact storage is unavailable or over quota." >> "$GITHUB_STEP_SUMMARY"
