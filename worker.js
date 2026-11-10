@@ -1725,6 +1725,7 @@ export default {
    return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+bindToken:null},{headers});
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
+   if (!env.REVIEWS) return Response.json({error:"Catalogue storage unavailable"},{status:503,headers:{"cache-control":"no-store","x-content-type-options":"nosniff"}});
    const cars = [];
    if (env.REVIEWS) {
     let cursor;
