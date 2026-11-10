@@ -213,3 +213,23 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Factory Security Baseline run #45 was still running at this handoff; Gitleaks v3 and CodeQL result must be confirmed before merge.
 - The PR deploy workflow passed but skipped Cloudflare secret verification and production deployment because the event was a pull request. Production has not yet been changed.
 - Live admin login, production KV binding, active vehicle records, Telegram webhook delivery, and real-device rendering still require post-merge runtime verification.
+
+
+## Production release — 2026-11-10 20:06 UTC
+- PR #60 merged to \`main\` by squash merge. Merge commit: \`9ef10803cbcfce5c628d5c150bfc7c99fdc9fdba\`.
+- Production Cloudflare Worker deployment run \`42891751875\` completed successfully.
+- Wrangler confirmed the \`REVIEWS\` KV binding is present on the deployed Worker; deployment output included the configured namespace binding.
+- Deployed Worker URL: https://avtoy-korea-auto.sokfrut.workers.dev
+- Production Worker version ID: \`59783368-e6fc-49de-8ed4-ef5aa666e1b9\`.
+- On the merge commit, Worker regression tests and Cloudflare Worker checks completed successfully; deployment re-ran syntax and the full regression suite, verified deployment secrets, restored and SHA-256-verified both binary assets, then deployed successfully.
+- Gitleaks on the merge commit completed successfully and reported \`no leaks found\`.
+- CodeQL static analysis on the merge commit was still running at the time of this note; check run \`42891714597\` before declaring the security baseline fully complete.
+- Live HTTP rendering, actual current catalogue entries/media, and a real Telegram admin login/command round-trip were not independently exercised by this environment. Deployment success and KV binding presence are confirmed, but these are still required acceptance checks on a phone.
+- Admin quick start for the owner:
+  1. Open the bot's private chat (not a group).
+  2. Send \`/adminlink\`.
+  3. Open the panel URL returned by the bot.
+  4. Enter the one-time 8-digit code from that same private chat within 5 minutes.
+  5. In the panel, choose the specific vehicle/review. Edit all text or remove/replace a precise fragment; to hide one listing use unpublish/return-to-moderation. Photos are retained.
+  6. Telegram fallback remains \`/site\` for the list and item-level edit/unpublish actions.
+- Never paste the one-time code into a group or share it. The panel session expires after 8 hours.
