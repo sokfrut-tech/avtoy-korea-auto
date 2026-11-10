@@ -156,16 +156,25 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 
 
 ## AVTOY KOREA repair continuation — 2026-11-10 19:45 UTC
-- Active branch: \`fix/avtoy-site-catalog-and-admin-ux-2026-11-10\`.
-- Base: \`main\` after warranty-removal PR #59 was squash-merged as \`33615f1610843562424b02afdc1a6ba760c06495\`.
+- Active branch: `fix/avtoy-site-catalog-and-admin-ux-2026-11-10`.
+- Base: `main` after warranty-removal PR #59 was squash-merged as `33615f1610843562424b02afdc1a6ba760c06495`.
 - Changes under development:
-  - \`worker.js\`: published items in \`/site\` now have separate edit-text and unpublish controls; admins can remove/replace/append an exact text fragment on an already-published car/review without altering its media or other listings.
-  - \`worker.js\`: \`/admin\` opens a concise admin guide; \`/catalog\` points to the real live website catalogue instead of incorrectly claiming there is no catalogue.
-  - \`worker.js\`: catalogue section copy is clarified; API errors now show a visible retry control and empty catalogues show an explicit empty state instead of silently leaving a placeholder.
-  - \`worker.test.mjs\`: added tests for the live catalogue link, published car text editing/media preservation, and visible catalogue retry state.
-  - \`README.md\`: update admin and catalogue operating instructions.
-- Commits: worker \`661001c08726bc68546ba02507058cd4345e08c6\`; tests \`98a297bc1902351f0b723e0b78050e8f07401970\`.
-- Verification: pending exact-branch Worker syntax, full regression tests, privacy/security checks, and Factory Review.
+  - `worker.js`: published items in `/site` now have separate edit-text and unpublish controls; admins can remove/replace/append an exact text fragment on an already-published car/review without altering its media or other listings.
+  - `worker.js`: `/admin` opens a concise admin guide; `/catalog` points to the real live website catalogue instead of incorrectly claiming there is no catalogue.
+  - `worker.js`: catalogue section copy is clarified; API errors now show a visible retry control and empty catalogues show an explicit empty state instead of silently leaving a placeholder.
+  - `/api/cars` now returns HTTP 503 when the `REVIEWS` KV binding is missing instead of silently returning an empty list.
+  - Vehicle photo galleries now appear before the description, with a clear per-car enquiry action.
+  - `worker.test.mjs`: added tests for the live catalogue link, published car text editing/media preservation, and visible catalogue retry state.
+  - `README.md`: update admin and catalogue operating instructions.
+- Latest source commit: `889bb59fd44f99dde063e666275598022c0babbd`; latest tests commit: `dde5551a2fdc92b089bf1b9f3ac806c0030433c5`; workflow trigger commit: `8817d55538771681f81498ef70641619aad9dae1`.
+- Verification: regression tests added, including a missing-KV 503 check and gallery order/CTA checks. The GitHub connector currently reports no PR-triggered workflow runs or commit status contexts for this head, so syntax/full-suite/Factory Review completion is not yet independently confirmed.
 - Runtime status: live Cloudflare Worker response, live /api/cars payload, Telegram webhook registration, KV contents and real device rendering remain unverified. No production Worker deploy, webhook change, KV mutation, or secret change was performed by this branch.
-- Known product gap: there is not yet a browser-based website admin console. Published text editing and unpublishing are safely available through the private Telegram admin \`/site\` workflow; a web console requires a separately designed admin authentication/session boundary before it can expose destructive actions.
-- Next: wait for CI on this branch, inspect exact diff, then present PR and clear admin steps. Do not deploy or merge without explicit confirmation.
+- Known product gap: there is not yet a browser-based website admin console. Published text editing and unpublishing are safely available through the private Telegram admin `/site` workflow; a web console requires a separately designed admin authentication/session boundary before it can expose destructive actions.
+- Next: obtain exact-head CI evidence and inspect exact diff, then present PR and clear admin steps. Do not deploy or merge without explicit confirmation.
+
+
+## Additional catalogue diagnosis — 2026-11-10 20:05 UTC
+- Confirmed silent failure mode: \`GET /api/cars\` previously returned HTTP 200 with an empty \`cars\` array when the \`REVIEWS\` KV binding was absent. The homepage then kept its generic placeholder and did not distinguish configuration failure from a genuinely empty catalogue.
+- The repair branch now returns HTTP 503 when \`REVIEWS\` is missing; the catalogue frontend displays an explicit retry action on API errors and a separate empty state when the API succeeds with zero published cars.
+- Vehicle card layout was reordered so the photo gallery is shown before the description, and every car card has a direct “Обсудить этот автомобиль” action leading to the enquiry form.
+- Added regression tests for the missing-KV response and the photo-first card/CTA layout. Exact-head CI evidence is still pending/unavailable through the current GitHub workflow-run/status connector; do not treat source changes as fully verified until the workflow result is confirmed.
