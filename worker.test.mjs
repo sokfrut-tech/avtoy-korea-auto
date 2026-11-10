@@ -2304,3 +2304,65 @@ test("homepage contains no unapproved warranty promise", async () => {
   assert.doesNotMatch(html, /гарант/i);
   assert.match(html, /Подбор автомобиля и доставка из Кореи/);
 });
+
+
+test("catalog bot command opens the real website catalogue instead of claiming no listings exist", async () => {
+  await withTelegramMock(async calls => {
+    const response = await worker.fetch(webhook({
+      chat: { id: 333333333, type: "private" },
+      from: { id: 333333333, first_name: "Client" },
+      text: "/catalog",
+    }), env);
+    assert.equal(response.status, 200);
+    const reply = calls.find(call => call.method === "sendMessage" && String(call.payload.chat_id) === "333333333");
+    assert.ok(reply);
+    assert.match(reply.payload.text, /avtoy-korea-auto\.sokfrut\.workers\.dev\/#cars/);
+    assert.doesNotMatch(reply.payload.text, /Готового каталога объявлений пока нет/);
+  });
+});
+
+test("admin can edit the text of one published car from the /site list without changing its media", async () => {
+  const kv = memoryKV();
+  const id = "car_100555_777";
+  const original = {
+    id,
+    caption: "Kia Sportage 2022\nГарантия на все узлы",
+    photos: [{ file_id: "PHOTO_KEEP", file_unique_id: "PHOTO_KEEP_UID" }],
+    publishedAt: "2026-11-01T10:00:00.000Z",
+  };
+  await kv.put("car_approved:" + id, JSON.stringify(original));
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: {
+      chat: { id: 111111111, type: "private" },
+      from: { id: 111111111, first_name: "Admin" },
+      text: "/site",
+    }}), reviewEnv(kv));
+    const siteList = calls.find(call => call.method === "sendMessage" &&
+      call.payload.reply_markup?.inline_keyboard?.flat().some(button => button.callback_data === "siteedit:" + id));
+    assert.ok(siteList, "published item has a dedicated edit action");
+    await worker.fetch(webhookUpdate(callback(111111111, "siteedit:" + id)), reviewEnv(kv));
+    const prompt = calls.find(call => call.method === "sendMessage" &&
+      String(call.payload.text || "").startsWith("✏️ РЕДАКТИРОВАНИЕ ОПУБЛИКОВАННОГО АВТОМОБИЛЯ"));
+    assert.ok(prompt, "bot asks for an exact text edit");
+    await worker.fetch(webhookUpdate({ message: {
+      chat: { id: 111111111, type: "private" },
+      from: { id: 111111111, first_name: "Admin" },
+      text: "УДАЛИТЬ: Гарантия на все узлы",
+      reply_to_message: { message_id: 88, text: prompt.payload.text },
+    }}), reviewEnv(kv));
+  });
+  const updated = JSON.parse(await kv.get("car_approved:" + id));
+  assert.equal(updated.caption, "Kia Sportage 2022");
+  assert.equal(updated.photos[0].file_id, "PHOTO_KEEP");
+  assert.equal(updated.publishedAt, original.publishedAt);
+  assert.equal(updated.originalCaption, original.caption);
+});
+
+test("catalogue page shows an explicit retry state when the car API request fails", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()));
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Повторить загрузку/);
+  assert.match(html, /Автомобили в продаже и под заказ/);
+  assert.match(html, /Не удалось загрузить автомобили/);
+});
