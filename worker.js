@@ -1452,7 +1452,7 @@ function randomHex(bytes = 32) {
 
 function cookieValue(request, name) {
  const cookie = String(request.headers.get("Cookie") || "");
- const match = cookie.match(new RegExp("(?:^|;\\\\s*)" + name + "=([a-f0-9]{64})(?:;|$)", "i"));
+ const match = cookie.match(new RegExp("(?:^|;\\s*)" + name + "=([a-f0-9]{64})(?:;|$)", "i"));
  return match ? match[1] : null;
 }
 
