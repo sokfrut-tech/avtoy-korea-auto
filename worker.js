@@ -2177,14 +2177,14 @@ footer{background:#071321;color:#aeb9c8}
   <div class="wrap hero-standard-content">
     <div class="eyebrow">ПРЯМЫЕ ПОСТАВКИ ИЗ КОРЕИ</div>
     <h1>Автомобили<br><span>из Кореи</span></h1>
-    <p class="intro">Надёжные, проверенные, с гарантией.<br>Подберём и доставим автомобиль под ваши требования.</p>
+    <p class="intro">Подбор автомобиля и доставка из Кореи<br>с учётом ваших требований.</p>
     <a class="btn btn-red" href="#cars">Перейти в каталог <b>→</b></a>
     <div class="hero-dots"><button class="hero-dot active" aria-label="Слайд 1"></button><button class="hero-dot" aria-label="Слайд 2"></button><button class="hero-dot" aria-label="Слайд 3"></button></div>
   </div>
 </section>
 <section class="benefit-strip"><div class="wrap benefit-grid">
  <article><span class="benefit-icon">♧</span><div><b>Проверенные автомобили</b><small>Только честные предложения<br>и прозрачная история</small></div></article>
- <article><span class="benefit-icon">◇</span><div><b>Гарантия<br>на все авто</b><small>Официальная гарантия<br>на основные узлы</small></div></article>
+ <article><span class="benefit-icon">◇</span><div><b>Подбор под ваш запрос</b><small>Учитываем ваши пожелания<br>и бюджет</small></div></article>
  <article><span class="benefit-icon">▣</span><div><b>Быстрая доставка</b><small>Оптимальные сроки<br>и полное сопровождение</small></div></article>
  <article><span class="benefit-icon">♧</span><div><b>Поддержка 24/7</b><small>Всегда на связи<br>на всех этапах</small></div></article>
 </div></section>
