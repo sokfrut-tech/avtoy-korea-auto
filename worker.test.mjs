@@ -2374,3 +2374,11 @@ test("car catalogue reports missing KV storage instead of silently returning an 
   const body = await response.json();
   assert.match(body.error, /Catalogue storage unavailable/);
 });
+
+
+test("car cards put the original photo gallery before the description and provide a clear enquiry action", async () => {
+  const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()))).text();
+  assert.match(html, /body\.insertBefore\(gallery,title\)/);
+  assert.match(html, /Обсудить этот автомобиль/);
+  assert.match(html, /#cars \.car-card \.car-gallery\{margin:0 0 16px/);
+});
