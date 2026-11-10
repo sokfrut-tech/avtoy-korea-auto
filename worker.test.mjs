@@ -2382,3 +2382,104 @@ test("car cards put the original photo gallery before the description and provid
   assert.match(html, /Обсудить этот автомобиль/);
   assert.match(html, /#cars \.car-card \.car-gallery\{margin:0 0 16px/);
 });
+
+
+test("web admin uses a one-time Telegram code, edits a single listing and unpublishes only that listing", async () => {
+  const kv = memoryKV();
+  const id = "car_100555_990";
+  const original = {
+    id,
+    caption: "Kia Sportage 2022\nСкрыть эту фразу",
+    photos: [{ file_id: "ADMIN_PANEL_PHOTO", file_unique_id: "ADMIN_PANEL_PHOTO_UID" }],
+    sourceUrl: "https://t.me/avtoYkorea/990",
+    publishedAt: "2026-11-01T10:00:00.000Z",
+  };
+  await kv.put("car_approved:" + id, JSON.stringify(original));
+  const page = await worker.fetch(new Request("https://worker.test/admin"), reviewEnv(kv));
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+  assert.match(await page.text(), /одноразовый код из Telegram/);
+
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: {
+      chat: { id: 333333333, type: "private" },
+      from: { id: 333333333 },
+      text: "/adminlink",
+    }}), reviewEnv(kv));
+    assert.ok(!calls.some(c => String(c.payload.chat_id) === "333333333"));
+    await worker.fetch(webhookUpdate({ message: {
+      chat: { id: 111111111, type: "private" },
+      from: { id: 111111111 },
+      text: "/adminlink",
+    }}), reviewEnv(kv));
+    const notice = calls.find(c => c.method === "sendMessage" && String(c.payload.chat_id) === "111111111" && /Код входа:/.test(c.payload.text));
+    assert.ok(notice);
+    assert.match(notice.payload.text, /\/admin/);
+    const code = notice.payload.text.match(/Код входа: (\d{8})/)[1];
+
+    const blocked = await worker.fetch(new Request("https://worker.test/api/admin/login", {
+      method: "POST",
+      headers: { origin: "https://evil.test", "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    }), reviewEnv(kv));
+    assert.equal(blocked.status, 403);
+
+    const login = await worker.fetch(new Request("https://worker.test/api/admin/login", {
+      method: "POST",
+      headers: { origin: "https://worker.test", "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    }), reviewEnv(kv));
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get("set-cookie").split(";")[0];
+
+    const session = await worker.fetch(new Request("https://worker.test/api/admin/session", { headers: { cookie } }), reviewEnv(kv));
+    assert.equal(session.status, 200);
+
+    const listResponse = await worker.fetch(new Request("https://worker.test/api/admin/items", { headers: { cookie } }), reviewEnv(kv));
+    assert.equal(listResponse.status, 200);
+    const list = await listResponse.json();
+    assert.equal(list.items.length, 1);
+    assert.equal(list.items[0].id, id);
+    assert.ok(!Object.hasOwn(list.items[0], "sourceUrl"));
+
+    const patch = await worker.fetch(new Request("https://worker.test/api/admin/items/" + id, {
+      method: "PATCH",
+      headers: { cookie, origin: "https://worker.test", "content-type": "application/json" },
+      body: JSON.stringify({ instruction: "УДАЛИТЬ: Скрыть эту фразу" }),
+    }), reviewEnv(kv));
+    assert.equal(patch.status, 200);
+    const edited = JSON.parse(await kv.get("car_approved:" + id));
+    assert.equal(edited.caption, "Kia Sportage 2022");
+    assert.equal(edited.photos[0].file_id, "ADMIN_PANEL_PHOTO");
+    assert.equal(edited.publishedAt, original.publishedAt);
+
+    const replay = await worker.fetch(new Request("https://worker.test/api/admin/login", {
+      method: "POST",
+      headers: { origin: "https://worker.test", "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    }), reviewEnv(kv));
+    assert.equal(replay.status, 401, "login code is single-use");
+
+    const removed = await worker.fetch(new Request("https://worker.test/api/admin/items/" + id, {
+      method: "DELETE",
+      headers: { cookie, origin: "https://worker.test" },
+    }), reviewEnv(kv));
+    assert.equal(removed.status, 200);
+  });
+  assert.equal(await kv.get("car_approved:" + id), null);
+  const pending = JSON.parse(await kv.get("car_pending:" + id));
+  assert.equal(pending.caption, "Kia Sportage 2022");
+  assert.equal(pending.photos[0].file_id, "ADMIN_PANEL_PHOTO");
+});
+
+test("web admin APIs reject unauthenticated access and missing same-origin protection", async () => {
+  const kv = memoryKV();
+  const unauthenticated = await worker.fetch(new Request("https://worker.test/api/admin/items"), reviewEnv(kv));
+  assert.equal(unauthenticated.status, 401);
+  const csrf = await worker.fetch(new Request("https://worker.test/api/admin/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: "12345678" }),
+  }), reviewEnv(kv));
+  assert.equal(csrf.status, 403);
+});
