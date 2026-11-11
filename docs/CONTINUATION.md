@@ -245,3 +245,9 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Image sources currently use external image CDNs (CarExpert for Sportage, CarsCommerce dealer image for K5, WhichCar for RAV4); no image binaries were added to the repository. External-host availability, commercial image-use terms, and final browser rendering still require review before production.
 - Verification status at handoff: source-level diff and assertions inspected; exact-head CI and real browser/phone visual checks are pending. Do not merge or deploy without owner approval.
 - Next action: run PR checks, inspect their exact-head results, and report the evidence plus outstanding image-host/legal checks.
+
+
+## CI correction — 2026-11-11
+- First exact-head CI on PR #66 found the new test's regular-expression literal was over-escaped, causing a JavaScript parse failure in `worker.test.mjs`; Worker source syntax itself passed.
+- Replaced those two assertions with literal `String.includes` checks in commit `fe74d8b36a5e14f52032bac3af1553c0b78cb83b`. New exact-head Worker tests, Cloudflare checks and Factory Review must complete before this change is considered verified.
+- The PR deployment workflow correctly skipped both production-secret verification and deployment because the event was a pull request. No production deployment occurred.
