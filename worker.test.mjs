@@ -963,6 +963,24 @@ test("duplicate Telegram PhotoSize renditions keep the largest original, not the
  }finally{globalThis.fetch=originalFetch;}
 });
 
+
+test("car import selects the largest PhotoSize when one raw post contains thumbnail renditions", async () => {
+ const kv=memoryKV();
+ await kv.put("import_pending:-100555_3007",JSON.stringify({
+  chat:{id:-100555,username:"avtoYkorea"},message_id:3007,sourceDate:1790000000,
+  caption:"Kia Sorento 2024\\nПробег 12 000 км",
+  photo:[
+   {file_id:"CAR_THUMB",file_unique_id:"CAR_SAME_IMAGE",width:90,height:60,file_size:3500},
+   {file_id:"CAR_ORIGINAL",file_unique_id:"CAR_SAME_IMAGE",width:1600,height:1200,file_size:950000}
+  ]
+ }));
+ await withTelegramMock(async()=>{
+  await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_3007")),reviewEnv(kv));
+  const car=JSON.parse(await kv.get("car_pending:car_100555_3007"));
+  assert.deepEqual(car.photos.map(item=>item.file_id),["CAR_ORIGINAL"]);
+ });
+});
+
 test("car import refuses photo-only posts and keeps them out of the vehicle queue", async () => {
  const kv=memoryKV();
  await kv.put("import_pending:-100555_3005",JSON.stringify({chat:{id:-100555,username:"avtoYkorea"},message_id:3005,sourceDate:1790000000,caption:"",photo:[{file_id:"ONLY_PHOTO",file_unique_id:"ONLY_PHOTO_UNIQUE",width:1600,height:1200}]}));
