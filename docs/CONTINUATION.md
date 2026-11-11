@@ -5,8 +5,10 @@
 - Root causes: duplicate Telegram `PhotoSize` entries sharing `file_unique_id` kept the first, often thumbnail-sized rendition; car import accepted media-only posts; the public API exposed legacy cars with no description or photo; force-publish had no hard completeness gate.
 - Changes: keep the largest pixel-area / file-size rendition per stable media identity; require cleaned description plus photo for car import/publication; hide incomplete legacy records from the catalogue; normalize raw single-image PhotoSize arrays to the largest rendition.
 - Regression tests cover legacy filtering, full-resolution media retrieval, photo-only import rejection, and force-publish rejection.
-- Verification pending. No merge, production deployment, KV or Telegram webhook mutation performed.
-- Next: run Worker syntax/full tests, inspect CI, open PR; ask approval before merge/deploy.
+- Pull request: [#64](https://github.com/sokfrut-tech/avtoy-korea-auto/pull/64).
+- Verification on code head `40a642cd94d9f72176c2db7a98c50ac332d6c36b`: Worker tests `42987550475` — success; Cloudflare Worker checks `42987550520` — success; Factory Review `42987550778` — functional/regression, security/privacy, and release-evidence jobs all success. Secret scanning `42987550495` — success; CodeQL was still running at the last check.
+- PR deployment workflow `42987550586` completed successfully with deployment steps skipped because this was a pull-request event. No production merge/deployment, KV mutation, or Telegram webhook change was performed.
+- Next: finish CodeQL, review the final PR head checks, then request approval before merge/deploy.
 
 # AVTOY KOREA — continuation handoff
 
