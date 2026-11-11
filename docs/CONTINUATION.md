@@ -295,3 +295,9 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Deploy workflow on that PR revision completed its test job successfully; Cloudflare secret verification and the actual Worker deployment steps were skipped because this was a PR. No production deployment occurred.
 - Factory Review Director / release evidence was still archiving its handoff artifact at the time of this update.
 - A documentation-only continuation update followed at `9a25d6922c126117f5660a35525397c2731ed526`; no Worker or test source changed after the passing code/test revision.
+
+## Admin vehicle-photo preview labeling — 2026-11-12
+- Updated `sendChannelMedia()` so each admin-side vehicle photo preview has an explicit ordinal caption (e.g. `Фото 1/3 · Kia K5 2021`); image documents are labeled as originals (e.g. `Фото 1/1 · оригинал · Kia Sorento`).
+- Added regression assertions for a three-photo forwarded vehicle album and an image-document original upload.
+- This improves association between admin preview images and the vehicle moderation card. It does not alter stored source `file_id` values or the website gallery.
+- Pending: exact-head CI for the new code/test revision; then inspect PR review and decide merge only after all required checks are green.
