@@ -303,3 +303,5 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Pending: exact-head CI for the new code/test revision; then inspect PR review and decide merge only after all required checks are green.
 
 - CI for the first numbered-preview test commit caught an invalid escaped slash in the new test's regular expression (the Worker code syntax check passed). Replaced that assertion with a literal `startsWith()` check. Exact-head CI rerun is pending; do not merge while checks are red.
+
+- Follow-up CI exposed that the initial channel-import preview call passed an empty caption, so the ordinal was present but the vehicle title was absent on the first admin preview. Updated it to pass the source post caption/text; this is the intended association fix, not a relaxed test. New exact-head CI pending.
