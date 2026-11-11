@@ -2820,7 +2820,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
   show(index);
  }
  data.cars.forEach(function(car){
-  var media=Array.isArray(car.mediaItems)&&car.mediaItems.length?car.mediaItems:(car.media?[car.media]:[]);
+  var media=Array.isArray(car.mediaItems)&&car.mediaItems.length?car.mediaItems:(car.media?[{url:car.media,type:car.mediaType}]:[]);
   var isVideo=car.mediaType==='video';
   var article=document.createElement('article'); article.className='card car-card';
   var body=document.createElement('div'); body.className='car-body';
@@ -2891,22 +2891,37 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
   var discuss=document.createElement('a');discuss.className='car-link';discuss.href='#request';discuss.textContent='Обсудить этот автомобиль →';body.appendChild(discuss);
   if(media.length){
    var gallery=document.createElement('div'); gallery.className='car-gallery';
-   var carItems=media.map(function(item){return typeof item==='string'?{url:item,video:isVideo}:{url:item.url,video:item.type==='video'};});
+   function isVideoMedia(item){
+    if(item&&typeof item==='object'){
+     var kind=String(item.type||item.mimeType||item.mime_type||'').toLowerCase();
+     if(kind.indexOf('video')>=0)return true;
+     if(kind.indexOf('image')>=0)return false;
+     item=item.url||item.src||'';
+    }
+    var url=String(item||'').split(/[?#]/)[0].toLowerCase();
+    return /\\.(mp4|m4v|mov|webm|ogv|m3u8|mpd)$/.test(url);
+   }
+   var carItems=media.map(function(item){return {url:typeof item==='string'?item:(item.url||item.src||''),video:isVideoMedia(item)};}).filter(function(item){return !!item.url;});
+   carItems.sort(function(a,b){return Number(a.video)-Number(b.video);});
    var stage=document.createElement('div'); stage.className='car-gallery-stage';
-   function createCarMedia(item,index){var el=document.createElement(item.video?'video':'img');el.className='car-gallery-main';el.src=item.url;if(item.video){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео автомобиля '+(index+1));}else{el.alt='Фотография автомобиля '+(index+1);el.loading='lazy';}el.addEventListener('error',function(){gallery.hidden=true;},{once:true});return el;}
+   var failedMedia={}; function createCarMedia(item,index){var el=document.createElement(item.video?'video':'img');el.className='car-gallery-main';el.src=item.url;if(item.video){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео автомобиля '+(index+1));}else{el.alt='Фотография автомобиля '+(index+1);el.loading='lazy';}el.addEventListener('error',function(){failedMedia[index]=true;var next=(index+1)%carItems.length,attempts=0;while(failedMedia[next]&&attempts<carItems.length){next=(next+1)%carItems.length;attempts++;}if(attempts>=carItems.length)gallery.hidden=true;else showCarPhoto(next);},{once:true});return el;}
    var current=createCarMedia(carItems[0],0);
    stage.appendChild(current); gallery.appendChild(stage);
    var photoIndex=0;
-   var count=document.createElement('span');count.className='car-gallery-count';count.textContent='1 / '+media.length;
+   var count=document.createElement('span');count.className='car-gallery-count';count.textContent='1 / '+carItems.length;
    var back=document.createElement('button');back.type='button';back.className='car-gallery-arrow is-prev';back.textContent='‹';back.setAttribute('aria-label','Предыдущее фото');
    var forward=document.createElement('button');forward.type='button';forward.className='car-gallery-arrow is-next';forward.textContent='›';forward.setAttribute('aria-label','Следующее фото');
    function showCarPhoto(nextIndex){
-    photoIndex=(nextIndex+media.length)%media.length;
+    var candidate=(nextIndex+carItems.length)%carItems.length,attempts=0;
+    while(failedMedia[candidate]&&attempts<carItems.length){candidate=(candidate+1)%carItems.length;attempts++;}
+    if(attempts>=carItems.length){gallery.hidden=true;return;}
+    photoIndex=candidate;
     var previous=current;
     current=createCarMedia(carItems[photoIndex],photoIndex);
-    stage.replaceChild(current,previous);count.textContent=(photoIndex+1)+' / '+media.length;
+    if(previous&&previous.parentNode===stage)stage.replaceChild(current,previous);else stage.appendChild(current);
+    count.textContent=(photoIndex+1)+' / '+carItems.length;
    }
-   back.hidden=forward.hidden=count.hidden=media.length<2;
+   back.hidden=forward.hidden=count.hidden=carItems.length<2;
    back.onclick=function(){showCarPhoto(photoIndex-1)};
    forward.onclick=function(){showCarPhoto(photoIndex+1)};
    var touchStart=0;
