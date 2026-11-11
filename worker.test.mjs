@@ -929,6 +929,62 @@ test("channel album imports one vehicle with all photos", async () => {
   });
 });
 
+
+test("car catalogue rejects missing descriptions and missing photos, including legacy approved records", async () => {
+ const kv=memoryKV();
+ await kv.put("car_approved:car_100555_3001",JSON.stringify({id:"car_100555_3001",caption:"",photos:[{file_id:"PHOTO_ONLY"}],publishedAt:"2026-11-01"}));
+ await kv.put("car_approved:car_100555_3002",JSON.stringify({id:"car_100555_3002",caption:"Kia Sorento 2022\\nПробег 20 000 км",photos:[],publishedAt:"2026-11-02"}));
+ await kv.put("car_approved:car_100555_3003",JSON.stringify({id:"car_100555_3003",caption:"Hyundai Tucson 2023\\nПробег 15 000 км",photos:[{file_id:"GOOD_PHOTO",file_unique_id:"GOOD_UNIQUE",width:1600,height:1200,file_size:900000}],publishedAt:"2026-11-03"}));
+ const body=await(await worker.fetch(new Request("https://worker.test/api/cars"),reviewEnv(kv))).json();
+ assert.deepEqual(body.cars.map(car=>car.id),["car_100555_3003"]);
+});
+
+test("duplicate Telegram PhotoSize renditions keep the largest original, not the first thumbnail", async () => {
+ const kv=memoryKV();
+ await kv.put("car_approved:car_100555_3004",JSON.stringify({id:"car_100555_3004",caption:"Kia Sportage 2024\\nПробег 8 000 км",photos:[
+  {file_id:"SMALL_THUMB",file_unique_id:"SAME_ORIGINAL",width:90,height:60,file_size:4000},
+  {file_id:"FULL_RESOLUTION",file_unique_id:"SAME_ORIGINAL",width:1600,height:1200,file_size:850000}
+ ],publishedAt:"2026-11-04"}));
+ const originalFetch=globalThis.fetch,calls=[];
+ globalThis.fetch=async(input,init={})=>{
+  if(String(input).startsWith("https://api.telegram.org/")){
+   const method=new URL(String(input)).pathname.split("/").pop(),payload=JSON.parse(init.body||"{}");calls.push({method,payload});
+   if(method==="getFile")return Response.json({ok:true,result:{file_path:"photos/full.jpg"}});
+   return Response.json({ok:true,result:{}});
+  }
+  if(String(input).includes("/file/bot"))return new Response(new Uint8Array([1,2,3]));
+  return originalFetch(input,init);
+ };
+ try{
+  const response=await worker.fetch(new Request("https://worker.test/api/car-media/car_100555_3004/photo/0"),reviewEnv(kv));
+  assert.equal(response.status,200);
+  assert.ok(calls.some(c=>c.method==="getFile"&&c.payload.file_id==="FULL_RESOLUTION"));
+  assert.equal(calls.some(c=>c.method==="getFile"&&c.payload.file_id==="SMALL_THUMB"),false);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("car import refuses photo-only posts and keeps them out of the vehicle queue", async () => {
+ const kv=memoryKV();
+ await kv.put("import_pending:-100555_3005",JSON.stringify({chat:{id:-100555,username:"avtoYkorea"},message_id:3005,sourceDate:1790000000,caption:"",photo:[{file_id:"ONLY_PHOTO",file_unique_id:"ONLY_PHOTO_UNIQUE",width:1600,height:1200}]}));
+ await withTelegramMock(async calls=>{
+  await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_3005")),reviewEnv(kv));
+  assert.equal((await kv.list({prefix:"car_pending:"})).keys.length,0);
+  assert.ok(await kv.get("import_pending:-100555_3005"));
+  assert.ok(calls.some(c=>c.method==="answerCallbackQuery"&&/нет описания/i.test(c.payload.text)));
+ });
+});
+
+test("car publication cannot bypass the description and photo requirements", async () => {
+ const kv=memoryKV(),id="car_100555_3006";
+ await kv.put("car_pending:"+id,JSON.stringify({id,caption:"",photos:[{file_id:"PHOTO"}]}));
+ await withTelegramMock(async calls=>{
+  await worker.fetch(webhookUpdate(callback(111111111,"carpubforce:"+id)),reviewEnv(kv));
+  assert.equal(await kv.get("car_approved:"+id),null);
+  assert.ok(await kv.get("car_pending:"+id));
+  assert.ok(calls.some(c=>c.method==="answerCallbackQuery"&&/без описания/i.test(c.payload.text)));
+ });
+});
+
 test("public car and review APIs remove Telegram promotional footer and source links", async () => {
  const kv=memoryKV();
  await kv.put("car_approved:car_100555_3383",JSON.stringify({id:"car_100555_3383",caption:"Kia Sorento 2022\nПробег 20 000 км\nЦена под ключ: 1.716.671 ₽\n📞 Владимир: +79537477230\n📲 WhatsApp / Telegram\nhttps://t.me/avtoYkorea\nВидео\n\nИсточник: https://t.me/avtoYkorea/3383",sourceUrl:"https://t.me/avtoYkorea/3383",fileId:"CAR_MEDIA",publishedAt:"2026-10-31"}));
