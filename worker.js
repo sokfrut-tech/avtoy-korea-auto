@@ -177,20 +177,51 @@ async function showSiteList(chatId, env) {
  if (!env.REVIEWS) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "Хранилище не настроено." });
  const cars = await env.REVIEWS.list({ prefix: "car_approved:" });
  const reviews = await env.REVIEWS.list({ prefix: "approved:" });
+ const entries = [...cars.keys.map(key => ({ key, type: "car" })), ...reviews.keys.map(key => ({ key, type: "review" }))];
  const items = [];
- for (const key of [...cars.keys, ...reviews.keys]) {
-  const raw = await env.REVIEWS.get(key.name);
+ for (const entry of entries) {
+  const raw = await env.REVIEWS.get(entry.key.name);
   if (!raw) continue;
-  const id = key.name.replace(/^(car_approved|approved):/, "");
-  items.push({ id, label: siteLabel(id, JSON.parse(raw)) });
+  const id = entry.key.name.replace(/^(car_approved|approved):/, "");
+  const record = JSON.parse(raw);
+  const photos = entry.type === "car" ? postPhotos(record) : uniqueFileItems(Array.isArray(record.photos) && record.photos.length ? record.photos : (record.fileId && record.kind !== "video" ? [{ file_id: record.fileId }] : []));
+  const videos = entry.type === "car" ? postVideos(record) : uniqueFileItems(Array.isArray(record.videos) ? record.videos : (record.kind === "video" && record.fileId ? [{ file_id: record.fileId }] : []));
+  items.push({ id, record, photos, videos, label: siteLabel(id, record), type: entry.type });
  }
  if (!items.length) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "На сайте сейчас ничего не опубликовано." });
- const shown = items.slice(0, 30);
- const text = "🌐 Сейчас на сайте: " + items.length + "\n\n" + shown.map((item, index) => (index + 1) + ". " + item.label).join("\n") + (items.length > shown.length ? "\n\nПоказаны первые " + shown.length + "." : "");
- const keyboard = { inline_keyboard: [...shown.flatMap(item => [
-  [{ text: "✏️ Изменить текст", callback_data: "siteedit:" + item.id }, { text: "🗑 Снять с сайта", callback_data: "sitedel:" + item.id }]
- ]), [{ text: "❓ Подсказка", callback_data: "adminhelp" }]] };
- return callTelegram(env, "sendMessage", { chat_id: chatId, text, reply_markup: keyboard });
+ const carsCount = items.filter(item => item.type === "car").length;
+ const reviewsCount = items.length - carsCount;
+ await callTelegram(env, "sendMessage", {
+  chat_id: chatId,
+  text: "🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ\n\n🚘 Автомобилей: " + carsCount + "\n⭐ Отзывов: " + reviewsCount + "\n\nНиже — отдельные карточки. Фото, название и кнопки относятся только к одной публикации."
+ });
+ for (let index = 0; index < items.length; index++) {
+  const item = items[index];
+  const title = (item.type === "car" ? "🚘 АВТОМОБИЛЬ" : "⭐ ОТЗЫВ") + " · " + (index + 1) + "/" + items.length;
+  const details = title + "\n" + item.label + "\n\nФото: " + item.photos.length + " · Видео: " + item.videos.length;
+  const keyboard = { inline_keyboard: [[
+   { text: "✏️ Изменить описание", callback_data: "siteedit:" + item.id },
+   { text: "🗑 Снять с сайта", callback_data: "sitedel:" + item.id }
+  ]] };
+  const cover = item.photos[0];
+  if (cover && cover.file_id) {
+   await callTelegram(env, "sendPhoto", {
+    chat_id: chatId, photo: cover.file_id, caption: details.slice(0, 1024), reply_markup: keyboard
+   });
+   const rest = item.photos.slice(1);
+   for (let offset = 0; offset < rest.length; offset += 10) {
+    const chunk = rest.slice(offset, offset + 10);
+    if (chunk.length > 1) await callTelegram(env, "sendMediaGroup", {
+     chat_id: chatId,
+     media: chunk.map(photo => ({ type: "photo", media: photo.file_id }))
+    });
+    else if (chunk.length === 1) await callTelegram(env, "sendPhoto", { chat_id: chatId, photo: chunk[0].file_id, caption: "Дополнительное фото · " + (offset + 2) });
+   }
+  } else {
+   await callTelegram(env, "sendMessage", { chat_id: chatId, text: details + (item.videos.length ? "\nВидео приложено" : "\n⚠️ Нет фотографии"), reply_markup: keyboard });
+  }
+ }
+ return callTelegram(env, "sendMessage", { chat_id: chatId, text: "Готово. Нажимайте кнопки только под карточкой нужного автомобиля или отзыва.", reply_markup: { inline_keyboard: [[{ text: "❓ Подсказка администратора", callback_data: "adminhelp" }]] } });
 }
 
 async function sendPendingCarCard(env, adminIds, car, id, lead) {
