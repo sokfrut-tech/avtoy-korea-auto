@@ -1072,7 +1072,7 @@ async function handleCarPost(post, env, adminIds) {
  const videos = postVideos(post);
  if (!caption || !photos.length) return false;
  const fileId = photos[0].file_id;
- if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return; }
+ if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return true; }
  const id = "car_" + String(chat.id).replace(/-/g,"") + "_" + messageNumberOf(post.message_id);
  const approved = await env.REVIEWS.get("car_approved:" + id);
  if (approved) {
@@ -1085,9 +1085,9 @@ async function handleCarPost(post, env, adminIds) {
   const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
   await Promise.all(adminIds.map(async adminId => {
    await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "");
-   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная отправка: автомобиль всё ещё ожидает решения модератора.\n\n" + (saved.caption || "Описание отсутствует") + "\n\nИсточник: " + saved.sourceUrl,reply_markup:keyboard});
+   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная отправка: автомобиль всё ещё ожидает решения модератора.\n\n" + saved.caption + "\n\nИсточник: " + saved.sourceUrl,reply_markup:keyboard});
   }));
-  return;
+  return true;
  }
  const car = {id,caption,fileId,photos,videos,mediaType:videos.length && !photos.length ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id),createdAt:new Date().toISOString(),sourceDate:created};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
