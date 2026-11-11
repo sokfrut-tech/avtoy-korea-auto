@@ -1039,19 +1039,28 @@ function largestPhotoOf(photo) {
 
 // Отправка всех фото и видео записи администратору.
 async function sendChannelMedia(env, adminId, photos, videos, caption) {
- // Telegram принимает не больше 10 медиа в одной группе: отправляем все фото пачками.
+ // Keep a stable numbered link between each admin preview and its car/moderation card.
+ // Telegram limits media groups to 10 items; every item receives its own ordinal caption.
+ const total = photos.length;
+ const title = String(caption || "").split(/\\r?\\n/).map(line => line.trim()).find(Boolean) || "";
+ const photoLabel = (number, original=false) => {
+  const marker = "Фото " + number + "/" + total + (original ? " · оригинал" : "");
+  return (title ? marker + " · " + title : marker).slice(0, 1024);
+ };
  for (let offset = 0; offset < photos.length; offset += 10) {
   const chunk = photos.slice(offset, offset + 10);
   const documentItems = chunk.filter(photo => photo.mime_type);
   const photoItems = chunk.filter(photo => !photo.mime_type);
   for (const photo of documentItems) {
-   await callTelegram(env, "sendDocument", { chat_id: adminId, document: photo.file_id, ...(offset === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
+   const number = photos.indexOf(photo) + 1;
+   await callTelegram(env, "sendDocument", { chat_id: adminId, document: photo.file_id, caption: photoLabel(number, true) });
   }
   if (photoItems.length > 1) {
-   const media = photoItems.map((photo, index) => ({ type: "photo", media: photo.file_id, ...(offset === 0 && documentItems.length === 0 && index === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) }));
+   const media = photoItems.map(photo => ({ type: "photo", media: photo.file_id, caption: photoLabel(photos.indexOf(photo) + 1) }));
    await callTelegram(env, "sendMediaGroup", { chat_id: adminId, media });
   } else if (photoItems.length === 1) {
-   await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: photoItems[0].file_id, ...(offset === 0 && documentItems.length === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
+   const photo = photoItems[0];
+   await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: photo.file_id, caption: photoLabel(photos.indexOf(photo) + 1) });
   }
  }
  for (const video of videos) await callTelegram(env, "sendVideo", { chat_id: adminId, video: video.file_id });
