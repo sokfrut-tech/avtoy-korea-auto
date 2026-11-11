@@ -387,6 +387,15 @@ function cleanPublicationText(value) {
   .trim();
 }
 
+// Каталог автомобилей: публикуем только связанный комплект «реальное описание + медиа».
+// Не превращаем служебные подписи и отдельные фото/текстовые сообщения в карточки машин.
+function isPublishableCarCaption(value) {
+ const text = cleanPublicationText(value).replace(/[\s\p{P}\p{S}]+/gu, " ").trim();
+ if (text.length < 24) return false;
+ if (/^(?:исправить|автомобиль из объявления|без текста|описание отсутствует|фото автомобиля|видео)$/i.test(text)) return false;
+ return true;
+}
+
 async function callTelegram(env, method, payload) {
  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
   method: "POST",
@@ -1066,7 +1075,10 @@ async function handleCarPost(post, env, adminIds) {
  const photos = await uniquePhotoFilesByContent(postPhotos(post), env);
  const videos = postVideos(post);
  const fileId = photos.length ? photos[photos.length - 1].file_id : (videos.length ? videos[0].file_id : null);
- if (!caption && !fileId) return;
+ if (!fileId || !isPublishableCarCaption(caption)) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"⏭ Автомобиль не добавлен: отдельное фото или служебный текст без полноценного описания не создают карточку. Фото и описание должны относиться к одной публикации."})));
+  return;
+ }
  if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return; }
  const id = "car_" + String(chat.id).replace(/-/g,"") + "_" + messageNumberOf(post.message_id);
  const approved = await env.REVIEWS.get("car_approved:" + id);
@@ -1942,7 +1954,7 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : [])); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))]; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : [])); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))]; const caption=publicCarCaption(car.caption); if (!mediaItems.length || !isPublishableCarCaption(caption)) continue; cars.push({id:car.id,caption,media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
