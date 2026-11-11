@@ -2260,6 +2260,29 @@ test("car catalogue exposes mixed photo and video media with separate playback U
 });
 
 
+test("published car catalogue hides known low-resolution photos but keeps sharp photos and video", async () => {
+ const kv = memoryKV();
+ await kv.put("car_approved:car_100555_778", JSON.stringify({
+  id:"car_100555_778",caption:"Kia Sportage 2026",
+  photos:[
+   {file_id:"BLURRY_640",file_unique_id:"BLURRY_640_U",width:640,height:480,file_size:45000},
+   {file_id:"SHARP_1600",file_unique_id:"SHARP_1600_U",width:1600,height:1200,file_size:350000},
+   {file_id:"UNKNOWN_SIZE",file_unique_id:"UNKNOWN_SIZE_U"}
+  ],
+  videos:[{file_id:"WALKAROUND",file_unique_id:"WALKAROUND_U"}],
+  publishedAt:"2026-11-11T10:00:00Z"
+ }));
+ const response=await worker.fetch(new Request("https://worker.test/api/cars"),reviewEnv(kv));
+ const body=await response.json();
+ const car=body.cars.find(item=>item.id==="car_100555_778");
+ assert.deepEqual(car.mediaItems,[
+  {url:"/api/car-media/car_100555_778/photo/0",type:"photo"},
+  {url:"/api/car-media/car_100555_778/photo/1",type:"photo"},
+  {url:"/api/car-media/car_100555_778/video/0",type:"video"}
+ ]);
+ assert.equal(car.mediaItems.some(item=>item.url.includes("BLURRY")),false);
+});
+
 test("car import removes byte-identical reuploads but keeps different angles", async () => {
   const kv = memoryKV();
   const originalFetch = globalThis.fetch;
