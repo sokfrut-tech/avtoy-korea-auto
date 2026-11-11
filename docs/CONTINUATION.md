@@ -288,3 +288,5 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - No KV records were deleted or rewritten. No Cloudflare deployment, Telegram webhook change, secret change, or production mutation was performed.
 - Pending: run full test suite and security/build workflows on this exact branch; inspect CI results; visually verify image output in browser/mobile. Existing old photos hidden by the stricter filter need source-quality re-upload as Telegram FILE/DOCUMENT.
 - Next action: open a draft PR and verify CI before any merge or production release.
+
+- First CI run on the initial patch exposed two stale fixtures that represented Telegram PhotoSize objects without the width/height/file_size metadata Telegram supplies. The strict filter correctly hid them; updated those fixtures to use realistic 1600x1200 Telegram photo metadata. The new strict-filter regression test passed in that run; full suite rerun is pending on the updated head.
