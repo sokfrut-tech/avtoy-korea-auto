@@ -2672,9 +2672,8 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
       gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showReviewPhoto(photoIndex+(delta<0?1:-1))},{passive:true});
       showReviewPhoto(0);card.appendChild(gallery);
     }
-    var who=document.createElement('div');who.className='review-name';who.textContent='Клиент';
-    var text=document.createElement('p');text.className='review-text';text.textContent=rv.text||'';
-    card.appendChild(who);card.appendChild(text);list.appendChild(card);
+    // Отзывы на сайте показываем только как фото/видео: текст публикации не выводим.
+    list.appendChild(card);
     var dot=document.createElement('button');dot.type='button';dot.className='review-dot';dot.setAttribute('aria-label','Показать отзыв '+(index+1));
     dot.addEventListener('click',function(){list.scrollTo({left:card.offsetLeft-list.offsetLeft,behavior:'smooth'})});dots.appendChild(dot);
   });
