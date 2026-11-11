@@ -1016,8 +1016,13 @@ function catalogPhotoItems(car) {
  const source = Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []);
  return uniqueFileItems(source).filter(photo => {
   const width = Number(photo.width) || 0, height = Number(photo.height) || 0;
-  if (!width || !height) return true;
-  return Math.max(width, height) >= 1280 && width * height >= 900000;
+  if (width > 0 && height > 0) {
+   return Math.max(width, height) >= 1280 && width * height >= 900000;
+  }
+  // A Telegram image sent as a document preserves its uploaded bytes. Without
+  // dimensions, only accept that explicit original-file path with a meaningful size.
+  // Legacy PhotoSize/file_id entries with unknown dimensions are hidden until re-upload.
+  return Boolean(photo.mime_type && Number(photo.file_size) >= 120000);
  });
 }
 
