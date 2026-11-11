@@ -2894,7 +2894,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
    var gallery=document.createElement('div'); gallery.className='car-gallery';
    var carItems=media.map(function(item){return typeof item==='string'?{url:item,video:isVideo}:{url:item.url,video:item.type==='video'};});
    var stage=document.createElement('div'); stage.className='car-gallery-stage';
-   var failedMedia={}; function createCarMedia(item,index){var el=document.createElement(item.video?'video':'img');el.className='car-gallery-main';el.src=item.url;if(item.video){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео автомобиля '+(index+1));}else{el.alt='Фотография автомобиля '+(index+1);el.loading='lazy';}el.addEventListener('error',function(){if(failedMedia[index])return;failedMedia[index]=true;if(photoIndex===index){var next=-1;for(var step=1;step<=carItems.length;step++){var candidate=(index+step)%carItems.length;if(!failedMedia[candidate]){next=candidate;break;}}if(next>=0)showCarPhoto(next);else gallery.hidden=true;}},{once:true});return el;}
+   function createCarMedia(item,index){var el=document.createElement(item.video?'video':'img');el.className='car-gallery-main';el.src=item.url;if(item.video){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео автомобиля '+(index+1));}else{el.alt='Фотография автомобиля '+(index+1);el.loading='lazy';}el.addEventListener('error',function(){gallery.hidden=true;},{once:true});return el;}
    var current=createCarMedia(carItems[0],0);
    stage.appendChild(current); gallery.appendChild(stage);
    var photoIndex=0;
@@ -2902,10 +2902,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
    var back=document.createElement('button');back.type='button';back.className='car-gallery-arrow is-prev';back.textContent='‹';back.setAttribute('aria-label','Предыдущее фото');
    var forward=document.createElement('button');forward.type='button';forward.className='car-gallery-arrow is-next';forward.textContent='›';forward.setAttribute('aria-label','Следующее фото');
    function showCarPhoto(nextIndex){
-    var candidate=(nextIndex+media.length)%media.length, attempts=0;
-    while(failedMedia[candidate]&&attempts<media.length){candidate=(candidate+1)%media.length;attempts++;}
-    if(attempts>=media.length){gallery.hidden=true;return;}
-    photoIndex=candidate;
+    photoIndex=(nextIndex+media.length)%media.length;
     var previous=current;
     current=createCarMedia(carItems[photoIndex],photoIndex);
     stage.replaceChild(current,previous);count.textContent=(photoIndex+1)+' / '+media.length;
