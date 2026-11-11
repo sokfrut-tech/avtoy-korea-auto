@@ -1013,6 +1013,21 @@ async function sendChannelMedia(env, adminId, photos, videos, caption) {
 // Exact-byte deduplication is scoped to one car publication. Telegram's
 // stable IDs catch ordinary re-forwards; SHA-256 catches identical bytes
 // uploaded again under a new ID. Verification failures keep the image (fail open).
+// Reject obviously undersized Telegram renditions before a vehicle can be published.
+// Portrait and landscape images are both accepted; dimensions are evaluated by short/long edge.
+function isPublishableCarPhoto(item) {
+ if (!item || !item.file_id) return false;
+ const width = Number(item.width) || 0;
+ const height = Number(item.height) || 0;
+ const bytes = Number(item.file_size) || 0;
+ if (width && height && (Math.min(width,height) < 600 || Math.max(width,height) < 1000 || width*height < 600000)) return false;
+ if (bytes > 0 && bytes < 45000) return false;
+ return true;
+}
+function publishableCarPhotos(items) {
+ return uniqueFileItems(items).filter(isPublishableCarPhoto);
+}
+
 async function uniquePhotoFilesByContent(items, env) {
  const seen = new Set();
  const output = [];
@@ -1063,7 +1078,7 @@ async function handleCarPost(post, env, adminIds) {
   return;
  }
  const caption = cleanPublicationText(post.caption || post.text).slice(0, 3000);
- const photos = await uniquePhotoFilesByContent(postPhotos(post), env);
+ const photos = publishableCarPhotos(await uniquePhotoFilesByContent(postPhotos(post), env));
  const videos = postVideos(post);
  const fileId = photos.length ? photos[photos.length - 1].file_id : (videos.length ? videos[0].file_id : null);
  if (!caption && !fileId) return;
@@ -1942,7 +1957,7 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : [])); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))]; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = publishableCarPhotos(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : [])); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))]; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
@@ -1955,7 +1970,7 @@ export default {
    if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found",{status:404});
    const raw = await env.REVIEWS.get("car_approved:" + carMediaMatch[1]); if (!raw) return new Response("Not found",{status:404});
    const car = JSON.parse(raw); const mediaType = carMediaMatch[2] || (car.mediaType === "video" ? "video" : "photo"); const index = Number(carMediaMatch[3] || carMediaMatch[4] || 0);
-   const photos = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []));
+   const photos = publishableCarPhotos(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []));
    const videos = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : []));
    const selected = (mediaType === "video" ? videos : photos)[index]; const fileId = selected && selected.file_id ? selected.file_id : null;
    if (!fileId) return new Response("Not found",{status:404});
@@ -2519,7 +2534,7 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
 }
 
 /* Mobile catalogue hardening: readable title, compact cards and no stretched grid rows */
-#cars h2{color:#f4f6f9!important}
+#cars h2,#cars .car-card h3{color:#f4f6f9!important}
 #cars .cars{align-items:start;grid-auto-rows:max-content}
 #cars .car-card{align-self:start;min-height:0;height:auto}
 #cars .car-card .car-gallery{width:100%;min-height:0;aspect-ratio:16/10;overflow:hidden;border-radius:15px;background:#090e16}
