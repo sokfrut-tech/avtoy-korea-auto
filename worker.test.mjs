@@ -1682,7 +1682,7 @@ test("/site sends separate visual admin cards with item-specific actions and sta
     assert.ok(carCard.payload.caption.includes("АВТОМОБИЛЬ") && carCard.payload.reply_markup.inline_keyboard[0][0].callback_data === "siteedit:" + CAR_ID);
     assert.equal(carCard.payload.reply_markup.inline_keyboard[0][1].callback_data, "sitedel:" + CAR_ID);
     assert.equal(reviewCard.payload.reply_markup.inline_keyboard[0][0].callback_data, "siteedit:" + REVIEW_ID);
-    assert.ok(calls.some(c => c.method === "sendMediaGroup" && c.payload.media.some(m => m.media === "CAR-2")), "additional car photos remain grouped after the cover");
+    assert.ok(calls.some(c => c.method === "sendPhoto" && c.payload.photo === "CAR-2"), "additional car photos remain next to their cover card");
   });
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate({ message: { message_id: 21, chat: { id: 333333333, type: "private" }, from: { id: 333333333 }, text: "/site" } }), reviewEnv(kv));
