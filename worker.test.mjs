@@ -2230,6 +2230,30 @@ test("catalogue cards use the site's dark theme instead of white text-panel styl
 });
 
 
+test("vehicle catalogue excludes undersized photo renditions from public gallery and media endpoint", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:car_100555_778", JSON.stringify({
+    id: "car_100555_778",
+    caption: "Kia Sportage 2026",
+    photos: [
+      { file_id: "PHOTO_GOOD", file_unique_id: "GOOD_U", width: 1280, height: 853, file_size: 180000 },
+      { file_id: "PHOTO_SMALL", file_unique_id: "SMALL_U", width: 320, height: 240, file_size: 12000 },
+      { file_id: "PHOTO_PORTRAIT", file_unique_id: "PORTRAIT_U", width: 720, height: 1280, file_size: 130000 }
+    ],
+    mediaType: "photo",
+    publishedAt: "2026-11-11T10:00:00Z"
+  }));
+  const response = await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv));
+  const body = await response.json();
+  const car = body.cars.find(item => item.id === "car_100555_778");
+  assert.deepEqual(car.mediaItems, [
+    { url: "/api/car-media/car_100555_778/photo/0", type: "photo" },
+    { url: "/api/car-media/car_100555_778/photo/1", type: "photo" }
+  ]);
+  const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(kv))).text();
+  assert.match(html, /#cars h2,#cars \.car-card h3\{color:#f4f6f9!important\}/);
+});
+
 test("car catalogue exposes mixed photo and video media with separate playback URLs", async () => {
   const kv = memoryKV();
   await kv.put("car_approved:car_100555_777", JSON.stringify({
