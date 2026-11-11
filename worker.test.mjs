@@ -2227,7 +2227,7 @@ test("channel car image documents preserve original file metadata through modera
     assert.equal(car.photos[0].file_name, "sorento-original.jpg");
     const originalPreview = calls.find(call => call.method === "sendDocument" && call.payload.document === "CAR_ORIGINAL_JPEG");
     assert.ok(originalPreview, "admin receives the original image file");
-    assert.match(originalPreview.payload.caption, /^Фото 1\\/1 · оригинал · Kia Sorento/);
+    assert.ok(originalPreview.payload.caption.startsWith("Фото 1/1 · оригинал · Kia Sorento"));
   });
 });
 
