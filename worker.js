@@ -2771,9 +2771,9 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
   var title=document.createElement('h3'); title.textContent=(car.caption||'Автомобиль из объявления').split(NL)[0].slice(0,120);
   body.appendChild(title);
   function renderCarDescription(root, rawCaption, titleText){
-   var lines=String(rawCaption||'').replace(/\r\n?/g,'\n').replace(/\u00a0/g,' ').split('\n').map(function(line){return line.trim()});
-   while(lines.length&& !lines[0])lines.shift();
-   while(lines.length&& !lines[lines.length-1])lines.pop();
+   var lines=String(rawCaption||'').replaceAll(String.fromCharCode(13),'').replaceAll(String.fromCharCode(160),' ').split(String.fromCharCode(10)).map(function(line){return line.trim()});
+   while(lines.length&&!lines[0])lines.shift();
+   while(lines.length&&!lines[lines.length-1])lines.pop();
    if(lines.length&&lines[0].slice(0,120)===String(titleText||''))lines.shift();
    var paragraph=[],list=null;
    function flushParagraph(){
@@ -2784,24 +2784,30 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
    function flushList(){if(list&&list.children.length)root.appendChild(list);list=null;}
    lines.forEach(function(line){
     if(!line){flushParagraph();flushList();return;}
-    var section=line.match(/^(характеристики|комплектация|описание|состояние|двигатель|трансмиссия|привод|безопасность|опции|дополнительно)\s*:?[ \t]*$/i);
-    if(section){
+    var sectionName=line.toLowerCase().replace(/:$/,'').trim();
+    if(['характеристики','комплектация','описание','состояние','двигатель','трансмиссия','привод','безопасность','опции','дополнительно'].indexOf(sectionName)>=0){
      flushParagraph();flushList();
-     var h=document.createElement('h4');h.className='car-description-heading';h.textContent=section[1];root.appendChild(h);return;
+     var h=document.createElement('h4');h.className='car-description-heading';h.textContent=sectionName;root.appendChild(h);return;
     }
-    var bullet=line.match(/^(?:[•●▪◦✓✔]|[-–—]|\d+[.)])\s+(.+)$/);
-    if(bullet){
+    var bulletText=null;
+    if('•●▪◦✓✔-–—'.indexOf(line.charAt(0))>=0&&line.length>1&&line.charAt(1)===' ')bulletText=line.slice(2).trim();
+    else{
+     var space=line.indexOf(' ');
+     if(space>1&&(line.charAt(space-1)==='.'||line.charAt(space-1)===')')&&!isNaN(Number(line.slice(0,space-1))))bulletText=line.slice(space+1).trim();
+    }
+    if(bulletText){
      flushParagraph();
      if(!list){list=document.createElement('ul');list.className='car-description-list';}
-     var li=document.createElement('li');li.textContent=bullet[1];list.appendChild(li);return;
+     var li=document.createElement('li');li.textContent=bulletText;list.appendChild(li);return;
     }
     flushList();
-    var pair=line.match(/^([^:：]{2,36})[:：]\s*(.+)$/);
-    if(pair){
+    var colon=line.indexOf(':');
+    if(colon<0)colon=line.indexOf('：');
+    if(colon>=2&&colon<=36&&line.slice(colon+1).trim()){
      flushParagraph();
      var row=document.createElement('div');row.className='car-description-row';
-     var label=document.createElement('strong');label.textContent=pair[1].trim();
-     var value=document.createElement('span');value.textContent=pair[2].trim();
+     var label=document.createElement('strong');label.textContent=line.slice(0,colon).trim();
+     var value=document.createElement('span');value.textContent=line.slice(colon+1).trim();
      row.appendChild(label);row.appendChild(value);root.appendChild(row);return;
     }
     paragraph.push(line);
