@@ -974,10 +974,13 @@ test("homepage uses compact spacing, readable benefit cards, and no oversized Te
   const html = await response.text();
   assert.ok(!html.includes('id="telegram"'), "redundant Telegram promo section is removed");
   assert.ok(!html.includes('class="telegram-promo"'), "oversized Telegram promo markup is removed");
-  assert.ok(html.includes(".topbar{border-bottom:0;box-shadow:none}"), "unnecessary grey header divider is removed");
+  assert.ok(html.includes(".topbar{border-bottom:1px solid #ffffff16;box-shadow:none}"), "decorative header divider is preserved");
   assert.ok(html.includes(".hero-standard{height:clamp(360px,31vw,445px)}"), "hero banner height is reduced");
   assert.ok(html.includes("#f4f7fb"), "benefit-card text uses a high-contrast light color");
   assert.ok(html.includes("background:#263342"), "mobile benefit cards use a lighter accessible surface");
+  assert.ok(!html.includes("Листайте пальцем"), "redundant swipe instruction is removed; arrows remain the visual cue");
+  assert.ok(html.includes("function splitVehicleHeading(raw)"), "vehicle headings are normalized into model and trim");
+  assert.ok(html.includes("className='car-trim'"), "trim is displayed separately above the model name");
   assert.ok(html.includes("#order.section{padding-top:30px!important;padding-bottom:28px!important}"), "order section vertical spacing is reduced");
 });
 
