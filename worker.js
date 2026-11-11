@@ -391,7 +391,7 @@ function cleanPublicationText(value) {
 // Не превращаем служебные подписи и отдельные фото/текстовые сообщения в карточки машин.
 function isPublishableCarCaption(value) {
  const text = cleanPublicationText(value).replace(/[\s\p{P}\p{S}]+/gu, " ").trim();
- if (text.length < 24) return false;
+ if (text.length < 8) return false;
  if (/^(?:исправить|автомобиль из объявления|без текста|описание отсутствует|фото автомобиля|видео)$/i.test(text)) return false;
  return true;
 }
