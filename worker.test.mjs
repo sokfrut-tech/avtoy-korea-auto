@@ -1464,9 +1464,9 @@ test("forwarded channel post: a failed admin delivery is restored by Telegram's 
 test("forwarded car album: all photos are shown on the site after publishing", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
-    await worker.fetch(webhookUpdate({ message: forwardedPart(701, 1001, "fw-8", { caption: "Kia K5 2021", photo: [{ file_id: "C1" }] }) }), reviewEnv(kv));
-    await worker.fetch(webhookUpdate({ message: forwardedPart(702, 1002, "fw-8", { photo: [{ file_id: "C2" }] }) }), reviewEnv(kv));
-    await worker.fetch(webhookUpdate({ message: forwardedPart(703, 1003, "fw-8", { photo: [{ file_id: "C3" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(701, 1001, "fw-8", { caption: "Kia K5 2021", photo: [{ file_id: "C1", width: 1600, height: 1200, file_size: 350000 }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(702, 1002, "fw-8", { photo: [{ file_id: "C2", width: 1600, height: 1200, file_size: 350000 }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(703, 1003, "fw-8", { photo: [{ file_id: "C3", width: 1600, height: 1200, file_size: 350000 }] }) }), reviewEnv(kv));
     await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_1001")), reviewEnv(kv));
     const carId = (await kv.list({ prefix: "car_pending:" })).keys[0].name.replace("car_pending:", "");
     await worker.fetch(webhookUpdate(callback(111111111, "carpub:" + carId)), reviewEnv(kv));
@@ -2241,7 +2241,7 @@ test("car catalogue exposes mixed photo and video media with separate playback U
   await kv.put("car_approved:car_100555_777", JSON.stringify({
     id: "car_100555_777",
     caption: "Kia Sorento 2022",
-    photos: [{ file_id: "PHOTO1", file_unique_id: "PHOTO1_U" }],
+    photos: [{ file_id: "PHOTO1", file_unique_id: "PHOTO1_U", width: 1600, height: 1200, file_size: 350000 }],
     videos: [{ file_id: "VIDEO1", file_unique_id: "VIDEO1_U" }],
     mediaType: "photo",
     publishedAt: "2026-11-02T10:00:00Z"
