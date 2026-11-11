@@ -349,7 +349,7 @@ test("admin choosing car rejects posts before 2026-01-01 and accepts boundary da
     await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_50")),reviewEnv(kv));
     assert.equal((await kv.list({prefix:"car_pending:"})).keys.length,0);
     const boundary=Math.floor(Date.UTC(2026,0,1)/1000);
-    await kv.put("import_pending:-100555_51",JSON.stringify({chat:{id:-100555,username:"avtoYkorea"},message_id:51,sourceDate:boundary,caption:"Kia 2026"}));
+    await kv.put("import_pending:-100555_51",JSON.stringify({chat:{id:-100555,username:"avtoYkorea"},message_id:51,sourceDate:boundary,caption:"Kia 2026",photo:[{file_id:"BOUNDARY_PHOTO",file_unique_id:"BOUNDARY_PHOTO_UNIQUE",width:1600,height:1200}]}));
     await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_51")),reviewEnv(kv));
     assert.ok(await kv.get("car_pending:car_100555_51"));
     assert.equal((await kv.list({prefix:"car_approved:"})).keys.length,0);
