@@ -1135,7 +1135,7 @@ async function handleCarPost(post, env, adminIds) {
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
   await sendChannelMedia(env, adminId, photos, videos, caption);
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 ОДИН АВТОМОБИЛЬ · " + (caption.split("\\n").find(line => line.trim()) || "Без названия").slice(0,90) + "\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n" + carPhotoQualityNote(photos) + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 ОДИН АВТОМОБИЛЬ · " + (caption.split(/\\r?\\n/).find(line => line.trim()) || "Без названия").slice(0,90) + "\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n" + carPhotoQualityNote(photos) + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
  }));
 }
 
