@@ -1065,7 +1065,7 @@ async function handleCarPost(post, env, adminIds) {
    chat_id: adminId,
    text: "⏭ Автомобиль не импортирован: публикация создана до 1 января 2026 года или дата источника недоступна. Для отзывов такого ограничения нет."
   })));
-  return;
+  return true;
  }
  const caption = publicCarCaption(post.caption || post.text).slice(0, 3000);
  const photos = await uniquePhotoFilesByContent(postPhotos(post), env);
@@ -1379,9 +1379,9 @@ async function handleCarCallback(callback, env, adminIds) {
  const raw = await env.REVIEWS.get("car_pending:" + id);
  if (!raw) return answer("Объявление уже обработано или не найдено",true);
  const car = JSON.parse(raw);
- if (!publicCarCaption(car.caption) || !postPhotos(car).length) return answer(!publicCarCaption(car.caption) ? "Нельзя опубликовать автомобиль без описания." : "Нельзя опубликовать автомобиль без фотографии.", true);
  if (action === "edit") return beginModerationEdit(callback, env, "car", id, answer);
  if (action === "rej") { await env.REVIEWS.delete("car_pending:" + id); await askRejectReason(env, fromId, id); return answer("Объявление отклонено"); }
+ if (!publicCarCaption(car.caption) || !postPhotos(car).length) return answer(!publicCarCaption(car.caption) ? "Нельзя опубликовать автомобиль без описания." : "Нельзя опубликовать автомобиль без фотографии.", true);
  if (action === "pub") {
   const warnings = publishWarnings(car.caption, postPhotos(car).length + postVideos(car).length);
   if (warnings.length) { await askPublishCheck(env, fromId, "car", id, warnings); return answer("Проверьте перед публикацией"); }
