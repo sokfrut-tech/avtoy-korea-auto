@@ -345,7 +345,7 @@ test("admin choosing car rejects posts before 2026-01-01 and accepts boundary da
   const kv = memoryKV();
   await withTelegramMock(async calls => {
     const oldDate=Math.floor(Date.UTC(2025,11,31,23,59,59)/1000);
-    await kv.put("import_pending:-100555_50",JSON.stringify({chat:{id:-100555,username:"avtoYkorea"},message_id:50,sourceDate:oldDate,caption:"Старая машина"}));
+    await kv.put("import_pending:-100555_50",JSON.stringify({chat:{id:-100555,username:"avtoYkorea"},message_id:50,sourceDate:oldDate,caption:"Старая машина",photo:[{file_id:"OLD_PHOTO",file_unique_id:"OLD_PHOTO_UNIQUE",width:1600,height:1200}]}));
     await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_50")),reviewEnv(kv));
     assert.equal((await kv.list({prefix:"car_pending:"})).keys.length,0);
     const boundary=Math.floor(Date.UTC(2026,0,1)/1000);
