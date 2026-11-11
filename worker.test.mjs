@@ -1474,6 +1474,9 @@ test("forwarded car album: all photos are shown on the site after publishing", a
     const car = body.cars.find(c => c.id === carId);
     assert.ok(car, "published car is on the site");
     assert.equal(car.mediaItems.length, 3, "all three album photos are shown");
+    const adminAlbum = calls.find(call => call.method === "sendMediaGroup" && call.payload.media && call.payload.media.length === 3);
+    assert.ok(adminAlbum, "admin receives one grouped visual preview for the vehicle album");
+    assert.deepEqual(adminAlbum.payload.media.map(item => item.caption), ["Фото 1/3 · Kia K5 2021", "Фото 2/3 · Kia K5 2021", "Фото 3/3 · Kia K5 2021"]);
   });
 });
 
@@ -2222,7 +2225,9 @@ test("channel car image documents preserve original file metadata through modera
     const car = JSON.parse(await kv.get("car_pending:car_100555_88"));
     assert.equal(car.photos[0].file_id, "CAR_ORIGINAL_JPEG");
     assert.equal(car.photos[0].file_name, "sorento-original.jpg");
-    assert.ok(calls.some(call => call.method === "sendDocument" && call.payload.document === "CAR_ORIGINAL_JPEG"));
+    const originalPreview = calls.find(call => call.method === "sendDocument" && call.payload.document === "CAR_ORIGINAL_JPEG");
+    assert.ok(originalPreview, "admin receives the original image file");
+    assert.match(originalPreview.payload.caption, /^Фото 1\\/1 · оригинал · Kia Sorento/);
   });
 });
 
