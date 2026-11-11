@@ -2343,6 +2343,9 @@ body{background:#f5f7fa;color:#111827;font-family:Inter,Arial,sans-serif}
 .hero-standard .btn{margin-top:26px;border-radius:28px;padding:16px 30px;min-width:210px}
 .hero-standard .hero-dots{position:static;margin:36px 0 0 44%;display:flex;gap:12px}
 .hero-standard .hero-dot{border:0;padding:0;width:10px;height:10px;cursor:pointer}
+.hero-model-name{position:absolute;z-index:3;right:78px;bottom:27px;padding:9px 15px;border:1px solid #ffffff35;border-radius:30px;background:#071321b8;color:#fff;font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;backdrop-filter:blur(8px)}
+.hero-standard .hero-slide{background-color:#101923;background-size:cover;background-position:center 55%}
+@media(max-width:780px){.hero-model-name{right:54px;bottom:25px;padding:7px 11px;font-size:10px;letter-spacing:.08em}}
 .hero-standard .hero-dot.active{background:var(--red)}
 .hero-arrow{position:absolute;z-index:3;top:48%;width:42px;height:42px;border:0;border-radius:50%;background:#07132199;color:#fff;font-size:30px;cursor:pointer}
 .hero-prev{left:20px}.hero-next{right:20px}
@@ -2442,7 +2445,7 @@ footer{background:#071321;color:#aeb9c8}
 body{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
 h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
 #cars .car-card .car-body{display:flex;flex-direction:column;align-items:stretch}
-#cars .car-card .car-body h3{font-family:"Manrope",sans-serif;font-size:clamp(17px,1.45vw,21px);font-weight:800;line-height:1.28;letter-spacing:-.025em;margin:0 0 12px;overflow-wrap:anywhere}
+#cars .car-card .car-trim{order:0;align-self:flex-start;margin:0 0 5px;color:#ff806e;font:800 11px/1.3 "Manrope",sans-serif;letter-spacing:.14em;text-transform:uppercase}\n#cars .car-card .car-body h3{font-family:"Manrope",sans-serif;font-size:clamp(17px,1.45vw,21px);font-weight:800;line-height:1.28;letter-spacing:-.025em;margin:0 0 12px;overflow-wrap:anywhere;text-transform:uppercase}
 #cars .car-description{display:grid;gap:11px;margin:0 0 16px;color:#c7c9d0;font-size:14px;line-height:1.72;overflow-wrap:anywhere}
 #cars .car-description-paragraph{margin:0;color:#c7c9d0}
 #cars .car-description-heading{margin:5px 0 -3px;color:#fff;font:800 12px/1.4 "Manrope",sans-serif;letter-spacing:.09em;text-transform:uppercase}
@@ -2474,6 +2477,46 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
   #cars h2{margin:0 0 12px}
   #cars .sub{display:none!important}
 }
+/* 2026-11-11 owner visual refinement: compact header, hero and section rhythm */
+.topbar{border-bottom:1px solid #ffffff16;box-shadow:none}
+.nav{min-height:68px;gap:14px}
+.brand-logo{width:205px}
+.nav-telegram{gap:7px;font-size:12px}
+.nav-telegram>span{width:32px;height:32px;font-size:16px}
+.nav-telegram small{font-size:10px}
+.nav .pill{padding:10px 17px;font-size:13px}
+.section{padding:58px 0}
+.hero-standard{height:clamp(360px,31vw,445px)}
+.get{margin-top:12px;padding:20px 24px;gap:22px}
+.get-title{font-size:19px;line-height:1.3}
+.get ul{gap:10px 18px;line-height:1.5;color:#f4f7fb}
+.get li{padding:12px 14px;border:1px solid #3a485a;border-radius:12px;background:#202a36;color:#f4f7fb;font-weight:600}
+.get li::marker{color:var(--red)}
+#order.section{padding-top:30px!important;padding-bottom:28px!important}
+#reviews.section{padding-top:12px!important}
+@media(max-width:900px){.brand-logo{width:185px}.nav{gap:10px}.nav-links{gap:14px}}
+@media(max-width:780px){
+ .nav{min-height:60px}
+ .brand-logo{width:158px}
+ .nav-telegram>span{width:29px;height:29px}
+ .nav .pill{padding:9px 12px;font-size:12px}
+ .section{padding:30px 0}
+ .hero-standard{height:380px}
+ #order.section{padding-top:24px!important;padding-bottom:20px!important}
+ #reviews.section{padding-top:10px!important}
+ .get{padding:16px;gap:10px}
+ .get ul{gap:8px}
+ .get li{padding:12px;background:#263342;border-color:#526176;color:#fff;font-size:14px;line-height:1.45}
+}
+@media(max-width:480px){
+ .hero-standard{height:345px}
+ .hero-standard h1{font-size:42px}
+ .hero-standard .intro{font-size:15px}
+ .hero-standard .btn{min-width:0;padding:12px 20px;margin-top:18px}
+ .nav-telegram b{font-size:11px}
+ .nav-telegram small{font-size:9px}
+ .get ul{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
@@ -2491,9 +2534,9 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
 <main>
 <section class="hero-standard">
   <div class="hero-standard-bg">
-    <div class="hero-slide active" style="background-image:url('/assets/kia-sportage.jpg')"></div>
-    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=2000&q=90')"></div>
-    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=2000&q=90')"></div>
+    <div class="hero-slide active" role="img" aria-label="Kia Sportage 2026, обновлённый дизайн" data-model="Kia Sportage" style="background-image:url('https://images.carexpert.com.au/resize/1920/-/cms/v1/media/2025-11-2026-250924kia-sportage-sxstill-7.jpg')"></div>
+    <div class="hero-slide" role="img" aria-label="Kia K5 2026 GT-Line" data-model="Kia K5" style="background-image:url('https://vehicle-images.carscommerce.inc/c296-18004034/KNAG64J7XT5407697/f77dca20312f1d8e2fc1db6f7841acfb.jpg')"></div>
+    <div class="hero-slide" role="img" aria-label="Toyota RAV4 2026, новое поколение" data-model="Toyota RAV4" style="background-image:url('https://media.whichcar.com.au/uploads/2025/11/2026-Toyota-RAV4-1-1920x1280.jpeg')"></div>
   </div>
   <button class="hero-arrow hero-prev" type="button" aria-label="Предыдущий слайд">‹</button><button class="hero-arrow hero-next" type="button" aria-label="Следующий слайд">›</button>
   <div class="wrap hero-standard-content">
@@ -2501,8 +2544,9 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
     <h1>Автомобили<br><span>из Кореи</span></h1>
     <p class="intro">Подбор автомобиля и доставка из Кореи<br>с учётом ваших требований.</p>
     <a class="btn btn-red" href="#cars">Перейти в каталог <b>→</b></a>
-    <div class="hero-dots"><button class="hero-dot active" aria-label="Слайд 1"></button><button class="hero-dot" aria-label="Слайд 2"></button><button class="hero-dot" aria-label="Слайд 3"></button></div>
+    <div class="hero-dots"><button class="hero-dot active" type="button" aria-label="Kia Sportage" aria-current="true"></button><button class="hero-dot" type="button" aria-label="Kia K5" aria-current="false"></button><button class="hero-dot" type="button" aria-label="Toyota RAV4" aria-current="false"></button></div>
   </div>
+  <div class="hero-model-name" aria-live="polite">Kia Sportage</div>
 </section>
 <section class="benefit-strip"><div class="wrap benefit-grid">
  <article><span class="benefit-icon">♧</span><div><b>Проверенные автомобили</b><small>Только честные предложения<br>и прозрачная история</small></div></article>
@@ -2516,7 +2560,6 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
   <div class="eyebrow">Наши автомобили</div>
   <h2>Автомобили в продаже и под заказ</h2>
   <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Загружаем актуальные предложения…</div></article></div>
-  <p class="cars-hint">← Листайте пальцем, справа видно следующую машину →</p>
 </section>
 <section class="wrap section" id="order" style="padding-top:40px">
   <div class="eyebrow">Как заказать</div>
@@ -2556,16 +2599,7 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
   </div>
 </section>
 
-<section class="wrap section" id="telegram" style="padding-top:20px">
-  <div class="telegram-promo">
-    <div><div class="eyebrow">Мы в Telegram</div><h2>Присоединяйтесь к нашему Telegram</h2>
-    <p>Следите за новыми автомобилями, свежими предложениями и новостями. Напишите нам напрямую — будем на связи.</p>
-    <a class="telegram-promo-link" href="https://t.me/AVTOYKOREABOT" target="_blank" rel="noopener">Открыть бота @AVTOYKOREABOT</a></div>
-    <a class="telegram-promo-qr" href="https://t.me/AVTOYKOREABOT" target="_blank" rel="noopener" aria-label="Открыть Telegram-бота по QR-коду">
-      <img src="data:image/png;base64,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" alt="QR-код для перехода в Telegram-бот AVTOYKOREABOT">
-    </a>
-  </div>
-</section>
+
 <section class="wrap section" id="request" style="padding-top:20px">
   <div class="form-card">
     <div>
@@ -2736,7 +2770,6 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
  if(!data.cars.length){list.textContent='';var empty=document.createElement('article');empty.className='card dashed';var emptyBody=document.createElement('div');emptyBody.className='car-body';emptyBody.textContent='Сейчас нет активных объявлений. Новые предложения появятся после проверки администратора.';empty.appendChild(emptyBody);list.appendChild(empty);return;}
  list.textContent='';
  var NL=String.fromCharCode(10);
- var hint=document.querySelector('.cars-hint'); if(hint)hint.classList.add('is-on');
  var lightbox=null, items=[], current=0;
  function onKey(e){ if(e.key==='Escape')closeBox(); else if(e.key==='ArrowRight')show(current+1); else if(e.key==='ArrowLeft')show(current-1); }
  function closeBox(){ if(lightbox){ lightbox.remove(); lightbox=null; } document.removeEventListener('keydown', onKey); }
@@ -2774,8 +2807,23 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
   var isVideo=car.mediaType==='video';
   var article=document.createElement('article'); article.className='card car-card';
   var body=document.createElement('div'); body.className='car-body';
-  var title=document.createElement('h3'); title.textContent=(car.caption||'Автомобиль из объявления').split(NL)[0].slice(0,120);
+  var heading=splitVehicleHeading((car.caption||'Автомобиль из объявления').split(NL)[0]);
+  if(heading.trim){var trim=document.createElement('div');trim.className='car-trim';trim.textContent=heading.trim;body.appendChild(trim);}
+  var title=document.createElement('h3'); title.textContent=heading.model.slice(0,120);
   body.appendChild(title);
+  function splitVehicleHeading(raw){
+   var original=String(raw||'Автомобиль из объявления').trim();
+   var trims=['SX Prestige','GT-Line','GT Line','X-Line','X Line','Calligraphy','Noblesse','Prestige','Signature','Platinum','Limited','Ultimate','Premium','Luxury','Elegance','Adventure','High-Tech','Techno','Intense','Comfort','Classic','Active','Prime','Style','N Line','SX','EX','LX','SE','SEL'];
+   var lower=original.toLowerCase();
+   for(var i=0;i<trims.length;i++){
+    var trim=trims[i], suffix=trim.toLowerCase(), offset=original.length-suffix.length;
+    if(offset>0&&lower.slice(offset)===suffix&&/[\s|·—–-]/.test(original.charAt(offset-1))){
+     var model=original.slice(0,offset).trim().replace(/[|·—–-]+$/,'').trim();
+     if(model)return {model:model,trim:trim.toUpperCase(),raw:original};
+    }
+   }
+   return {model:original,trim:'',raw:original};
+  }
   function renderCarDescription(root, rawCaption, titleText){
    var lines=String(rawCaption||'').replaceAll(String.fromCharCode(13),'').replaceAll(String.fromCharCode(160),' ').split(String.fromCharCode(10)).map(function(line){return line.trim()});
    while(lines.length&&!lines[0])lines.shift();
@@ -2821,7 +2869,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
    flushParagraph();flushList();
   }
   var description=document.createElement('div');description.className='car-description';
-  renderCarDescription(description,car.caption||'',title.textContent);
+  renderCarDescription(description,car.caption||'',heading.raw);
   if(description.childNodes.length)body.appendChild(description);
   var discuss=document.createElement('a');discuss.className='car-link';discuss.href='#request';discuss.textContent='Обсудить этот автомобиль →';body.appendChild(discuss);
   if(media.length){
@@ -2863,26 +2911,43 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
 });
 }
 loadCars();
-// Главный слайдер: автоматическая смена, точки и стрелки
+// Главный слайдер: три реальные модели, автосмена каждые 5 секунд и ручное управление.
 (function(){
   if(typeof document.querySelector!=='function')return;
   var root=document.querySelector('.hero-standard');
   if(!root || typeof root.querySelector!=='function')return;
   var slides=root.querySelectorAll('.hero-slide');
   var dots=root.querySelectorAll('.hero-dot');
+  var modelLabel=root.querySelector('.hero-model-name');
   if(!slides.length)return;
-  var index=0;
+  var index=0, timer=null, paused=false;
+  var reducedMotion=!!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  function stopTimer(){if(timer!==null){window.clearInterval(timer);timer=null;}}
+  function startTimer(){
+    stopTimer();
+    if(!reducedMotion && !paused && document.visibilityState!=='hidden'){
+      timer=window.setInterval(function(){show(index+1)},5000);
+    }
+  }
   function show(next){
     slides[index].classList.remove('active');
-    if(dots[index])dots[index].classList.remove('active');
+    if(dots[index]){dots[index].classList.remove('active');dots[index].setAttribute('aria-current','false');}
     index=(next+slides.length)%slides.length;
     slides[index].classList.add('active');
-    if(dots[index])dots[index].classList.add('active');
+    if(dots[index]){dots[index].classList.add('active');dots[index].setAttribute('aria-current','true');}
+    if(modelLabel)modelLabel.textContent=slides[index].getAttribute('data-model')||'';
+    startTimer();
   }
+  if(dots[0])dots[0].setAttribute('aria-current','true');
+  if(modelLabel)modelLabel.textContent=slides[0].getAttribute('data-model')||'';
+  slides.forEach(function(slide){var match=String(slide.style.backgroundImage||'').match(/url\(["']?(.+?)["']?\)/);if(match){var preload=new Image();preload.src=match[1];}});
   root.querySelector('.hero-prev')?.addEventListener('click',function(){show(index-1)});
   root.querySelector('.hero-next')?.addEventListener('click',function(){show(index+1)});
   dots.forEach(function(dot,i){dot.addEventListener('click',function(){show(i)})});
-  window.setInterval(function(){show(index+1)},5000);
+  root.addEventListener('focusin',function(){paused=true;stopTimer();});
+  root.addEventListener('focusout',function(event){if(!root.contains(event.relatedTarget)){paused=false;startTimer();}});
+  document.addEventListener('visibilitychange',startTimer);
+  startTimer();
 })();
 </script>
 </body>

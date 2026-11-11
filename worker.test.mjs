@@ -953,6 +953,36 @@ test("homepage inline JavaScript parses before deployment", async () => {
   for (const script of scripts) new vm.Script(script[1]);
 });
 
+test("homepage hero rotates between the three requested current car models", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/"), env);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /aria-label="Kia Sportage 2026/);
+  assert.match(html, /aria-label="Kia K5 2026/);
+  assert.match(html, /aria-label="Toyota RAV4 2026/);
+  assert.match(html, /data-model="Kia Sportage"/);
+  assert.match(html, /data-model="Kia K5"/);
+  assert.match(html, /data-model="Toyota RAV4"/);
+  assert.ok(html.includes("setInterval(function(){show(index+1)},5000)"));
+  assert.ok(!html.includes("images.unsplash.com/photo-"));
+});
+
+
+test("homepage uses compact spacing, readable benefit cards, and no oversized Telegram promo", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/"), env);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.ok(!html.includes('id="telegram"'), "redundant Telegram promo section is removed");
+  assert.ok(!html.includes('class="telegram-promo"'), "oversized Telegram promo markup is removed");
+  assert.ok(html.includes(".topbar{border-bottom:1px solid #ffffff16;box-shadow:none}"), "decorative header divider is preserved");
+  assert.ok(html.includes(".hero-standard{height:clamp(360px,31vw,445px)}"), "hero banner height is reduced");
+  assert.ok(html.includes("#f4f7fb"), "benefit-card text uses a high-contrast light color");
+  assert.ok(html.includes("background:#263342"), "mobile benefit cards use a lighter accessible surface");
+  assert.ok(!html.includes("Листайте пальцем"), "redundant swipe instruction is removed; arrows remain the visual cue");
+  assert.ok(html.includes("function splitVehicleHeading(raw)"), "vehicle headings are normalized into model and trim");
+  assert.ok(html.includes("className='car-trim'"), "trim is displayed separately above the model name");
+  assert.ok(html.includes("#order.section{padding-top:30px!important;padding-bottom:28px!important}"), "order section vertical spacing is reduced");
+});
 
 test("website order retry delivers only the admin whose first notification failed", async () => {
   const kv = memoryKV();
@@ -1991,13 +2021,16 @@ test("image asset sources exist and decode to expected binary sizes", () => {
   assert.equal(sportage.length, 16326);
 });
 
-test("homepage references externalized logo and Sportage asset", async () => {
+test("homepage references the externalized logo and all three current hero models", async () => {
   const response = await worker.fetch(new Request("https://worker.test/"), {});
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.ok(html.includes("/assets/logo.jpg"));
   assert.ok(!html.includes("data:image/jpeg;base64,"));
-  assert.ok(html.includes("/assets/kia-sportage.jpg"));
+  assert.ok(html.includes("data-model=\"Kia Sportage\""));
+  assert.ok(html.includes("data-model=\"Kia K5\""));
+  assert.ok(html.includes("data-model=\"Toyota RAV4\""));
+  assert.ok(!html.includes("/assets/kia-sportage.jpg"));
 });
 
 

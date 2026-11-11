@@ -233,3 +233,37 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
   5. In the panel, choose the specific vehicle/review. Edit all text or remove/replace a precise fragment; to hide one listing use unpublish/return-to-moderation. Photos are retained.
   6. Telegram fallback remains \`/site\` for the list and item-level edit/unpublish actions.
 - Never paste the one-time code into a group or share it. The panel session expires after 8 hours.
+
+
+## Homepage hero vehicle refresh — 2026-11-11
+- Active branch: `feat/homepage-car-hero-carousel-standalone-2026-11-11`, based directly on `main`; this change is independent of open PR #64 and does not include or merge it.
+- Code/test commit before this handoff note: `b6d92aa8733b5fd99d406ed14b738a0e37740568`.
+- Replaced the three generic/irrelevant hero backgrounds with current vehicle imagery for Kia Sportage 2026 (facelift / refreshed design), Kia K5 2026 GT-Line, and Toyota RAV4 2026 (new generation).
+- Hero now exposes the active model name, accessible image labels and model-specific dot labels. Images are preloaded after script initialization; manual arrows/dots remain available.
+- Autoplay advances every 5 seconds. Manual navigation restarts the interval; the timer pauses when the tab is hidden or the carousel receives keyboard focus, and respects `prefers-reduced-motion`.
+- Added a regression test asserting the three model names, model metadata, 5-second autoplay, and removal of the previous Unsplash placeholder cars.
+- Image sources currently use external image CDNs (CarExpert for Sportage, CarsCommerce dealer image for K5, WhichCar for RAV4); no image binaries were added to the repository. External-host availability, commercial image-use terms, and final browser rendering still require review before production.
+- Verification status at handoff: source-level diff and assertions inspected; exact-head CI and real browser/phone visual checks are pending. Do not merge or deploy without owner approval.
+- Next action: run PR checks, inspect their exact-head results, and report the evidence plus outstanding image-host/legal checks.
+
+
+## CI correction — 2026-11-11
+- First exact-head CI on PR #66 found the new test's regular-expression literal was over-escaped, causing a JavaScript parse failure in `worker.test.mjs`; Worker source syntax itself passed.
+- Replaced those two assertions with literal `String.includes` checks in commit `fe74d8b36a5e14f52032bac3af1553c0b78cb83b`. New exact-head Worker tests, Cloudflare checks and Factory Review must complete before this change is considered verified.
+- The PR deployment workflow correctly skipped both production-secret verification and deployment because the event was a pull request. No production deployment occurred.
+
+
+## Existing homepage asset regression update — 2026-11-11
+- Second CI pass parsed successfully and ran 134 tests; 133 passed and one pre-existing homepage asset assertion failed because it still required the old `/assets/kia-sportage.jpg` background.
+- Updated that assertion to retain the logo check while verifying the three new model identifiers and ensuring the obsolete Sportage asset path is no longer used. Change commit: `8127f79f2d981683a505d2a15e90b82a1bfff159`.
+- This was a stale expectation caused by the intentional hero-image replacement, not a runtime syntax or carousel failure. New exact-head CI is pending.
+
+
+## Latest verification evidence — 2026-11-11
+- Current PR #66 head: `33ed2209dc4300bcf095d197ff119708c79e4f52`.
+- Worker tests run `42999992309`: success, **134/134 passed**.
+- Cloudflare Worker checks run `42999992338`: success.
+- Factory Review run `42999992778`: Functional / regression tests, Security / privacy regression tests, and Director / release evidence all success.
+- Factory Security Baseline run `42999992348`: Secret scanning success; CodeQL static analysis was still in progress at the time of this handoff.
+- PR deployment workflow run `42999992398`: job succeeded, but both Cloudflare secret verification and actual production deployment steps were skipped because this is a pull request. Production remains unchanged.
+- Still outstanding: CodeQL final result, real browser/phone visual smoke test, and review of external image-host stability and image-use permissions. Do not describe the production site as updated until a separately approved merge and successful Cloudflare production deployment.
