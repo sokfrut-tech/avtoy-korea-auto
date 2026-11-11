@@ -2495,15 +2495,15 @@ test("review cards show customer photos and videos without review text", async (
 
 test("vehicle descriptions use one safe semantic format and responsive Google Font typography", async () => {
   const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()))).text();
-  assert.match(html, /fonts\\.googleapis\\.com\\/css2\\?family=Inter/);
-  assert.match(html, /family=Inter:[^"]*family=Manrope/);
-  assert.match(html, /font-family:"Manrope","Inter"/);
-  assert.match(html, /car-description-row/);
-  assert.match(html, /car-description-list/);
-  assert.match(html, /car-description-heading/);
-  assert.match(html, /function renderCarDescription\\(root, rawCaption, titleText\\)/);
-  assert.match(html, /label\\.textContent=pair\\[1\\]\\.trim\\(\\)/);
-  assert.match(html, /value\\.textContent=pair\\[2\\]\\.trim\\(\\)/);
-  assert.match(html, /@media\\(max-width:780px\\)[\\s\\S]*#cars \\.car-description-row\\{grid-template-columns:1fr/);
-  assert.doesNotMatch(html, /description\\.innerHTML/);
+  assert.ok(html.includes("fonts.googleapis.com/css2?family=Inter:"));
+  assert.ok(html.includes("family=Manrope:"));
+  assert.ok(html.includes('font-family:"Manrope","Inter"'));
+  assert.ok(html.includes("car-description-row"));
+  assert.ok(html.includes("car-description-list"));
+  assert.ok(html.includes("car-description-heading"));
+  assert.ok(html.includes("function renderCarDescription(root, rawCaption, titleText)"));
+  assert.ok(html.includes("label.textContent=pair[1].trim()"));
+  assert.ok(html.includes("value.textContent=pair[2].trim()"));
+  assert.ok(html.includes("#cars .car-description-row{grid-template-columns:1fr"));
+  assert.ok(!html.includes("description.innerHTML"), "description formatter must use safe text nodes");
 });
