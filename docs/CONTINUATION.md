@@ -307,3 +307,7 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Follow-up CI exposed that the initial channel-import preview call passed an empty caption, so the ordinal was present but the vehicle title was absent on the first admin preview. Updated it to pass the source post caption/text; this is the intended association fix, not a relaxed test. New exact-head CI pending.
 
 - Final review of the preview-label code found a multiline-caption edge case: the title extractor was splitting on a literal backslash sequence rather than line breaks. Replaced it with a newline-character split so the first non-empty vehicle-title line is used. New exact-head CI pending.
+
+- Final preview-label source revision `3c5b7931af65c3987d7ec9200651272014b9c814`: Worker regression tests passed; Cloudflare Worker syntax/private-admin routing checks passed; Factory Review full functional/regression tests passed; Factory Review security/privacy tests passed; Director/release evidence artifact archived successfully.
+- PR deploy workflow ran the syntax and Worker tests successfully, while Cloudflare secret verification and actual deployment steps were skipped. No production deploy was performed.
+- The current branch head after this evidence note is documentation-only; Worker source is unchanged from the passing `3c5b7931` revision.
