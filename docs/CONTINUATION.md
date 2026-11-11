@@ -277,3 +277,14 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Source-level work is committed on the feature branch. Exact-head CI, runtime Telegram round-trip, real photo fidelity, and phone visual verification are pending. Do not merge or deploy without explicit owner approval.
 - Remaining media-quality investigation: trace actual published car image URL/rendition end-to-end; distinguish Telegram-compressed photo uploads from source images that were already blurry; implement duplicate suppression at the vehicle-post scope without deleting intentional repeated images across different vehicles; verify site renders full media and not an accidental thumbnail URL.
 - Next action: open PR and run full Worker/Cloudflare/Factory checks; inspect actual code/test results before any merge.
+
+
+## Strict published vehicle-photo filtering — 2026-11-12
+- Active branch: `fix/strict-published-photo-quality-2026-11-12`, based on commit `d921807d2c71d51493b3c6574bff4ad933a54515`.
+- Changed `catalogPhotoItems()`: published galleries now require known image dimensions meeting the existing 1280px longest-edge / 900,000-pixel threshold. Legacy Telegram photo renditions with missing dimensions are hidden rather than silently treated as verified.
+- Exception: image documents with an explicit safe image MIME type and file size >=120 KB remain eligible when dimensions are unavailable; Telegram document upload preserves uploaded bytes and is the preferred original-quality intake path.
+- Added regression coverage for low-resolution photos, unknown legacy renditions, retained large photos, original document uploads, and video continuity.
+- Important limitation: pixel dimensions and file size do not prove visual sharpness. This change filters undersized/unverifiable legacy renditions; it does not implement a blur detector. Human review of actual image content remains required.
+- No KV records were deleted or rewritten. No Cloudflare deployment, Telegram webhook change, secret change, or production mutation was performed.
+- Pending: run full test suite and security/build workflows on this exact branch; inspect CI results; visually verify image output in browser/mobile. Existing old photos hidden by the stricter filter need source-quality re-upload as Telegram FILE/DOCUMENT.
+- Next action: open a draft PR and verify CI before any merge or production release.
