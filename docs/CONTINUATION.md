@@ -248,3 +248,15 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
   5. In the panel, choose the specific vehicle/review. Edit all text or remove/replace a precise fragment; to hide one listing use unpublish/return-to-moderation. Photos are retained.
   6. Telegram fallback remains \`/site\` for the list and item-level edit/unpublish actions.
 - Never paste the one-time code into a group or share it. The panel session expires after 8 hours.
+
+
+## Homepage hero vehicle refresh — 2026-11-11
+- Active branch: `feat/homepage-car-hero-carousel-2026-11-11`, stacked on PR #64 branch `fix/car-listing-description-and-photo-quality-2026-11-11`. PR #64 remains open; this work does not merge it or deploy production.
+- Code change commit before this handoff note: `88df69e2172638e82713378baf29bb9d4ef5c8f5`.
+- Replaced the three generic/irrelevant hero backgrounds with current vehicle imagery for Kia Sportage 2026 (facelift / refreshed design), Kia K5 2026 GT-Line, and Toyota RAV4 2026 (new generation).
+- Hero now exposes the active model name, accessible image labels and model-specific dot labels. Images are preloaded after script initialization; manual arrows/dots remain available.
+- Autoplay advances every 5 seconds. Manual navigation restarts the interval; the timer pauses when the tab is hidden or the carousel receives keyboard focus, and respects `prefers-reduced-motion`.
+- Added a regression test asserting the three model names, model metadata, 5-second autoplay, and removal of the previous Unsplash placeholder cars.
+- Image sources currently use external image CDNs (CarExpert for Sportage, CarsCommerce dealer image for K5, WhichCar for RAV4); no image binaries were added to the repository. External-host availability, commercial image-use terms, and final browser rendering still require review before production.
+- Verification status at handoff: source-level diff and assertions inspected; exact-head CI and real browser/phone visual checks are pending. Do not merge or deploy without owner approval.
+- Next action: create a stacked PR against PR #64's branch, run syntax/full tests/security review, then report the evidence and outstanding image-host/legal checks.
