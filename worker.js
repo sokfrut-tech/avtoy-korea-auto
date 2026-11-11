@@ -1042,7 +1042,7 @@ async function sendChannelMedia(env, adminId, photos, videos, caption) {
  // Keep a stable numbered link between each admin preview and its car/moderation card.
  // Telegram limits media groups to 10 items; every item receives its own ordinal caption.
  const total = photos.length;
- const title = String(caption || "").split(/\\r?\\n/).map(line => line.trim()).find(Boolean) || "";
+ const title = String(caption || "").split(String.fromCharCode(10)).map(line => line.trim()).find(Boolean) || "";
  const photoLabel = (number, original=false) => {
   const marker = "Фото " + number + "/" + total + (original ? " · оригинал" : "");
   return (title ? marker + " · " + title : marker).slice(0, 1024);
