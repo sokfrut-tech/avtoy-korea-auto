@@ -1,3 +1,13 @@
+## 2026-11-11 — vehicle listing quality and description gate
+
+- Branch: `fix/car-listing-description-and-photo-quality-2026-11-11`
+- Base: `main` (worker.js source SHA `08d5140684295beb8c1b9fcb1f0999f7befeca43`).
+- Root causes: duplicate Telegram `PhotoSize` entries sharing `file_unique_id` kept the first, often thumbnail-sized rendition; car import accepted media-only posts; the public API exposed legacy cars with no description or photo; force-publish had no hard completeness gate.
+- Changes: keep the largest pixel-area / file-size rendition per stable media identity; require cleaned description plus photo for car import/publication; hide incomplete legacy records from the catalogue; normalize raw single-image PhotoSize arrays to the largest rendition.
+- Regression tests cover legacy filtering, full-resolution media retrieval, photo-only import rejection, and force-publish rejection.
+- Verification pending. No merge, production deployment, KV or Telegram webhook mutation performed.
+- Next: run Worker syntax/full tests, inspect CI, open PR; ask approval before merge/deploy.
+
 # AVTOY KOREA — continuation handoff
 
 Updated: 2026-10-31 15:20 UTC
