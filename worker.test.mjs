@@ -1851,8 +1851,9 @@ test("help button under the site list shows the admin help", async () => {
   await kv.put("approved:-1001234567890_12", JSON.stringify({ id: "-1001234567890_12", kind: "text", text: "Хорошо", name: "Анна", photos: [{ file_id: "R1" }], publishedAt: "2026-10-03T10:00:00Z" }));
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate({ message: { message_id: 802, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text: "/site" } }), reviewEnv(kv));
-    const list = calls.find(c => String(c.payload.text || "").startsWith("🌐 Сейчас на сайте"));
-    assert.ok(list.payload.reply_markup.inline_keyboard.some(row => row[0].callback_data === "adminhelp"), "list has the help button");
+    const list = calls.find(c => String(c.payload.text || "").startsWith("🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ"));
+    const tail = calls.find(c => c.payload.reply_markup?.inline_keyboard?.some(row => row[0].callback_data === "adminhelp"));
+    assert.ok(list && tail, "site feed ends with a dedicated help action");
   });
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate(callback(ADMIN, "adminhelp")), reviewEnv(kv));
@@ -1870,7 +1871,7 @@ test("buttons in the help run /site and show the help again, so admins need not 
   });
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate(callback(ADMIN, "admincmd:site")), reviewEnv(kv));
-    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 Сейчас на сайте: 1")), "button shows the site list");
+    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ")), "button shows the visual site feed");
   });
 });
 
