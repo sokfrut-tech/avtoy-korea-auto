@@ -1081,6 +1081,21 @@ async function uniquePhotoFilesByContent(items, env) {
  return output;
 }
 
+function carPhotoQualityNote(photos) {
+ const list = Array.isArray(photos) ? photos : [];
+ if (!list.length) return "⚠️ Нет фотографий автомобиля.";
+ const weak = list.map((photo, index) => ({ photo, index })).filter(({ photo }) => {
+  const width = Number(photo.width) || 0, height = Number(photo.height) || 0;
+  const known = width > 0 && height > 0;
+  return (known && (Math.max(width, height) < 1280 || width * height < 900000)) ||
+   (Number(photo.file_size) > 0 && Number(photo.file_size) < 120000);
+ });
+ const unknown = list.filter(photo => !(Number(photo.width) > 0 && Number(photo.height) > 0)).length;
+ if (!weak.length && !unknown) return "✅ Разрешение фото: проверка пройдена.";
+ if (weak.length) return "⚠️ Слабое разрешение: фото " + weak.map(item => item.index + 1).join(", ") + ". Запросите оригиналы как ФАЙЛ/ДОКУМЕНТ; не публикуйте размытые снимки.";
+ return "ℹ️ Разрешение части фото не удалось проверить. Для гарантии качества запросите оригиналы как ФАЙЛ/ДОКУМЕНТ.";
+}
+
 async function handleCarPost(post, env, adminIds) {
  const chat = post.chat || {};
  if (String(chat.username || "").toLowerCase() !== "avtoykorea") return;
@@ -1120,7 +1135,7 @@ async function handleCarPost(post, env, adminIds) {
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
   await sendChannelMedia(env, adminId, photos, videos, caption);
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 Один автомобиль из канала AVTOY KOREA\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 ОДИН АВТОМОБИЛЬ · " + (caption.split("\\n").find(line => line.trim()) || "Без названия").slice(0,90) + "\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n" + carPhotoQualityNote(photos) + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
  }));
 }
 
