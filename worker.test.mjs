@@ -2551,3 +2551,15 @@ test("vehicle catalogue hides failed media, skips to the next usable item and ke
   assert.match(html, /#cars h2\{color:#f4f6f9!important\}/);
   assert.match(html, /@media\(max-width:780px\)[\s\S]*?#cars \.cars\{grid-template-columns:minmax\(0,1fr\)/);
 });
+
+
+test("vehicle media detects video per item, prioritizes photos and skips broken media", async () => {
+  const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()))).text();
+  assert.match(html, /function isVideoMedia\(item\)/);
+  assert.match(html, /item\.mimeType\|\|item\.mime_type/);
+  assert.match(html, /mp4\|m4v\|mov\|webm\|ogv\|m3u8\|mpd/);
+  assert.match(html, /carItems\.sort\(function\(a,b\)\{return Number\(a\.video\)-Number\(b\.video\);\}\)/);
+  assert.match(html, /failedMedia\[index\]=true/);
+  assert.match(html, /if\(attempts>=carItems\.length\)gallery\.hidden=true/);
+  assert.match(html, /carItems\.length<2/);
+});
