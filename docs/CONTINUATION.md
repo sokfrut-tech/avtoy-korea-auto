@@ -305,3 +305,5 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - CI for the first numbered-preview test commit caught an invalid escaped slash in the new test's regular expression (the Worker code syntax check passed). Replaced that assertion with a literal `startsWith()` check. Exact-head CI rerun is pending; do not merge while checks are red.
 
 - Follow-up CI exposed that the initial channel-import preview call passed an empty caption, so the ordinal was present but the vehicle title was absent on the first admin preview. Updated it to pass the source post caption/text; this is the intended association fix, not a relaxed test. New exact-head CI pending.
+
+- Final review of the preview-label code found a multiline-caption edge case: the title extractor was splitting on a literal backslash sequence rather than line breaks. Replaced it with a newline-character split so the first non-empty vehicle-title line is used. New exact-head CI pending.
