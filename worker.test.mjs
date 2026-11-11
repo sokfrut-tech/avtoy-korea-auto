@@ -2260,14 +2260,15 @@ test("car catalogue exposes mixed photo and video media with separate playback U
 });
 
 
-test("published car catalogue hides known low-resolution photos but keeps sharp photos and video", async () => {
+test("published car catalogue hides low-resolution and unverified legacy photos but keeps large photos, uploaded originals and video", async () => {
  const kv = memoryKV();
  await kv.put("car_approved:car_100555_778", JSON.stringify({
   id:"car_100555_778",caption:"Kia Sportage 2026",
   photos:[
    {file_id:"BLURRY_640",file_unique_id:"BLURRY_640_U",width:640,height:480,file_size:45000},
-   {file_id:"SHARP_1600",file_unique_id:"SHARP_1600_U",width:1600,height:1200,file_size:350000},
-   {file_id:"UNKNOWN_SIZE",file_unique_id:"UNKNOWN_SIZE_U"}
+   {file_id:"LARGE_1600",file_unique_id:"LARGE_1600_U",width:1600,height:1200,file_size:350000},
+   {file_id:"UNKNOWN_SIZE",file_unique_id:"UNKNOWN_SIZE_U"},
+   {file_id:"ORIGINAL_DOCUMENT",file_unique_id:"ORIGINAL_DOCUMENT_U",mime_type:"image/jpeg",file_size:420000}
   ],
   videos:[{file_id:"WALKAROUND",file_unique_id:"WALKAROUND_U"}],
   publishedAt:"2026-11-11T10:00:00Z"
@@ -2281,6 +2282,10 @@ test("published car catalogue hides known low-resolution photos but keeps sharp 
   {url:"/api/car-media/car_100555_778/video/0",type:"video"}
  ]);
  assert.equal(car.mediaItems.some(item=>item.url.includes("BLURRY")),false);
+ // Unknown legacy photo renditions must not leak into the public gallery.
+ // The image/document upload path is retained because it preserves source bytes.
+ const unknownLegacy = car.mediaItems.find(item=>item.url.endsWith("/photo/1"));
+ assert.ok(unknownLegacy, "the original document is the second accepted photo");
 });
 
 test("car import removes byte-identical reuploads but keeps different angles", async () => {
