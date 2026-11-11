@@ -2005,13 +2005,16 @@ test("image asset sources exist and decode to expected binary sizes", () => {
   assert.equal(sportage.length, 16326);
 });
 
-test("homepage references externalized logo and Sportage asset", async () => {
+test("homepage references the externalized logo and all three current hero models", async () => {
   const response = await worker.fetch(new Request("https://worker.test/"), {});
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.ok(html.includes("/assets/logo.jpg"));
   assert.ok(!html.includes("data:image/jpeg;base64,"));
-  assert.ok(html.includes("/assets/kia-sportage.jpg"));
+  assert.ok(html.includes("data-model=\"Kia Sportage\""));
+  assert.ok(html.includes("data-model=\"Kia K5\""));
+  assert.ok(html.includes("data-model=\"Toyota RAV4\""));
+  assert.ok(!html.includes("/assets/kia-sportage.jpg"));
 });
 
 
