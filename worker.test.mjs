@@ -2572,6 +2572,6 @@ test("vehicle catalogue hides failed media, skips to the next usable item and ke
   assert.match(html, /gallery\.hidden=true/);
   assert.match(html, /#cars \.cars\{align-items:start;grid-auto-rows:max-content\}/);
   assert.match(html, /#cars \.car-card\{align-self:start;min-height:0;height:auto\}/);
-  assert.match(html, /#cars h2\{color:#f4f6f9!important\}/);
+  assert.match(html, /#cars h2,#cars \.car-card h3\{color:#f4f6f9!important\}/);
   assert.match(html, /@media\(max-width:780px\)[\s\S]*?#cars \.cars\{grid-template-columns:minmax\(0,1fr\)/);
 });
