@@ -1668,20 +1668,25 @@ const REVIEW_ID = "-1001234567890_12";
 const seedCar = (photos) => ({ id: CAR_ID, caption: "Kia K5 2021\nпробег 40 000 км", photos, videos: [], mediaType: "photo", sourceUrl: "https://t.me/avtoYkorea/1601", sourceDate: 1790000000, createdAt: "2026-10-01T10:00:00Z" });
 const photoReply = (text) => webhookUpdate({ message: { message_id: 9, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text, reply_to_message: { message_id: 8, chat: { id: ADMIN, type: "private" }, text: "✏️ РЕДАКТИРОВАНИЕ ОПИСАНИЕ АВТОМОБИЛЯ\n\nТЕКУЩИЙ ТЕКСТ:\nKia K5" } } });
 
-test("/site lists what is on the site for an admin and nothing for a client", async () => {
+test("/site sends separate visual admin cards with item-specific actions and stays private", async () => {
   const kv = memoryKV();
-  await kv.put("car_approved:" + CAR_ID, JSON.stringify({ ...seedCar([{ file_id: "A" }]), publishedAt: "2026-10-02T10:00:00Z" }));
-  await kv.put("approved:" + REVIEW_ID, JSON.stringify({ id: REVIEW_ID, kind: "text", text: "Всё быстро и честно", name: "Анна", photos: [{ file_id: "R1" }], publishedAt: "2026-10-03T10:00:00Z" }));
+  await kv.put("car_approved:" + CAR_ID, JSON.stringify({ ...seedCar([{ file_id: "CAR-COVER", file_unique_id: "CAR-COVER-U" }, { file_id: "CAR-2", file_unique_id: "CAR-2-U" }]), publishedAt: "2026-10-02T10:00:00Z" }));
+  await kv.put("approved:" + REVIEW_ID, JSON.stringify({ id: REVIEW_ID, kind: "text", text: "Всё быстро и честно", name: "Анна", photos: [{ file_id: "REVIEW-COVER", file_unique_id: "REVIEW-COVER-U" }], publishedAt: "2026-10-03T10:00:00Z" }));
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate({ message: { message_id: 20, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text: "/site" } }), reviewEnv(kv));
-    const list = calls.find(c => c.payload.text && c.payload.text.startsWith("🌐 Сейчас на сайте: 2"));
-    assert.ok(list, "admin gets the list with two items");
-    const buttons = list.payload.reply_markup.inline_keyboard.flat().map(button => button.callback_data);
-    assert.ok(buttons.includes("sitedel:" + CAR_ID) && buttons.includes("sitedel:" + REVIEW_ID), "each item has a remove button");
+    const summary = calls.find(c => c.payload.text && c.payload.text.startsWith("🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ"));
+    assert.ok(summary && summary.payload.text.includes("Автомобилей: 1") && summary.payload.text.includes("Отзывов: 1"));
+    const carCard = calls.find(c => c.method === "sendPhoto" && c.payload.photo === "CAR-COVER");
+    const reviewCard = calls.find(c => c.method === "sendPhoto" && c.payload.photo === "REVIEW-COVER");
+    assert.ok(carCard && reviewCard, "each published item has its own cover-photo card");
+    assert.ok(carCard.payload.caption.includes("АВТОМОБИЛЬ") && carCard.payload.reply_markup.inline_keyboard[0][0].callback_data === "siteedit:" + CAR_ID);
+    assert.equal(carCard.payload.reply_markup.inline_keyboard[0][1].callback_data, "sitedel:" + CAR_ID);
+    assert.equal(reviewCard.payload.reply_markup.inline_keyboard[0][0].callback_data, "siteedit:" + REVIEW_ID);
+    assert.ok(calls.some(c => c.method === "sendMediaGroup" && c.payload.media.some(m => m.media === "CAR-2")), "additional car photos remain grouped after the cover");
   });
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate({ message: { message_id: 21, chat: { id: 333333333, type: "private" }, from: { id: 333333333 }, text: "/site" } }), reviewEnv(kv));
-    assert.equal(calls.some(c => String(c.payload.text || "").includes("Сейчас на сайте")), false, "client never sees the site list");
+    assert.equal(calls.some(c => String(c.payload.text || "").includes("УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ")), false, "client never sees the site list");
   });
 });
 
