@@ -2483,3 +2483,12 @@ test("web admin APIs reject unauthenticated access and missing same-origin prote
   }), reviewEnv(kv));
   assert.equal(csrf.status, 403);
 });
+
+
+test("review cards show customer photos and videos without review text", async () => {
+  const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()))).text();
+  assert.match(html, /el\.controls=true;el\.playsInline=true/);
+  assert.match(html, /review-gallery-image/);
+  assert.doesNotMatch(html, /text\.textContent=rv\.text/);
+  assert.doesNotMatch(html, /who\.textContent='Клиент'/);
+});
