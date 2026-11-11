@@ -267,3 +267,13 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Factory Security Baseline run `42999992348`: Secret scanning success; CodeQL static analysis was still in progress at the time of this handoff.
 - PR deployment workflow run `42999992398`: job succeeded, but both Cloudflare secret verification and actual production deployment steps were skipped because this is a pull request. Production remains unchanged.
 - Still outstanding: CodeQL final result, real browser/phone visual smoke test, and review of external image-host stability and image-use permissions. Do not describe the production site as updated until a separately approved merge and successful Cloudflare production deployment.
+
+
+## Vehicle media quality and visual admin cards — 2026-11-11
+- Active branch: `feat/vehicle-media-quality-and-visual-admin-2026-11-11`, based on `main` after production deployment of PR #70.
+- Implemented `/site` as a visual per-publication admin feed: each published car/review gets its own cover-photo message, clear type/position/title, item-specific edit/remove inline buttons, and remaining photos in a separate grouped continuation. Summary separates car and review counts. Customer privacy gate remains unchanged.
+- Added vehicle-upload quality feedback before publication. Known low-resolution/small images are flagged by their Telegram width/height/file_size metadata and admins are instructed to request the original as a FILE/DOCUMENT. Media is retained for review; the bot does not silently delete it based on a heuristic.
+- Added regression coverage for separate visual cards, correct item-specific buttons, preserving additional photos, client privacy, and low-resolution warning behavior.
+- Source-level work is committed on the feature branch. Exact-head CI, runtime Telegram round-trip, real photo fidelity, and phone visual verification are pending. Do not merge or deploy without explicit owner approval.
+- Remaining media-quality investigation: trace actual published car image URL/rendition end-to-end; distinguish Telegram-compressed photo uploads from source images that were already blurry; implement duplicate suppression at the vehicle-post scope without deleting intentional repeated images across different vehicles; verify site renders full media and not an accidental thumbnail URL.
+- Next action: open PR and run full Worker/Cloudflare/Factory checks; inspect actual code/test results before any merge.

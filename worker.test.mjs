@@ -1668,20 +1668,25 @@ const REVIEW_ID = "-1001234567890_12";
 const seedCar = (photos) => ({ id: CAR_ID, caption: "Kia K5 2021\nпробег 40 000 км", photos, videos: [], mediaType: "photo", sourceUrl: "https://t.me/avtoYkorea/1601", sourceDate: 1790000000, createdAt: "2026-10-01T10:00:00Z" });
 const photoReply = (text) => webhookUpdate({ message: { message_id: 9, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text, reply_to_message: { message_id: 8, chat: { id: ADMIN, type: "private" }, text: "✏️ РЕДАКТИРОВАНИЕ ОПИСАНИЕ АВТОМОБИЛЯ\n\nТЕКУЩИЙ ТЕКСТ:\nKia K5" } } });
 
-test("/site lists what is on the site for an admin and nothing for a client", async () => {
+test("/site sends separate visual admin cards with item-specific actions and stays private", async () => {
   const kv = memoryKV();
-  await kv.put("car_approved:" + CAR_ID, JSON.stringify({ ...seedCar([{ file_id: "A" }]), publishedAt: "2026-10-02T10:00:00Z" }));
-  await kv.put("approved:" + REVIEW_ID, JSON.stringify({ id: REVIEW_ID, kind: "text", text: "Всё быстро и честно", name: "Анна", photos: [{ file_id: "R1" }], publishedAt: "2026-10-03T10:00:00Z" }));
+  await kv.put("car_approved:" + CAR_ID, JSON.stringify({ ...seedCar([{ file_id: "CAR-COVER", file_unique_id: "CAR-COVER-U" }, { file_id: "CAR-2", file_unique_id: "CAR-2-U" }]), publishedAt: "2026-10-02T10:00:00Z" }));
+  await kv.put("approved:" + REVIEW_ID, JSON.stringify({ id: REVIEW_ID, kind: "text", text: "Всё быстро и честно", name: "Анна", photos: [{ file_id: "REVIEW-COVER", file_unique_id: "REVIEW-COVER-U" }], publishedAt: "2026-10-03T10:00:00Z" }));
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate({ message: { message_id: 20, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text: "/site" } }), reviewEnv(kv));
-    const list = calls.find(c => c.payload.text && c.payload.text.startsWith("🌐 Сейчас на сайте: 2"));
-    assert.ok(list, "admin gets the list with two items");
-    const buttons = list.payload.reply_markup.inline_keyboard.flat().map(button => button.callback_data);
-    assert.ok(buttons.includes("sitedel:" + CAR_ID) && buttons.includes("sitedel:" + REVIEW_ID), "each item has a remove button");
+    const summary = calls.find(c => c.payload.text && c.payload.text.startsWith("🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ"));
+    assert.ok(summary && summary.payload.text.includes("Автомобилей: 1") && summary.payload.text.includes("Отзывов: 1"));
+    const carCard = calls.find(c => c.method === "sendPhoto" && c.payload.photo === "CAR-COVER");
+    const reviewCard = calls.find(c => c.method === "sendPhoto" && c.payload.photo === "REVIEW-COVER");
+    assert.ok(carCard && reviewCard, "each published item has its own cover-photo card");
+    assert.ok(carCard.payload.caption.includes("АВТОМОБИЛЬ") && carCard.payload.reply_markup.inline_keyboard[0][0].callback_data === "siteedit:" + CAR_ID);
+    assert.equal(carCard.payload.reply_markup.inline_keyboard[0][1].callback_data, "sitedel:" + CAR_ID);
+    assert.equal(reviewCard.payload.reply_markup.inline_keyboard[0][0].callback_data, "siteedit:" + REVIEW_ID);
+    assert.ok(calls.some(c => c.method === "sendPhoto" && c.payload.photo === "CAR-2"), "additional car photos remain next to their cover card");
   });
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate({ message: { message_id: 21, chat: { id: 333333333, type: "private" }, from: { id: 333333333 }, text: "/site" } }), reviewEnv(kv));
-    assert.equal(calls.some(c => String(c.payload.text || "").includes("Сейчас на сайте")), false, "client never sees the site list");
+    assert.equal(calls.some(c => String(c.payload.text || "").includes("УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ")), false, "client never sees the site list");
   });
 });
 
@@ -1811,7 +1816,7 @@ test("end to end: admin uploads via bot, edits photos, publishes, removes from s
 
     // 4. /site lists it, and removal through the bot returns it to waiting
     await worker.fetch(webhookUpdate({ message: { message_id: 720, chat: adminChat, from, text: "/site" } }), reviewEnv(kv));
-    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 Сейчас на сайте: 1")), "/site shows it");
+    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ")), "/site shows the visual feed");
     await worker.fetch(webhookUpdate(callback(ADMIN, "sitedelok:" + id)), reviewEnv(kv));
     const site2 = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
     assert.equal(site2.reviews.length, 0, "removed from the site");
@@ -1846,8 +1851,9 @@ test("help button under the site list shows the admin help", async () => {
   await kv.put("approved:-1001234567890_12", JSON.stringify({ id: "-1001234567890_12", kind: "text", text: "Хорошо", name: "Анна", photos: [{ file_id: "R1" }], publishedAt: "2026-10-03T10:00:00Z" }));
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate({ message: { message_id: 802, chat: { id: ADMIN, type: "private" }, from: { id: ADMIN }, text: "/site" } }), reviewEnv(kv));
-    const list = calls.find(c => String(c.payload.text || "").startsWith("🌐 Сейчас на сайте"));
-    assert.ok(list.payload.reply_markup.inline_keyboard.some(row => row[0].callback_data === "adminhelp"), "list has the help button");
+    const list = calls.find(c => String(c.payload.text || "").startsWith("🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ"));
+    const tail = calls.find(c => c.payload.reply_markup?.inline_keyboard?.some(row => row[0].callback_data === "adminhelp"));
+    assert.ok(list && tail, "site feed ends with a dedicated help action");
   });
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate(callback(ADMIN, "adminhelp")), reviewEnv(kv));
@@ -1865,7 +1871,7 @@ test("buttons in the help run /site and show the help again, so admins need not 
   });
   await withTelegramMock(async calls => {
     await worker.fetch(webhookUpdate(callback(ADMIN, "admincmd:site")), reviewEnv(kv));
-    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 Сейчас на сайте: 1")), "button shows the site list");
+    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ")), "button shows the visual site feed");
   });
 });
 
@@ -2254,6 +2260,29 @@ test("car catalogue exposes mixed photo and video media with separate playback U
 });
 
 
+test("published car catalogue hides known low-resolution photos but keeps sharp photos and video", async () => {
+ const kv = memoryKV();
+ await kv.put("car_approved:car_100555_778", JSON.stringify({
+  id:"car_100555_778",caption:"Kia Sportage 2026",
+  photos:[
+   {file_id:"BLURRY_640",file_unique_id:"BLURRY_640_U",width:640,height:480,file_size:45000},
+   {file_id:"SHARP_1600",file_unique_id:"SHARP_1600_U",width:1600,height:1200,file_size:350000},
+   {file_id:"UNKNOWN_SIZE",file_unique_id:"UNKNOWN_SIZE_U"}
+  ],
+  videos:[{file_id:"WALKAROUND",file_unique_id:"WALKAROUND_U"}],
+  publishedAt:"2026-11-11T10:00:00Z"
+ }));
+ const response=await worker.fetch(new Request("https://worker.test/api/cars"),reviewEnv(kv));
+ const body=await response.json();
+ const car=body.cars.find(item=>item.id==="car_100555_778");
+ assert.deepEqual(car.mediaItems,[
+  {url:"/api/car-media/car_100555_778/photo/0",type:"photo"},
+  {url:"/api/car-media/car_100555_778/photo/1",type:"photo"},
+  {url:"/api/car-media/car_100555_778/video/0",type:"video"}
+ ]);
+ assert.equal(car.mediaItems.some(item=>item.url.includes("BLURRY")),false);
+});
+
 test("car import removes byte-identical reuploads but keeps different angles", async () => {
   const kv = memoryKV();
   const originalFetch = globalThis.fetch;
@@ -2299,6 +2328,23 @@ test("car import removes byte-identical reuploads but keeps different angles", a
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("car moderation warns about low-resolution photos without silently discarding them", async () => {
+ const kv = memoryKV();
+ await kv.put("import_pending:-100555_603", JSON.stringify({
+  chat: { id: -100555, username: "avtoYkorea" }, message_id: 603, sourceDate: 1790000000,
+  caption: "Kia Sportage 2026",
+  photo: [{ file_id: "BLURRY", file_unique_id: "BLURRY-U", width: 640, height: 480, file_size: 45000 }]
+ }));
+ await withTelegramMock(async calls => {
+  await worker.fetch(webhookUpdate(callback(ADMIN, "imp:car:-100555_603")), reviewEnv(kv));
+  const car = JSON.parse(await kv.get("car_pending:car_100555_603"));
+  assert.equal(car.photos.length, 1, "quality warning does not silently destroy source media");
+  const card = calls.find(c => c.method === "sendMessage" && String(c.payload.text || "").includes("ОДИН АВТОМОБИЛЬ"));
+  assert.ok(card && card.payload.text.includes("Слабое разрешение: фото 1"));
+  assert.ok(card.payload.text.includes("ФАЙЛ/ДОКУМЕНТ"), "admin gets the original-quality upload instruction");
+ });
 });
 
 test("car import keeps a photo when Telegram content verification fails", async () => {
@@ -2370,7 +2416,7 @@ test("admin can edit the text of one published car from the /site list without c
       from: { id: 111111111, first_name: "Admin" },
       text: "/site",
     }}), reviewEnv(kv));
-    const siteList = calls.find(call => call.method === "sendMessage" &&
+    const siteList = calls.find(call => call.method === "sendPhoto" && call.payload.photo === "PHOTO_KEEP" &&
       call.payload.reply_markup?.inline_keyboard?.flat().some(button => button.callback_data === "siteedit:" + id));
     assert.ok(siteList, "published item has a dedicated edit action");
     await worker.fetch(webhookUpdate(callback(111111111, "siteedit:" + id)), reviewEnv(kv));

@@ -177,20 +177,51 @@ async function showSiteList(chatId, env) {
  if (!env.REVIEWS) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "Хранилище не настроено." });
  const cars = await env.REVIEWS.list({ prefix: "car_approved:" });
  const reviews = await env.REVIEWS.list({ prefix: "approved:" });
+ const entries = [...cars.keys.map(key => ({ key, type: "car" })), ...reviews.keys.map(key => ({ key, type: "review" }))];
  const items = [];
- for (const key of [...cars.keys, ...reviews.keys]) {
-  const raw = await env.REVIEWS.get(key.name);
+ for (const entry of entries) {
+  const raw = await env.REVIEWS.get(entry.key.name);
   if (!raw) continue;
-  const id = key.name.replace(/^(car_approved|approved):/, "");
-  items.push({ id, label: siteLabel(id, JSON.parse(raw)) });
+  const id = entry.key.name.replace(/^(car_approved|approved):/, "");
+  const record = JSON.parse(raw);
+  const photos = entry.type === "car" ? postPhotos(record) : uniqueFileItems(Array.isArray(record.photos) && record.photos.length ? record.photos : (record.fileId && record.kind !== "video" ? [{ file_id: record.fileId }] : []));
+  const videos = entry.type === "car" ? postVideos(record) : uniqueFileItems(Array.isArray(record.videos) ? record.videos : (record.kind === "video" && record.fileId ? [{ file_id: record.fileId }] : []));
+  items.push({ id, record, photos, videos, label: siteLabel(id, record), type: entry.type });
  }
  if (!items.length) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "На сайте сейчас ничего не опубликовано." });
- const shown = items.slice(0, 30);
- const text = "🌐 Сейчас на сайте: " + items.length + "\n\n" + shown.map((item, index) => (index + 1) + ". " + item.label).join("\n") + (items.length > shown.length ? "\n\nПоказаны первые " + shown.length + "." : "");
- const keyboard = { inline_keyboard: [...shown.flatMap(item => [
-  [{ text: "✏️ Изменить текст", callback_data: "siteedit:" + item.id }, { text: "🗑 Снять с сайта", callback_data: "sitedel:" + item.id }]
- ]), [{ text: "❓ Подсказка", callback_data: "adminhelp" }]] };
- return callTelegram(env, "sendMessage", { chat_id: chatId, text, reply_markup: keyboard });
+ const carsCount = items.filter(item => item.type === "car").length;
+ const reviewsCount = items.length - carsCount;
+ await callTelegram(env, "sendMessage", {
+  chat_id: chatId,
+  text: "🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ\n\n🚘 Автомобилей: " + carsCount + "\n⭐ Отзывов: " + reviewsCount + "\n\nНиже — отдельные карточки. Фото, название и кнопки относятся только к одной публикации."
+ });
+ for (let index = 0; index < items.length; index++) {
+  const item = items[index];
+  const title = (item.type === "car" ? "🚘 АВТОМОБИЛЬ" : "⭐ ОТЗЫВ") + " · " + (index + 1) + "/" + items.length;
+  const details = title + "\n" + item.label + "\n\nФото: " + item.photos.length + " · Видео: " + item.videos.length;
+  const keyboard = { inline_keyboard: [[
+   { text: "✏️ Изменить описание", callback_data: "siteedit:" + item.id },
+   { text: "🗑 Снять с сайта", callback_data: "sitedel:" + item.id }
+  ]] };
+  const cover = item.photos[0];
+  if (cover && cover.file_id) {
+   await callTelegram(env, "sendPhoto", {
+    chat_id: chatId, photo: cover.file_id, caption: details.slice(0, 1024), reply_markup: keyboard
+   });
+   const rest = item.photos.slice(1);
+   for (let offset = 0; offset < rest.length; offset += 10) {
+    const chunk = rest.slice(offset, offset + 10);
+    if (chunk.length > 1) await callTelegram(env, "sendMediaGroup", {
+     chat_id: chatId,
+     media: chunk.map(photo => ({ type: "photo", media: photo.file_id }))
+    });
+    else if (chunk.length === 1) await callTelegram(env, "sendPhoto", { chat_id: chatId, photo: chunk[0].file_id, caption: "Дополнительное фото · " + (offset + 2) });
+   }
+  } else {
+   await callTelegram(env, "sendMessage", { chat_id: chatId, text: details + (item.videos.length ? "\nВидео приложено" : "\n⚠️ Нет фотографии"), reply_markup: keyboard });
+  }
+ }
+ return callTelegram(env, "sendMessage", { chat_id: chatId, text: "Готово. Нажимайте кнопки только под карточкой нужного автомобиля или отзыва.", reply_markup: { inline_keyboard: [[{ text: "❓ Подсказка администратора", callback_data: "adminhelp" }]] } });
 }
 
 async function sendPendingCarCard(env, adminIds, car, id, lead) {
@@ -979,6 +1010,17 @@ function postPhotos(post) {
  return uniqueFileItems([...items, ...(documentPhoto ? [documentPhoto] : [])]);
 }
 
+// Hide clearly undersized photo renditions from published vehicle galleries.
+// Unknown dimensions remain visible pending manual review.
+function catalogPhotoItems(car) {
+ const source = Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []);
+ return uniqueFileItems(source).filter(photo => {
+  const width = Number(photo.width) || 0, height = Number(photo.height) || 0;
+  if (!width || !height) return true;
+  return Math.max(width, height) >= 1280 && width * height >= 900000;
+ });
+}
+
 function postVideos(post) {
  if (Array.isArray(post.videos) && post.videos.length) return uniqueFileItems(post.videos);
  return uniqueFileItems(post.video && post.video.file_id ? [post.video] : []);
@@ -1050,6 +1092,21 @@ async function uniquePhotoFilesByContent(items, env) {
  return output;
 }
 
+function carPhotoQualityNote(photos) {
+ const list = Array.isArray(photos) ? photos : [];
+ if (!list.length) return "⚠️ Нет фотографий автомобиля.";
+ const weak = list.map((photo, index) => ({ photo, index })).filter(({ photo }) => {
+  const width = Number(photo.width) || 0, height = Number(photo.height) || 0;
+  const known = width > 0 && height > 0;
+  return (known && (Math.max(width, height) < 1280 || width * height < 900000)) ||
+   (Number(photo.file_size) > 0 && Number(photo.file_size) < 120000);
+ });
+ const unknown = list.filter(photo => !(Number(photo.width) > 0 && Number(photo.height) > 0)).length;
+ if (!weak.length && !unknown) return "✅ Разрешение фото: проверка пройдена.";
+ if (weak.length) return "⚠️ Слабое разрешение: фото " + weak.map(item => item.index + 1).join(", ") + ". Запросите оригиналы как ФАЙЛ/ДОКУМЕНТ; не публикуйте размытые снимки.";
+ return "ℹ️ Разрешение части фото не удалось проверить. Для гарантии качества запросите оригиналы как ФАЙЛ/ДОКУМЕНТ.";
+}
+
 async function handleCarPost(post, env, adminIds) {
  const chat = post.chat || {};
  if (String(chat.username || "").toLowerCase() !== "avtoykorea") return;
@@ -1089,7 +1146,7 @@ async function handleCarPost(post, env, adminIds) {
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
   await sendChannelMedia(env, adminId, photos, videos, caption);
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 Один автомобиль из канала AVTOY KOREA\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 ОДИН АВТОМОБИЛЬ · " + (caption.split(String.fromCharCode(10)).find(line => line.trim()) || "Без названия").slice(0,90) + "\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n" + carPhotoQualityNote(photos) + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
  }));
 }
 
@@ -1942,7 +1999,7 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : [])); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))]; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = catalogPhotoItems(car); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))]; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
@@ -1955,7 +2012,7 @@ export default {
    if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found",{status:404});
    const raw = await env.REVIEWS.get("car_approved:" + carMediaMatch[1]); if (!raw) return new Response("Not found",{status:404});
    const car = JSON.parse(raw); const mediaType = carMediaMatch[2] || (car.mediaType === "video" ? "video" : "photo"); const index = Number(carMediaMatch[3] || carMediaMatch[4] || 0);
-   const photos = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []));
+   const photos = catalogPhotoItems(car);
    const videos = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : []));
    const selected = (mediaType === "video" ? videos : photos)[index]; const fileId = selected && selected.file_id ? selected.file_id : null;
    if (!fileId) return new Response("Not found",{status:404});
