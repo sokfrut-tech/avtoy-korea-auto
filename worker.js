@@ -2517,6 +2517,23 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
  .nav-telegram small{font-size:9px}
  .get ul{grid-template-columns:1fr}
 }
+
+/* Mobile catalogue hardening: readable title, compact cards and no stretched grid rows */
+#cars h2{color:#f4f6f9!important}
+#cars .cars{align-items:start;grid-auto-rows:max-content}
+#cars .car-card{align-self:start;min-height:0;height:auto}
+#cars .car-card .car-gallery{width:100%;min-height:0;aspect-ratio:16/10;overflow:hidden;border-radius:15px;background:#090e16}
+#cars .car-gallery-stage{position:relative;width:100%;height:100%;min-height:0;aspect-ratio:16/10;overflow:hidden}
+#cars .car-gallery-main{display:block;width:100%;height:100%;min-height:0;aspect-ratio:16/10;object-fit:cover;background:#090e16}
+#cars .car-card .car-description{margin-bottom:12px}
+@media(max-width:780px){
+ #cars .cars{grid-template-columns:minmax(0,1fr);gap:14px;align-items:start}
+ #cars .car-card{width:100%;height:auto;min-height:0}
+ #cars .car-card .car-gallery{aspect-ratio:16/10;min-height:0;margin:0 0 12px}
+ #cars .car-gallery-stage{aspect-ratio:16/10;min-height:0}
+ #cars .car-gallery-main{aspect-ratio:16/10;min-height:0}
+ #cars h2{color:#f4f6f9!important;font-size:clamp(24px,6vw,30px);line-height:1.2}
+}
 </style>
 </head>
 <body>
@@ -2876,7 +2893,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
    var gallery=document.createElement('div'); gallery.className='car-gallery';
    var carItems=media.map(function(item){return typeof item==='string'?{url:item,video:isVideo}:{url:item.url,video:item.type==='video'};});
    var stage=document.createElement('div'); stage.className='car-gallery-stage';
-   function createCarMedia(item,index){var el=document.createElement(item.video?'video':'img');el.className='car-gallery-main';el.src=item.url;if(item.video){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео автомобиля '+(index+1));}else{el.alt='Фотография автомобиля '+(index+1);el.loading='lazy';}return el;}
+   function createCarMedia(item,index){var el=document.createElement(item.video?'video':'img');el.className='car-gallery-main';el.src=item.url;if(item.video){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео автомобиля '+(index+1));}else{el.alt='Фотография автомобиля '+(index+1);el.loading='lazy';}el.addEventListener('error',function(){gallery.hidden=true;},{once:true});return el;}
    var current=createCarMedia(carItems[0],0);
    stage.appendChild(current); gallery.appendChild(stage);
    var photoIndex=0;
