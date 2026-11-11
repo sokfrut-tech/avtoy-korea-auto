@@ -972,7 +972,7 @@ function uniqueFileItems(list) {
   if (previousIndex === undefined) { positions.set(key, out.length); out.push({ item: photoItemFrom(raw), area, bytes }); continue; }
   const previous = out[previousIndex];
   // Same file_unique_id means rendition variants of one image: retain the best.
-  if (area > previous.area || (area === previous.area && bytes >= previous.bytes)) out[previousIndex] = { item: photoItemFrom(raw), area, bytes };
+  if (area > previous.area || (area === previous.area && bytes > previous.bytes)) out[previousIndex] = { item: photoItemFrom(raw), area, bytes };
  }
  return out.map(entry => entry.item);
 }
