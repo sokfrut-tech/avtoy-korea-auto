@@ -2817,7 +2817,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
    var lower=original.toLowerCase();
    for(var i=0;i<trims.length;i++){
     var trim=trims[i], suffix=trim.toLowerCase(), offset=original.length-suffix.length;
-    if(offset>0&&lower.slice(offset)===suffix&&/[\\s|·—–-]/.test(original.charAt(offset-1))){
+    if(offset>0&&lower.slice(offset)===suffix&&/[\s|·—–-]/.test(original.charAt(offset-1))){
      var model=original.slice(0,offset).trim().replace(/[|·—–-]+$/,'').trim();
      if(model)return {model:model,trim:trim.toUpperCase(),raw:original};
     }
