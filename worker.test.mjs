@@ -2502,8 +2502,8 @@ test("vehicle descriptions use one safe semantic format and responsive Google Fo
   assert.ok(html.includes("car-description-list"));
   assert.ok(html.includes("car-description-heading"));
   assert.ok(html.includes("function renderCarDescription(root, rawCaption, titleText)"));
-  assert.ok(html.includes("label.textContent=pair[1].trim()"));
-  assert.ok(html.includes("value.textContent=pair[2].trim()"));
+  assert.ok(html.includes("label.textContent=line.slice(0,colon).trim()"));
+  assert.ok(html.includes("value.textContent=line.slice(colon+1).trim()"));
   assert.ok(html.includes("#cars .car-description-row{grid-template-columns:1fr"));
   assert.ok(!html.includes("description.innerHTML"), "description formatter must use safe text nodes");
 });
