@@ -978,8 +978,14 @@ function uniqueFileItems(list) {
 }
 
 function postPhotos(post) {
+ const rawPhoto = Array.isArray(post.photo) ? post.photo : [];
+ const uniquePhotoIds = new Set(rawPhoto.map(item => item && item.file_unique_id).filter(Boolean));
+ const containsDistinctAlbumPhotos = uniquePhotoIds.size > 1;
+ // "photos" is the normalized album representation. A raw Telegram "photo"
+ // array normally contains multiple sizes of one image; only preserve it as a
+ // gallery when album identity or distinct file_unique_ids prove that.
  const items = Array.isArray(post.photos) ? post.photos
-  : (Array.isArray(post.photo) ? (post.media_group_id || post.albumId ? post.photo : largestPhotoOf(post.photo)) : []);
+  : (rawPhoto.length ? (post.media_group_id || post.albumId || containsDistinctAlbumPhotos ? rawPhoto : largestPhotoOf(rawPhoto)) : []);
  const documentPhoto = imageDocumentItemFrom(post.document);
  return uniqueFileItems([...items, ...(documentPhoto ? [documentPhoto] : [])]);
 }
