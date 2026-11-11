@@ -290,3 +290,8 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Next action: open a draft PR and verify CI before any merge or production release.
 
 - First CI run on the initial patch exposed two stale fixtures that represented Telegram PhotoSize objects without the width/height/file_size metadata Telegram supplies. The strict filter correctly hid them; updated those fixtures to use realistic 1600x1200 Telegram photo metadata. The new strict-filter regression test passed in that run; full suite rerun is pending on the updated head.
+
+- Exact code/test revision `24776e44f418be91be50874ea8ef49a3eb403fc8`: Worker tests passed; Cloudflare Worker checks passed; Factory Review functional/regression tests passed; Factory Review security/privacy tests passed. The earlier failures were limited to two legacy test fixtures missing Telegram PhotoSize metadata and were corrected.
+- Deploy workflow on that PR revision completed its test job successfully; Cloudflare secret verification and the actual Worker deployment steps were skipped because this was a PR. No production deployment occurred.
+- Factory Review Director / release evidence was still archiving its handoff artifact at the time of this update.
+- A documentation-only continuation update followed at `9a25d6922c126117f5660a35525397c2731ed526`; no Worker or test source changed after the passing code/test revision.
