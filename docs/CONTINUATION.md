@@ -257,3 +257,13 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Second CI pass parsed successfully and ran 134 tests; 133 passed and one pre-existing homepage asset assertion failed because it still required the old `/assets/kia-sportage.jpg` background.
 - Updated that assertion to retain the logo check while verifying the three new model identifiers and ensuring the obsolete Sportage asset path is no longer used. Change commit: `8127f79f2d981683a505d2a15e90b82a1bfff159`.
 - This was a stale expectation caused by the intentional hero-image replacement, not a runtime syntax or carousel failure. New exact-head CI is pending.
+
+
+## Latest verification evidence — 2026-11-11
+- Current PR #66 head: `33ed2209dc4300bcf095d197ff119708c79e4f52`.
+- Worker tests run `42999992309`: success, **134/134 passed**.
+- Cloudflare Worker checks run `42999992338`: success.
+- Factory Review run `42999992778`: Functional / regression tests, Security / privacy regression tests, and Director / release evidence all success.
+- Factory Security Baseline run `42999992348`: Secret scanning success; CodeQL static analysis was still in progress at the time of this handoff.
+- PR deployment workflow run `42999992398`: job succeeded, but both Cloudflare secret verification and actual production deployment steps were skipped because this is a pull request. Production remains unchanged.
+- Still outstanding: CodeQL final result, real browser/phone visual smoke test, and review of external image-host stability and image-use permissions. Do not describe the production site as updated until a separately approved merge and successful Cloudflare production deployment.
