@@ -2249,7 +2249,7 @@ test("car catalogue exposes mixed photo and video media with separate playback U
   ]);
   const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(kv))).text();
   assert.ok(html.includes("max-height:none;min-height:220px"), "mobile gallery is no longer restricted to a short preview");
-  assert.ok(html.includes("item.type==='video'"), "each gallery item keeps its own media type");
+  assert.ok(html.includes("item.type||item.mimeType||item.mime_type"), "each gallery item keeps its own media type");
   assert.ok(html.includes("createCarMedia"), "gallery creates photo and video elements per item");
 });
 
