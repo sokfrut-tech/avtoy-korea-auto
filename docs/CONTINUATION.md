@@ -301,3 +301,5 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Added regression assertions for a three-photo forwarded vehicle album and an image-document original upload.
 - This improves association between admin preview images and the vehicle moderation card. It does not alter stored source `file_id` values or the website gallery.
 - Pending: exact-head CI for the new code/test revision; then inspect PR review and decide merge only after all required checks are green.
+
+- CI for the first numbered-preview test commit caught an invalid escaped slash in the new test's regular expression (the Worker code syntax check passed). Replaced that assertion with a literal `startsWith()` check. Exact-head CI rerun is pending; do not merge while checks are red.
