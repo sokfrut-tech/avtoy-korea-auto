@@ -2370,6 +2370,9 @@ body{background:#f5f7fa;color:#111827;font-family:Inter,Arial,sans-serif}
 .hero-standard .btn{margin-top:26px;border-radius:28px;padding:16px 30px;min-width:210px}
 .hero-standard .hero-dots{position:static;margin:36px 0 0 44%;display:flex;gap:12px}
 .hero-standard .hero-dot{border:0;padding:0;width:10px;height:10px;cursor:pointer}
+.hero-model-name{position:absolute;z-index:3;right:78px;bottom:27px;padding:9px 15px;border:1px solid #ffffff35;border-radius:30px;background:#071321b8;color:#fff;font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;backdrop-filter:blur(8px)}
+.hero-standard .hero-slide{background-color:#101923;background-size:cover;background-position:center 55%}
+@media(max-width:780px){.hero-model-name{right:54px;bottom:25px;padding:7px 11px;font-size:10px;letter-spacing:.08em}}
 .hero-standard .hero-dot.active{background:var(--red)}
 .hero-arrow{position:absolute;z-index:3;top:48%;width:42px;height:42px;border:0;border-radius:50%;background:#07132199;color:#fff;font-size:30px;cursor:pointer}
 .hero-prev{left:20px}.hero-next{right:20px}
@@ -2518,9 +2521,9 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
 <main>
 <section class="hero-standard">
   <div class="hero-standard-bg">
-    <div class="hero-slide active" style="background-image:url('/assets/kia-sportage.jpg')"></div>
-    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=2000&q=90')"></div>
-    <div class="hero-slide" style="background-image:url('https://images.unsplash.com/photo-1552519507-da3b142c6e3d?auto=format&fit=crop&w=2000&q=90')"></div>
+    <div class="hero-slide active" role="img" aria-label="Kia Sportage 2026, обновлённое поколение" data-model="Kia Sportage" style="background-image:url('https://images.carexpert.com.au/resize/1920/-/cms/v1/media/2025-11-2026-250924kia-sportage-sxstill-7.jpg')"></div>
+    <div class="hero-slide" role="img" aria-label="Kia K5 2026 GT-Line" data-model="Kia K5" style="background-image:url('https://vehicle-images.carscommerce.inc/c296-18004034/KNAG64J7XT5407697/f77dca20312f1d8e2fc1db6f7841acfb.jpg')"></div>
+    <div class="hero-slide" role="img" aria-label="Toyota RAV4 2026, новое поколение" data-model="Toyota RAV4" style="background-image:url('https://media.whichcar.com.au/uploads/2025/11/2026-Toyota-RAV4-1-1920x1280.jpeg')"></div>
   </div>
   <button class="hero-arrow hero-prev" type="button" aria-label="Предыдущий слайд">‹</button><button class="hero-arrow hero-next" type="button" aria-label="Следующий слайд">›</button>
   <div class="wrap hero-standard-content">
@@ -2528,8 +2531,9 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
     <h1>Автомобили<br><span>из Кореи</span></h1>
     <p class="intro">Подбор автомобиля и доставка из Кореи<br>с учётом ваших требований.</p>
     <a class="btn btn-red" href="#cars">Перейти в каталог <b>→</b></a>
-    <div class="hero-dots"><button class="hero-dot active" aria-label="Слайд 1"></button><button class="hero-dot" aria-label="Слайд 2"></button><button class="hero-dot" aria-label="Слайд 3"></button></div>
+    <div class="hero-dots"><button class="hero-dot active" type="button" aria-label="Kia Sportage" aria-current="true"></button><button class="hero-dot" type="button" aria-label="Kia K5" aria-current="false"></button><button class="hero-dot" type="button" aria-label="Toyota RAV4" aria-current="false"></button></div>
   </div>
+  <div class="hero-model-name" aria-live="polite">Kia Sportage</div>
 </section>
 <section class="benefit-strip"><div class="wrap benefit-grid">
  <article><span class="benefit-icon">♧</span><div><b>Проверенные автомобили</b><small>Только честные предложения<br>и прозрачная история</small></div></article>
@@ -2890,26 +2894,43 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
 });
 }
 loadCars();
-// Главный слайдер: автоматическая смена, точки и стрелки
+// Главный слайдер: три реальные модели, автосмена каждые 5 секунд и ручное управление.
 (function(){
   if(typeof document.querySelector!=='function')return;
   var root=document.querySelector('.hero-standard');
   if(!root || typeof root.querySelector!=='function')return;
   var slides=root.querySelectorAll('.hero-slide');
   var dots=root.querySelectorAll('.hero-dot');
+  var modelLabel=root.querySelector('.hero-model-name');
   if(!slides.length)return;
-  var index=0;
+  var index=0, timer=null, paused=false;
+  var reducedMotion=!!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  function stopTimer(){if(timer!==null){window.clearInterval(timer);timer=null;}}
+  function startTimer(){
+    stopTimer();
+    if(!reducedMotion && !paused && document.visibilityState!=='hidden'){
+      timer=window.setInterval(function(){show(index+1)},5000);
+    }
+  }
   function show(next){
     slides[index].classList.remove('active');
-    if(dots[index])dots[index].classList.remove('active');
+    if(dots[index]){dots[index].classList.remove('active');dots[index].setAttribute('aria-current','false');}
     index=(next+slides.length)%slides.length;
     slides[index].classList.add('active');
-    if(dots[index])dots[index].classList.add('active');
+    if(dots[index]){dots[index].classList.add('active');dots[index].setAttribute('aria-current','true');}
+    if(modelLabel)modelLabel.textContent=slides[index].getAttribute('data-model')||'';
+    startTimer();
   }
+  if(dots[0])dots[0].setAttribute('aria-current','true');
+  if(modelLabel)modelLabel.textContent=slides[0].getAttribute('data-model')||'';
+  slides.forEach(function(slide){var match=String(slide.style.backgroundImage||'').match(/url\(["']?(.+?)["']?\)/);if(match){var preload=new Image();preload.src=match[1];}});
   root.querySelector('.hero-prev')?.addEventListener('click',function(){show(index-1)});
   root.querySelector('.hero-next')?.addEventListener('click',function(){show(index+1)});
   dots.forEach(function(dot,i){dot.addEventListener('click',function(){show(i)})});
-  window.setInterval(function(){show(index+1)},5000);
+  root.addEventListener('focusin',function(){paused=true;stopTimer();});
+  root.addEventListener('focusout',function(event){if(!root.contains(event.relatedTarget)){paused=false;startTimer();}});
+  document.addEventListener('visibilitychange',startTimer);
+  startTimer();
 })();
 </script>
 </body>
