@@ -2492,3 +2492,18 @@ test("review cards show customer photos and videos without review text", async (
   assert.doesNotMatch(html, /text\.textContent=rv\.text/);
   assert.doesNotMatch(html, /who\.textContent='Клиент'/);
 });
+
+test("vehicle descriptions use one safe semantic format and responsive Google Font typography", async () => {
+  const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()))).text();
+  assert.ok(html.includes("fonts.googleapis.com/css2?family=Inter:"));
+  assert.ok(html.includes("family=Manrope:"));
+  assert.ok(html.includes('font-family:"Manrope","Inter"'));
+  assert.ok(html.includes("car-description-row"));
+  assert.ok(html.includes("car-description-list"));
+  assert.ok(html.includes("car-description-heading"));
+  assert.ok(html.includes("function renderCarDescription(root, rawCaption, titleText)"));
+  assert.ok(html.includes("label.textContent=line.slice(0,colon).trim()"));
+  assert.ok(html.includes("value.textContent=line.slice(colon+1).trim()"));
+  assert.ok(html.includes("#cars .car-description-row{grid-template-columns:1fr"));
+  assert.ok(!html.includes("description.innerHTML"), "description formatter must use safe text nodes");
+});

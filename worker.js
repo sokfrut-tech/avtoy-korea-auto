@@ -2018,6 +2018,9 @@ export default {
 <meta name="theme-color" content="#08090b">
 <meta name="description" content="Подбор автомобилей из Кореи, Китая и ОАЭ под ваш бюджет">
 <title>AVTOY KOREA: автомобили под заказ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root{color-scheme:dark;--bg:#08090b;--panel:#121419;--line:#292c33;--text:#f7f7f8;--muted:#a3a5ad;--red:#ff4b35;--max:1160px}
 *{box-sizing:border-box;min-width:0}img,video,iframe{max-width:100%}body{overflow-x:hidden}
@@ -2434,6 +2437,36 @@ footer{background:#071321;color:#aeb9c8}
 #cars .car-card .car-link{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:9px 14px;border:1px solid #ff4b3566;border-radius:12px;background:#ff4b3514;font-size:13px;font-weight:800}
 #cars .car-card .car-link:hover{background:#ff4b35;color:#fff}
 @media(max-width:780px){#cars .car-card .car-gallery{min-height:180px;margin-bottom:13px}#cars .car-card .car-body{padding:13px}#cars .car-card .car-text{font-size:13px}}
+
+/* Unified vehicle description typography and responsive text rhythm */
+body{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
+#cars .car-card .car-body{display:flex;flex-direction:column;align-items:stretch}
+#cars .car-card .car-body h3{font-family:"Manrope",sans-serif;font-size:clamp(17px,1.45vw,21px);font-weight:800;line-height:1.28;letter-spacing:-.025em;margin:0 0 12px;overflow-wrap:anywhere}
+#cars .car-description{display:grid;gap:11px;margin:0 0 16px;color:#c7c9d0;font-size:14px;line-height:1.72;overflow-wrap:anywhere}
+#cars .car-description-paragraph{margin:0;color:#c7c9d0}
+#cars .car-description-heading{margin:5px 0 -3px;color:#fff;font:800 12px/1.4 "Manrope",sans-serif;letter-spacing:.09em;text-transform:uppercase}
+#cars .car-description-row{display:grid;grid-template-columns:minmax(82px,.72fr) minmax(0,1.28fr);gap:12px;padding:8px 10px;border:1px solid #ffffff12;border-radius:9px;background:#ffffff06}
+#cars .car-description-row strong{color:#aeb9c8;font-size:12px;font-weight:700}
+#cars .car-description-row span{color:#f4f6f9;font-weight:600}
+#cars .car-description-list{display:grid;gap:6px;margin:0;padding:0;list-style:none}
+#cars .car-description-list li{position:relative;padding-left:18px;color:#d8dde5}
+#cars .car-description-list li:before{content:"";position:absolute;left:2px;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--red)}
+#cars .car-card .car-link{align-self:flex-start;margin-top:auto}
+@media(max-width:780px){
+ #cars .car-card .car-body h3{font-size:15px;line-height:1.3;margin-bottom:9px}
+ #cars .car-description{font-size:12px;line-height:1.62;gap:8px;margin-bottom:12px}
+ #cars .car-description-row{grid-template-columns:1fr;gap:2px;padding:7px 9px}
+ #cars .car-description-row strong{font-size:10px}
+ #cars .car-description-row span{font-size:12px}
+ #cars .car-description-heading{font-size:10px}
+ #cars .car-description-list{gap:4px}
+ #cars .car-card .car-link{width:100%;justify-content:center}
+}
+@media(max-width:380px){
+ #cars .car-description{font-size:11px}
+ #cars .car-description-row{padding:6px 8px}
+}
 </style>
 </head>
 <body>
@@ -2736,8 +2769,54 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
   var article=document.createElement('article'); article.className='card car-card';
   var body=document.createElement('div'); body.className='car-body';
   var title=document.createElement('h3'); title.textContent=(car.caption||'Автомобиль из объявления').split(NL)[0].slice(0,120);
-  var desc=document.createElement('p'); desc.className='car-text'; desc.textContent=car.caption||'Описание не указано';
-  body.appendChild(title); body.appendChild(desc);
+  body.appendChild(title);
+  function renderCarDescription(root, rawCaption, titleText){
+   var lines=String(rawCaption||'').replaceAll(String.fromCharCode(13),'').replaceAll(String.fromCharCode(160),' ').split(String.fromCharCode(10)).map(function(line){return line.trim()});
+   while(lines.length&&!lines[0])lines.shift();
+   while(lines.length&&!lines[lines.length-1])lines.pop();
+   if(lines.length&&lines[0].slice(0,120)===String(titleText||''))lines.shift();
+   var paragraph=[],list=null;
+   function flushParagraph(){
+    if(!paragraph.length)return;
+    var p=document.createElement('p');p.className='car-description-paragraph';p.textContent=paragraph.join(' ');
+    root.appendChild(p);paragraph=[];
+   }
+   function flushList(){if(list&&list.children.length)root.appendChild(list);list=null;}
+   lines.forEach(function(line){
+    if(!line){flushParagraph();flushList();return;}
+    var sectionName=line.toLowerCase().replace(/:$/,'').trim();
+    if(['характеристики','комплектация','описание','состояние','двигатель','трансмиссия','привод','безопасность','опции','дополнительно'].indexOf(sectionName)>=0){
+     flushParagraph();flushList();
+     var h=document.createElement('h4');h.className='car-description-heading';h.textContent=sectionName;root.appendChild(h);return;
+    }
+    var bulletText=null;
+    if('•●▪◦✓✔-–—'.indexOf(line.charAt(0))>=0&&line.length>1&&line.charAt(1)===' ')bulletText=line.slice(2).trim();
+    else{
+     var space=line.indexOf(' ');
+     if(space>1&&(line.charAt(space-1)==='.'||line.charAt(space-1)===')')&&!isNaN(Number(line.slice(0,space-1))))bulletText=line.slice(space+1).trim();
+    }
+    if(bulletText){
+     flushParagraph();
+     if(!list){list=document.createElement('ul');list.className='car-description-list';}
+     var li=document.createElement('li');li.textContent=bulletText;list.appendChild(li);return;
+    }
+    flushList();
+    var colon=line.indexOf(':');
+    if(colon<0)colon=line.indexOf('：');
+    if(colon>=2&&colon<=36&&line.slice(colon+1).trim()){
+     flushParagraph();
+     var row=document.createElement('div');row.className='car-description-row';
+     var label=document.createElement('strong');label.textContent=line.slice(0,colon).trim();
+     var value=document.createElement('span');value.textContent=line.slice(colon+1).trim();
+     row.appendChild(label);row.appendChild(value);root.appendChild(row);return;
+    }
+    paragraph.push(line);
+   });
+   flushParagraph();flushList();
+  }
+  var description=document.createElement('div');description.className='car-description';
+  renderCarDescription(description,car.caption||'',title.textContent);
+  if(description.childNodes.length)body.appendChild(description);
   var discuss=document.createElement('a');discuss.className='car-link';discuss.href='#request';discuss.textContent='Обсудить этот автомобиль →';body.appendChild(discuss);
   if(media.length){
    var gallery=document.createElement('div'); gallery.className='car-gallery';
