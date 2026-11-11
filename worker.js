@@ -2813,10 +2813,18 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
   body.appendChild(title);
   function splitVehicleHeading(raw){
    var original=String(raw||'Автомобиль из объявления').trim();
-   var trims=['GT-Line','GT Line','X-Line','X Line','Calligraphy','Noblesse','Prestige','Signature','Platinum','Limited','Ultimate','Premium','Luxury','Elegance','Adventure','High-Tech','Techno','Intense','Comfort','Classic','Active','Prime','Style','N Line','SX Prestige','SX','EX','LX','SE','SEL'];
+   var trims=['SX Prestige','GT-Line','GT Line','X-Line','X Line','Calligraphy','Noblesse','Prestige','Signature','Platinum','Limited','Ultimate','Premium','Luxury','Elegance','Adventure','High-Tech','Techno','Intense','Comfort','Classic','Active','Prime','Style','N Line','SX','EX','LX','SE','SEL'];
+   var lower=original.toLowerCase();
    for(var i=0;i<trims.length;i++){
-    var trim=trims[i], escaped=trim.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\  function renderCarDescription(root, rawCaption, titleText){');
-    var match=original.match(new RegExp('(?:\\s|[|·—–-])'+escaped+'
+    var trim=trims[i], suffix=trim.toLowerCase(), offset=original.length-suffix.length;
+    if(offset>0&&lower.slice(offset)===suffix&&/[\\s|·—–-]/.test(original.charAt(offset-1))){
+     var model=original.slice(0,offset).trim().replace(/[|·—–-]+$/,'').trim();
+     if(model)return {model:model,trim:trim.toUpperCase(),raw:original};
+    }
+   }
+   return {model:original,trim:'',raw:original};
+  }
+  function renderCarDescription(root, rawCaption, titleText){
    var lines=String(rawCaption||'').replaceAll(String.fromCharCode(13),'').replaceAll(String.fromCharCode(160),' ').split(String.fromCharCode(10)).map(function(line){return line.trim()});
    while(lines.length&&!lines[0])lines.shift();
    while(lines.length&&!lines[lines.length-1])lines.pop();
