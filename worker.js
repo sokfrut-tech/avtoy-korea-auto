@@ -974,7 +974,16 @@ function uniqueFileItems(list) {
 }
 
 function postPhotos(post) {
- const items = Array.isArray(post.photos) ? post.photos : (Array.isArray(post.photo) ? post.photo : []);
+ // Telegram Message.photo is a list of size variants for ONE image, not an album.
+ // Album parts are normalized to one largest rendition per message before storage.
+ let items = [];
+ if (Array.isArray(post.photos)) {
+  items = uniqueFileItems(post.photos);
+ } else if (Array.isArray(post.photo)) {
+  items = post.photoItems === true
+   ? uniqueFileItems(post.photo)
+   : largestPhotoOf(post.photo);
+ }
  const documentPhoto = imageDocumentItemFrom(post.document);
  return uniqueFileItems([...items, ...(documentPhoto ? [documentPhoto] : [])]);
 }
@@ -1211,6 +1220,7 @@ async function mergeChannelPartMedia(post, id, env) {
   const entry = JSON.parse(importRaw);
   const saved = entry.post || entry;
   saved.photo = uniqueFileItems([...(Array.isArray(saved.photo) ? saved.photo : []), ...photos]);
+  saved.photoItems = true;
   saved.videos = uniqueFileItems([...(Array.isArray(saved.videos) ? saved.videos : []), ...videos]);
   if (!saved.caption && post.caption) saved.caption = post.caption;
   entry.post = saved;
@@ -1299,7 +1309,7 @@ async function stageChannelPost(post, env, adminIds) {
  }
  const photos = [...largestPhotoOf(post.photo), ...(imageDocumentItemFrom(post.document) ? [imageDocumentItemFrom(post.document)] : [])];
  const videos = postVideos(post);
- const stored = {...post,chat,message_id:Number(number),albumId:post.media_group_id ? String(post.media_group_id) : "",photo:photos,videos};
+ const stored = {...post,chat,message_id:Number(number),albumId:post.media_group_id ? String(post.media_group_id) : "",photo:photos,photoItems:true,videos};
  await env.REVIEWS.put("import_pending:" + id,JSON.stringify({...stored,post:stored}),{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
@@ -2987,3 +2997,5 @@ loadCars();
   return new Response(html,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"strict-origin-when-cross-origin"}});
  }
 };
+
+export { postPhotos };
