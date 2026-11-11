@@ -2467,6 +2467,13 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
  #cars .car-description{font-size:11px}
  #cars .car-description-row{padding:6px 8px}
 }
+
+/* Mobile catalog: remove redundant vertical whitespace around the listing */
+@media(max-width:780px){
+  #cars{padding:16px 14px 24px!important}
+  #cars h2{margin:0 0 12px}
+  #cars .sub{display:none!important}
+}
 </style>
 </head>
 <body>
@@ -2508,7 +2515,6 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
 <section class="wrap section" id="cars" style="padding-top:20px">
   <div class="eyebrow">Наши автомобили</div>
   <h2>Автомобили в продаже и под заказ</h2>
-  <p class="sub">Актуальные предложения из нашего Telegram-канала. На сайт попадают только объявления, проверенные администратором.</p>
   <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Загружаем актуальные предложения…</div></article></div>
   <p class="cars-hint">← Листайте пальцем, справа видно следующую машину →</p>
 </section>
