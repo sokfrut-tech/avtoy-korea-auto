@@ -2315,7 +2315,8 @@ test("car import removes byte-identical reuploads but keeps different angles", a
         { file_id: "A", file_unique_id: "UID_A" },
         { file_id: "B", file_unique_id: "UID_B" },
         { file_id: "C", file_unique_id: "UID_C" }
-      ]
+      ],
+      photoItems: true
     }));
     await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_601")), reviewEnv(kv));
     const car = JSON.parse(await kv.get("car_pending:car_100555_601"));
