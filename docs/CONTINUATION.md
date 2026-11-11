@@ -251,3 +251,9 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - First exact-head CI on PR #66 found the new test's regular-expression literal was over-escaped, causing a JavaScript parse failure in `worker.test.mjs`; Worker source syntax itself passed.
 - Replaced those two assertions with literal `String.includes` checks in commit `fe74d8b36a5e14f52032bac3af1553c0b78cb83b`. New exact-head Worker tests, Cloudflare checks and Factory Review must complete before this change is considered verified.
 - The PR deployment workflow correctly skipped both production-secret verification and deployment because the event was a pull request. No production deployment occurred.
+
+
+## Existing homepage asset regression update — 2026-11-11
+- Second CI pass parsed successfully and ran 134 tests; 133 passed and one pre-existing homepage asset assertion failed because it still required the old `/assets/kia-sportage.jpg` background.
+- Updated that assertion to retain the logo check while verifying the three new model identifiers and ensuring the obsolete Sportage asset path is no longer used. Change commit: `8127f79f2d981683a505d2a15e90b82a1bfff159`.
+- This was a stale expectation caused by the intentional hero-image replacement, not a runtime syntax or carousel failure. New exact-head CI is pending.
