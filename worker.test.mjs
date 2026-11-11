@@ -1816,7 +1816,7 @@ test("end to end: admin uploads via bot, edits photos, publishes, removes from s
 
     // 4. /site lists it, and removal through the bot returns it to waiting
     await worker.fetch(webhookUpdate({ message: { message_id: 720, chat: adminChat, from, text: "/site" } }), reviewEnv(kv));
-    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 Сейчас на сайте: 1")), "/site shows it");
+    assert.ok(calls.some(c => String(c.payload.text || "").startsWith("🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ")), "/site shows the visual feed");
     await worker.fetch(webhookUpdate(callback(ADMIN, "sitedelok:" + id)), reviewEnv(kv));
     const site2 = await (await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv))).json();
     assert.equal(site2.reviews.length, 0, "removed from the site");
@@ -2416,7 +2416,7 @@ test("admin can edit the text of one published car from the /site list without c
       from: { id: 111111111, first_name: "Admin" },
       text: "/site",
     }}), reviewEnv(kv));
-    const siteList = calls.find(call => call.method === "sendMessage" &&
+    const siteList = calls.find(call => call.method === "sendPhoto" && call.payload.photo === "PHOTO_KEEP" &&
       call.payload.reply_markup?.inline_keyboard?.flat().some(button => button.callback_data === "siteedit:" + id));
     assert.ok(siteList, "published item has a dedicated edit action");
     await worker.fetch(webhookUpdate(callback(111111111, "siteedit:" + id)), reviewEnv(kv));
