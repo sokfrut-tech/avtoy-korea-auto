@@ -943,6 +943,40 @@ test("public car and review APIs remove Telegram promotional footer and source l
  assert.match(cars.cars[0].caption,/Владимир/);
  assert.doesNotMatch(JSON.stringify({cars,reviews}),/79537477230|WhatsApp|avtoYkorea|Источник:|Видео/);
 });
+test("car catalogue excludes orphan media and placeholder or short descriptions", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:car_1_1", JSON.stringify({
+    id: "car_1_1", caption: "АВТОМОБИЛЬ ИЗ ОБЪЯВЛЕНИЯ",
+    photos: [{ file_id: "ENGINE" }], publishedAt: "2026-11-11T10:00:00.000Z"
+  }));
+  await kv.put("car_approved:car_1_2", JSON.stringify({
+    id: "car_1_2", caption: "ИСПРАВИТЬ",
+    photos: [], publishedAt: "2026-11-11T10:01:00.000Z"
+  }));
+  await kv.put("car_approved:car_1_3", JSON.stringify({
+    id: "car_1_3", caption: "Kia Sportage 2026\\nПробег 8 000 км\\nДвигатель 1.6, комплектация Prestige",
+    photos: [{ file_id: "KIA" }], publishedAt: "2026-11-11T10:02:00.000Z"
+  }));
+  const response = await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv));
+  const data = await response.json();
+  assert.equal(data.cars.length, 1);
+  assert.equal(data.cars[0].id, "car_1_3");
+});
+
+test("car import rejects a standalone photo with placeholder text", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await worker.fetch(webhookUpdate({ message: {
+      message_id: 1700, chat: { id: 111111111, type: "private" }, from: { id: 111111111 },
+      forward_origin: { type: "channel", date: 1790000000, chat: { id: -100555, username: "avtoYkorea", type: "channel" }, message_id: 1701 },
+      caption: "ИСПРАВИТЬ", photo: [{ file_id: "ORPHAN", file_unique_id: "ORPHAN_U" }]
+    } }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_1701")), reviewEnv(kv));
+    assert.equal((await kv.list({ prefix: "car_pending:" })).keys.length, 0);
+    assert.ok(calls.some(c => c.method === "sendMessage" && /отдельное фото|полноценного описания/i.test(c.payload.text || "")));
+  });
+});
+
 test("homepage inline JavaScript parses before deployment", async () => {
   const vm = await import("node:vm");
   const response = await worker.fetch(new Request("https://worker.test/"), env);
