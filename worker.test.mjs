@@ -2309,11 +2309,13 @@ test("car import removes byte-identical reuploads but keeps different angles", a
 
 test("car moderation warns about low-resolution photos without silently discarding them", async () => {
  const kv = memoryKV();
+ await kv.put("import_pending:-100555_603", JSON.stringify({
+  chat: { id: -100555, username: "avtoYkorea" }, message_id: 603, sourceDate: 1790000000,
+  caption: "Kia Sportage 2026",
+  photo: [{ file_id: "BLURRY", file_unique_id: "BLURRY-U", width: 640, height: 480, file_size: 45000 }]
+ }));
  await withTelegramMock(async calls => {
-  await worker.fetch(webhookUpdate({ channel_post: {
-   message_id: 603, date: 1790000000, chat: { id: -100555, username: "avtoYkorea", type: "channel" },
-   caption: "Kia Sportage 2026", photo: [{ file_id: "BLURRY", file_unique_id: "BLURRY-U", width: 640, height: 480, file_size: 45000 }]
-  }}), reviewEnv(kv));
+  await worker.fetch(webhookUpdate(callback(ADMIN, "imp:car:-100555_603")), reviewEnv(kv));
   const car = JSON.parse(await kv.get("car_pending:car_100555_603"));
   assert.equal(car.photos.length, 1, "quality warning does not silently destroy source media");
   const card = calls.find(c => c.method === "sendMessage" && String(c.payload.text || "").includes("ОДИН АВТОМОБИЛЬ"));
