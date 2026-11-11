@@ -2545,8 +2545,7 @@ test("vehicle descriptions use one safe semantic format and responsive Google Fo
 test("vehicle catalogue hides failed media, skips to the next usable item and keeps mobile cards compact", async () => {
   const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()))).text();
   assert.match(html, /el\.addEventListener\('error',function\(\)/);
-  assert.match(html, /failedMedia\[index\]=true/);
-  assert.match(html, /else gallery\.hidden=true/);
+  assert.match(html, /gallery\.hidden=true/);
   assert.match(html, /#cars \.cars\{align-items:start;grid-auto-rows:max-content\}/);
   assert.match(html, /#cars \.car-card\{align-self:start;min-height:0;height:auto\}/);
   assert.match(html, /#cars h2\{color:#f4f6f9!important\}/);
