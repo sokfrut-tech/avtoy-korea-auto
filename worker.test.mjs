@@ -953,6 +953,20 @@ test("homepage inline JavaScript parses before deployment", async () => {
   for (const script of scripts) new vm.Script(script[1]);
 });
 
+test("homepage hero rotates between the three requested current car models", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/"), env);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /aria-label="Kia Sportage 2026/);
+  assert.match(html, /aria-label="Kia K5 2026/);
+  assert.match(html, /aria-label="Toyota RAV4 2026/);
+  assert.match(html, /data-model="Kia Sportage"/);
+  assert.match(html, /data-model="Kia K5"/);
+  assert.match(html, /data-model="Toyota RAV4"/);
+  assert.match(html, /setInterval\\(function\\(\\)\\{show\\(index\\+1\\)\\},5000\\)/);
+  assert.doesNotMatch(html, /images\\.unsplash\\.com\\/photo-/);
+});
+
 
 test("website order retry delivers only the admin whose first notification failed", async () => {
   const kv = memoryKV();
