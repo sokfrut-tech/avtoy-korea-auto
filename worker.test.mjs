@@ -2083,7 +2083,7 @@ test("admin photo album in the review group becomes one staged review with every
       { message_id: 9912, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { id: ADMIN, first_name: "Admin" }, media_group_id: "991199", photo: [{ file_id: "GROUP_B", file_unique_id: "GROUP_B_UID", width: 1200, height: 900 }] },
       { message_id: 9913, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { id: ADMIN, first_name: "Admin" }, media_group_id: "991199", photo: [{ file_id: "GROUP_B_RETRY", file_unique_id: "GROUP_B_UID", width: 1200, height: 900 }] }
     ];
-    await Promise.all(parts.map(message => worker.fetch(webhookUpdate({ message }), sharedEnv)));
+    for (const message of parts) await worker.fetch(webhookUpdate({ message }), sharedEnv);
     const id = REVIEW_GROUP + "_991199";
     const staged = JSON.parse(await kv.get("import_pending:" + id));
     assert.deepEqual(staged.post.photo.map(photo => photo.file_id), ["GROUP_A", "GROUP_B"]);
