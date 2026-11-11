@@ -1037,8 +1037,8 @@ test("homepage hero rotates between the three requested current car models", asy
   assert.match(html, /data-model="Kia Sportage"/);
   assert.match(html, /data-model="Kia K5"/);
   assert.match(html, /data-model="Toyota RAV4"/);
-  assert.match(html, /setInterval\\(function\\(\\)\\{show\\(index\\+1\\)\\},5000\\)/);
-  assert.doesNotMatch(html, /images\\.unsplash\\.com\\/photo-/);
+  assert.match(html, /setInterval\(function\(\)\{show\(index\+1\)\},5000\)/);
+  assert.doesNotMatch(html, /images\.unsplash\.com\/photo-/);
 });
 
 
