@@ -2521,7 +2521,7 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
 <main>
 <section class="hero-standard">
   <div class="hero-standard-bg">
-    <div class="hero-slide active" role="img" aria-label="Kia Sportage 2026, обновлённое поколение" data-model="Kia Sportage" style="background-image:url('https://images.carexpert.com.au/resize/1920/-/cms/v1/media/2025-11-2026-250924kia-sportage-sxstill-7.jpg')"></div>
+    <div class="hero-slide active" role="img" aria-label="Kia Sportage 2026, обновлённый дизайн" data-model="Kia Sportage" style="background-image:url('https://images.carexpert.com.au/resize/1920/-/cms/v1/media/2025-11-2026-250924kia-sportage-sxstill-7.jpg')"></div>
     <div class="hero-slide" role="img" aria-label="Kia K5 2026 GT-Line" data-model="Kia K5" style="background-image:url('https://vehicle-images.carscommerce.inc/c296-18004034/KNAG64J7XT5407697/f77dca20312f1d8e2fc1db6f7841acfb.jpg')"></div>
     <div class="hero-slide" role="img" aria-label="Toyota RAV4 2026, новое поколение" data-model="Toyota RAV4" style="background-image:url('https://media.whichcar.com.au/uploads/2025/11/2026-Toyota-RAV4-1-1920x1280.jpeg')"></div>
   </div>
