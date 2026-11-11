@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker, { AlbumSerializer } from "./worker.js";
+import worker, { AlbumSerializer, postPhotos } from "./worker.js";
 
 const env = {
   TELEGRAM_BOT_TOKEN: "test-token",
@@ -2574,4 +2574,20 @@ test("vehicle catalogue hides failed media, skips to the next usable item and ke
   assert.match(html, /#cars \.car-card\{align-self:start;min-height:0;height:auto\}/);
   assert.match(html, /#cars h2,#cars \.car-card h3\{color:#f4f6f9!important\}/);
   assert.match(html, /@media\(max-width:780px\)[\s\S]*?#cars \.cars\{grid-template-columns:minmax\(0,1fr\)/);
+});
+
+
+test("Telegram photo size variants become one largest image, while normalized album photos stay separate", () => {
+  const variants = [
+    { file_id: "small", file_unique_id: "small_u", width: 160, height: 90, file_size: 4000 },
+    { file_id: "medium", file_unique_id: "medium_u", width: 640, height: 360, file_size: 32000 },
+    { file_id: "large", file_unique_id: "large_u", width: 1280, height: 720, file_size: 145000 }
+  ];
+  assert.deepEqual(postPhotos({ photo: variants }), [
+    { file_id: "large", file_unique_id: "large_u", width: 1280, height: 720, file_size: 145000 }
+  ]);
+  assert.deepEqual(postPhotos({ photo: [variants[2], { file_id: "album_second", file_unique_id: "album_second_u", width: 1280, height: 720, file_size: 150000 }], photoItems: true }), [
+    { file_id: "large", file_unique_id: "large_u", width: 1280, height: 720, file_size: 145000 },
+    { file_id: "album_second", file_unique_id: "album_second_u", width: 1280, height: 720, file_size: 150000 }
+  ]);
 });
