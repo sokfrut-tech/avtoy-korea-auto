@@ -2492,3 +2492,18 @@ test("review cards show customer photos and videos without review text", async (
   assert.doesNotMatch(html, /text\.textContent=rv\.text/);
   assert.doesNotMatch(html, /who\.textContent='Клиент'/);
 });
+
+test("vehicle descriptions use one safe semantic format and responsive Google Font typography", async () => {
+  const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(memoryKV()))).text();
+  assert.match(html, /fonts\\.googleapis\\.com\\/css2\\?family=Inter/);
+  assert.match(html, /family=Inter:[^"]*family=Manrope/);
+  assert.match(html, /font-family:"Manrope","Inter"/);
+  assert.match(html, /car-description-row/);
+  assert.match(html, /car-description-list/);
+  assert.match(html, /car-description-heading/);
+  assert.match(html, /function renderCarDescription\\(root, rawCaption, titleText\\)/);
+  assert.match(html, /label\\.textContent=pair\\[1\\]\\.trim\\(\\)/);
+  assert.match(html, /value\\.textContent=pair\\[2\\]\\.trim\\(\\)/);
+  assert.match(html, /@media\\(max-width:780px\\)[\\s\\S]*#cars \\.car-description-row\\{grid-template-columns:1fr/);
+  assert.doesNotMatch(html, /description\\.innerHTML/);
+});
