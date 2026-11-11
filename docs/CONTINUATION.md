@@ -1,3 +1,18 @@
+## 2026-11-11 — vehicle listing quality and description gate
+
+- Branch: `fix/car-listing-description-and-photo-quality-2026-11-11`
+- Base: `main` (worker.js source SHA `08d5140684295beb8c1b9fcb1f0999f7befeca43`).
+- Root causes: duplicate Telegram `PhotoSize` entries sharing `file_unique_id` kept the first, often thumbnail-sized rendition; car import accepted media-only posts; the public API exposed legacy cars with no description or photo; force-publish had no hard completeness gate.
+- Changes: keep the largest pixel-area / file-size rendition per stable media identity; require cleaned description plus photo for car import/publication; hide incomplete legacy records from the catalogue; normalize raw single-image PhotoSize arrays to the largest rendition.
+- Regression tests cover legacy filtering, full-resolution media retrieval, photo-only import rejection, and force-publish rejection.
+- Pull request: [#64](https://github.com/sokfrut-tech/avtoy-korea-auto/pull/64).
+- Verification on code head `40a642cd94d9f72176c2db7a98c50ac332d6c36b`: Worker tests `42987550475` — success; Cloudflare Worker checks `42987550520` — success; Factory Review `42987550778` — functional/regression, security/privacy, and release-evidence jobs all success. Secret scanning `42987550495` — success; CodeQL was still running at the last check.
+- PR deployment workflow `42987550586` completed successfully with deployment steps skipped because this was a pull-request event. No production merge/deployment, KV mutation, or Telegram webhook change was performed.
+- Final code/test head before this handoff update: `05d490fc4ca78f32940fe42b400b16f0f4310090`; current PR head (handoff-only documentation update): `9972817ab4dcf9a180488c9db40493706a41e7ca`.
+- Latest checks for the current PR head: Worker tests `42987756714` — success (138/138); Cloudflare Worker checks `42987756779` — success; Factory Review `42987756689` — functional/regression, security/privacy, and release-evidence jobs all success; PR deploy workflow `42987756807` — success with actual deployment steps skipped. Factory Security Baseline `42987756678`: Secret scanning success; CodeQL still in progress at this update.
+- Runtime check: no live site, Telegram bot, webhook, or production KV smoke test was performed. PR is mergeable; merge and production deployment still await explicit user approval.
+- Next: wait for CodeQL completion, then request approval before merge/deploy.
+
 # AVTOY KOREA — continuation handoff
 
 Updated: 2026-10-31 15:20 UTC

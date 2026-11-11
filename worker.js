@@ -960,21 +960,32 @@ function messageNumberOf(id) {
 
 // Уникальные файлы по file_id, порядок сохраняется.
 function uniqueFileItems(list) {
- const seen = new Set();
- const out = [];
+ const positions = new Map(), out = [];
  for (const item of Array.isArray(list) ? list : []) {
   const raw = item && typeof item === "object" ? item : { file_id: item };
   if (!raw.file_id) continue;
   const key = raw.file_unique_id ? "u:" + String(raw.file_unique_id) : "f:" + String(raw.file_id);
-  if (seen.has(key)) continue;
-  seen.add(key);
-  out.push(photoItemFrom(raw));
+  const width = Number(raw.width) || 0, height = Number(raw.height) || 0;
+  const area = width > 0 && height > 0 ? width * height : -1;
+  const bytes = Number(raw.file_size) || -1;
+  const previousIndex = positions.get(key);
+  if (previousIndex === undefined) { positions.set(key, out.length); out.push({ item: photoItemFrom(raw), area, bytes }); continue; }
+  const previous = out[previousIndex];
+  // Same file_unique_id means rendition variants of one image: retain the best.
+  if (area > previous.area || (area === previous.area && bytes > previous.bytes)) out[previousIndex] = { item: photoItemFrom(raw), area, bytes };
  }
- return out;
+ return out.map(entry => entry.item);
 }
 
 function postPhotos(post) {
- const items = Array.isArray(post.photos) ? post.photos : (Array.isArray(post.photo) ? post.photo : []);
+ const rawPhoto = Array.isArray(post.photo) ? post.photo : [];
+ const uniquePhotoIds = new Set(rawPhoto.map(item => item && item.file_unique_id).filter(Boolean));
+ const containsDistinctAlbumPhotos = uniquePhotoIds.size > 1;
+ // "photos" is the normalized album representation. A raw Telegram "photo"
+ // array normally contains multiple sizes of one image; only preserve it as a
+ // gallery when album identity or distinct file_unique_ids prove that.
+ const items = Array.isArray(post.photos) ? post.photos
+  : (rawPhoto.length ? (post.media_group_id || post.albumId || containsDistinctAlbumPhotos ? rawPhoto : largestPhotoOf(rawPhoto)) : []);
  const documentPhoto = imageDocumentItemFrom(post.document);
  return uniqueFileItems([...items, ...(documentPhoto ? [documentPhoto] : [])]);
 }
@@ -1060,19 +1071,19 @@ async function handleCarPost(post, env, adminIds) {
    chat_id: adminId,
    text: "⏭ Автомобиль не импортирован: публикация создана до 1 января 2026 года или дата источника недоступна. Для отзывов такого ограничения нет."
   })));
-  return;
+  return true;
  }
- const caption = cleanPublicationText(post.caption || post.text).slice(0, 3000);
+ const caption = publicCarCaption(post.caption || post.text).slice(0, 3000);
  const photos = await uniquePhotoFilesByContent(postPhotos(post), env);
  const videos = postVideos(post);
- const fileId = photos.length ? photos[photos.length - 1].file_id : (videos.length ? videos[0].file_id : null);
- if (!caption && !fileId) return;
- if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return; }
+ if (!caption || !photos.length) return false;
+ const fileId = photos[0].file_id;
+ if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return true; }
  const id = "car_" + String(chat.id).replace(/-/g,"") + "_" + messageNumberOf(post.message_id);
  const approved = await env.REVIEWS.get("car_approved:" + id);
  if (approved) {
   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"✅ Этот автомобиль уже опубликован на сайте. Повторная публикация не создана: https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id)})));
-  return;
+  return true;
  }
  const existing = await env.REVIEWS.get("car_pending:" + id);
  if (existing) {
@@ -1080,17 +1091,18 @@ async function handleCarPost(post, env, adminIds) {
   const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
   await Promise.all(adminIds.map(async adminId => {
    await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "");
-   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная отправка: автомобиль всё ещё ожидает решения модератора.\n\n" + (saved.caption || "Описание отсутствует") + "\n\nИсточник: " + saved.sourceUrl,reply_markup:keyboard});
+   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная отправка: автомобиль всё ещё ожидает решения модератора.\n\n" + saved.caption + "\n\nИсточник: " + saved.sourceUrl,reply_markup:keyboard});
   }));
-  return;
+  return true;
  }
  const car = {id,caption,fileId,photos,videos,mediaType:videos.length && !photos.length ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id),createdAt:new Date().toISOString(),sourceDate:created};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
   await sendChannelMedia(env, adminId, photos, videos, caption);
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 Один автомобиль из канала AVTOY KOREA\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 Один автомобиль из канала AVTOY KOREA\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n\n" + caption + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
  }));
+ return true;
 }
 
 async function handleImportedReview(post, env, adminIds) {
@@ -1168,10 +1180,15 @@ async function handleImportChoice(callback, env, adminIds) {
  if (!raw) return answer("Публикация уже обработана или не найдена",true);
  const entry = JSON.parse(raw);
  const post = entry && entry.post ? entry.post : entry;
- if (kind === "car") await handleCarPost(post,env,adminIds);
- else await handleImportedReview(post,env,adminIds);
+ if (kind === "car") {
+  const caption = publicCarCaption(post.caption || post.text).slice(0, 3000);
+  if (!caption) return answer("Автомобиль не передан: в посте нет описания. Фото отдельно не публикуются.", true);
+  if (!postPhotos(post).length) return answer("Автомобиль не передан: в посте нет фотографии нормального качества.", true);
+  const accepted = await handleCarPost(post,env,adminIds);
+  if (!accepted) return answer("Автомобиль не прошёл проверку описания и фотографий.", true);
+ } else await handleImportedReview(post,env,adminIds);
  await env.REVIEWS.delete(key);
- return answer(kind === "car" ? "Передано в модерацию автомобилей" : "Передано в модерацию отзывов");
+ return answer(kind === "car" ? "Автомобиль передан на модерацию" : "Передано в модерацию отзывов");
 }
 
 async function resendChannelImportEntry(entry, id, env, adminIds) {
@@ -1370,6 +1387,7 @@ async function handleCarCallback(callback, env, adminIds) {
  const car = JSON.parse(raw);
  if (action === "edit") return beginModerationEdit(callback, env, "car", id, answer);
  if (action === "rej") { await env.REVIEWS.delete("car_pending:" + id); await askRejectReason(env, fromId, id); return answer("Объявление отклонено"); }
+ if (!publicCarCaption(car.caption) || !postPhotos(car).length) return answer(!publicCarCaption(car.caption) ? "Нельзя опубликовать автомобиль без описания." : "Нельзя опубликовать автомобиль без фотографии.", true);
  if (action === "pub") {
   const warnings = publishWarnings(car.caption, postPhotos(car).length + postVideos(car).length);
   if (warnings.length) { await askPublishCheck(env, fromId, "car", id, warnings); return answer("Проверьте перед публикацией"); }
@@ -1942,7 +1960,16 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : [])); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))]; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) {
+      const raw = await env.REVIEWS.get(key.name);
+      if (!raw) continue;
+      const car = JSON.parse(raw), caption = publicCarCaption(car.caption);
+      const photoItems = uniqueFileItems(Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []));
+      const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : []));
+      if (!caption || !photoItems.length) continue;
+      const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))];
+      cars.push({id:car.id,caption,media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt});
+     }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
