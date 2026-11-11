@@ -968,6 +968,19 @@ test("homepage hero rotates between the three requested current car models", asy
 });
 
 
+test("homepage uses compact spacing, readable benefit cards, and no oversized Telegram promo", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/"), env);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.ok(!html.includes('id="telegram"'), "redundant Telegram promo section is removed");
+  assert.ok(!html.includes("telegram-promo"), "oversized Telegram promo styles and markup are removed");
+  assert.ok(html.includes(".topbar{border-bottom:0;box-shadow:none}"), "unnecessary grey header divider is removed");
+  assert.ok(html.includes(".hero-standard{height:clamp(360px,31vw,445px)}"), "hero banner height is reduced");
+  assert.ok(html.includes("#f4f7fb"), "benefit-card text uses a high-contrast light color");
+  assert.ok(html.includes("background:#263342"), "mobile benefit cards use a lighter accessible surface");
+  assert.ok(html.includes("#order.section{padding-top:30px!important;padding-bottom:28px!important}"), "order section vertical spacing is reduced");
+});
+
 test("website order retry delivers only the admin whose first notification failed", async () => {
   const kv = memoryKV();
   const originalFetch = globalThis.fetch;
