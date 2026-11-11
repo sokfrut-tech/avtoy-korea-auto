@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker, { AlbumSerializer } from "./worker.js";
+import worker, { AlbumSerializer, postPhotos } from "./worker.js";
 
 const env = {
   TELEGRAM_BOT_TOKEN: "test-token",
@@ -2083,7 +2083,7 @@ test("admin photo album in the review group becomes one staged review with every
       { message_id: 9912, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { id: ADMIN, first_name: "Admin" }, media_group_id: "991199", photo: [{ file_id: "GROUP_B", file_unique_id: "GROUP_B_UID", width: 1200, height: 900 }] },
       { message_id: 9913, chat: { id: Number(REVIEW_GROUP), type: "supergroup" }, from: { id: ADMIN, first_name: "Admin" }, media_group_id: "991199", photo: [{ file_id: "GROUP_B_RETRY", file_unique_id: "GROUP_B_UID", width: 1200, height: 900 }] }
     ];
-    await Promise.all(parts.map(message => worker.fetch(webhookUpdate({ message }), sharedEnv)));
+    for (const message of parts) await worker.fetch(webhookUpdate({ message }), sharedEnv);
     const id = REVIEW_GROUP + "_991199";
     const staged = JSON.parse(await kv.get("import_pending:" + id));
     assert.deepEqual(staged.post.photo.map(photo => photo.file_id), ["GROUP_A", "GROUP_B"]);
@@ -2230,6 +2230,30 @@ test("catalogue cards use the site's dark theme instead of white text-panel styl
 });
 
 
+test("vehicle catalogue excludes undersized photo renditions from public gallery and media endpoint", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:car_100555_778", JSON.stringify({
+    id: "car_100555_778",
+    caption: "Kia Sportage 2026",
+    photos: [
+      { file_id: "PHOTO_GOOD", file_unique_id: "GOOD_U", width: 1280, height: 853, file_size: 180000 },
+      { file_id: "PHOTO_SMALL", file_unique_id: "SMALL_U", width: 320, height: 240, file_size: 12000 },
+      { file_id: "PHOTO_PORTRAIT", file_unique_id: "PORTRAIT_U", width: 720, height: 1280, file_size: 130000 }
+    ],
+    mediaType: "photo",
+    publishedAt: "2026-11-11T10:00:00Z"
+  }));
+  const response = await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv));
+  const body = await response.json();
+  const car = body.cars.find(item => item.id === "car_100555_778");
+  assert.deepEqual(car.mediaItems, [
+    { url: "/api/car-media/car_100555_778/photo/0", type: "photo" },
+    { url: "/api/car-media/car_100555_778/photo/1", type: "photo" }
+  ]);
+  const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(kv))).text();
+  assert.match(html, /#cars h2,#cars \.car-card h3\{color:#f4f6f9!important\}/);
+});
+
 test("car catalogue exposes mixed photo and video media with separate playback URLs", async () => {
   const kv = memoryKV();
   await kv.put("car_approved:car_100555_777", JSON.stringify({
@@ -2291,7 +2315,8 @@ test("car import removes byte-identical reuploads but keeps different angles", a
         { file_id: "A", file_unique_id: "UID_A" },
         { file_id: "B", file_unique_id: "UID_B" },
         { file_id: "C", file_unique_id: "UID_C" }
-      ]
+      ],
+      photoItems: true
     }));
     await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_601")), reviewEnv(kv));
     const car = JSON.parse(await kv.get("car_pending:car_100555_601"));
@@ -2548,6 +2573,22 @@ test("vehicle catalogue hides failed media, skips to the next usable item and ke
   assert.match(html, /gallery\.hidden=true/);
   assert.match(html, /#cars \.cars\{align-items:start;grid-auto-rows:max-content\}/);
   assert.match(html, /#cars \.car-card\{align-self:start;min-height:0;height:auto\}/);
-  assert.match(html, /#cars h2\{color:#f4f6f9!important\}/);
+  assert.match(html, /#cars h2,#cars \.car-card h3\{color:#f4f6f9!important\}/);
   assert.match(html, /@media\(max-width:780px\)[\s\S]*?#cars \.cars\{grid-template-columns:minmax\(0,1fr\)/);
+});
+
+
+test("Telegram photo size variants become one largest image, while normalized album photos stay separate", () => {
+  const variants = [
+    { file_id: "small", file_unique_id: "small_u", width: 160, height: 90, file_size: 4000 },
+    { file_id: "medium", file_unique_id: "medium_u", width: 640, height: 360, file_size: 32000 },
+    { file_id: "large", file_unique_id: "large_u", width: 1280, height: 720, file_size: 145000 }
+  ];
+  assert.deepEqual(postPhotos({ photo: variants }), [
+    { file_id: "large", file_unique_id: "large_u", width: 1280, height: 720, file_size: 145000 }
+  ]);
+  assert.deepEqual(postPhotos({ photo: [variants[2], { file_id: "album_second", file_unique_id: "album_second_u", width: 1280, height: 720, file_size: 150000 }], photoItems: true }), [
+    { file_id: "large", file_unique_id: "large_u", width: 1280, height: 720, file_size: 145000 },
+    { file_id: "album_second", file_unique_id: "album_second_u", width: 1280, height: 720, file_size: 150000 }
+  ]);
 });
