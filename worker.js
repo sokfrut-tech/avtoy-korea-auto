@@ -1332,10 +1332,11 @@ async function stageGroupMedia(msg, env, adminIds) {
  let state = JSON.parse(await env.REVIEWS.get(key) || "null");
  if (!state || !state.post) {
   const albumNumber = msg.media_group_id ? String(msg.media_group_id).replace(/[^0-9]/g, "").slice(0, 40) : String(msg.message_id);
-  state = {type:"group_media",post:{...msg,message_id:albumNumber,photo:photos,videos,sourceType:"group"},notified:{}};
+  state = {type:"group_media",post:{...msg,message_id:albumNumber,photo:photos,photoItems:true,videos,sourceType:"group"},notified:{}};
  } else {
   const saved = state.post;
   saved.photo = uniqueFileItems([...(Array.isArray(saved.photo) ? saved.photo : []), ...photos]);
+  saved.photoItems = true;
   saved.videos = uniqueFileItems([...(Array.isArray(saved.videos) ? saved.videos : []), ...videos]);
   if (!saved.caption && msg.caption) saved.caption = msg.caption;
   state.post = saved;
