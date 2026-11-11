@@ -2445,7 +2445,7 @@ footer{background:#071321;color:#aeb9c8}
 body{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
 h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
 #cars .car-card .car-body{display:flex;flex-direction:column;align-items:stretch}
-#cars .car-card .car-body h3{font-family:"Manrope",sans-serif;font-size:clamp(17px,1.45vw,21px);font-weight:800;line-height:1.28;letter-spacing:-.025em;margin:0 0 12px;overflow-wrap:anywhere}
+#cars .car-card .car-trim{order:0;align-self:flex-start;margin:0 0 5px;color:#ff806e;font:800 11px/1.3 "Manrope",sans-serif;letter-spacing:.14em;text-transform:uppercase}\n#cars .car-card .car-body h3{font-family:"Manrope",sans-serif;font-size:clamp(17px,1.45vw,21px);font-weight:800;line-height:1.28;letter-spacing:-.025em;margin:0 0 12px;overflow-wrap:anywhere;text-transform:uppercase}
 #cars .car-description{display:grid;gap:11px;margin:0 0 16px;color:#c7c9d0;font-size:14px;line-height:1.72;overflow-wrap:anywhere}
 #cars .car-description-paragraph{margin:0;color:#c7c9d0}
 #cars .car-description-heading{margin:5px 0 -3px;color:#fff;font:800 12px/1.4 "Manrope",sans-serif;letter-spacing:.09em;text-transform:uppercase}
@@ -2478,7 +2478,7 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
   #cars .sub{display:none!important}
 }
 /* 2026-11-11 owner visual refinement: compact header, hero and section rhythm */
-.topbar{border-bottom:0;box-shadow:none}
+.topbar{border-bottom:1px solid #ffffff16;box-shadow:none}
 .nav{min-height:68px;gap:14px}
 .brand-logo{width:205px}
 .nav-telegram{gap:7px;font-size:12px}
@@ -2560,7 +2560,6 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
   <div class="eyebrow">Наши автомобили</div>
   <h2>Автомобили в продаже и под заказ</h2>
   <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Загружаем актуальные предложения…</div></article></div>
-  <p class="cars-hint">← Листайте пальцем, справа видно следующую машину →</p>
 </section>
 <section class="wrap section" id="order" style="padding-top:40px">
   <div class="eyebrow">Как заказать</div>
@@ -2771,7 +2770,6 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
  if(!data.cars.length){list.textContent='';var empty=document.createElement('article');empty.className='card dashed';var emptyBody=document.createElement('div');emptyBody.className='car-body';emptyBody.textContent='Сейчас нет активных объявлений. Новые предложения появятся после проверки администратора.';empty.appendChild(emptyBody);list.appendChild(empty);return;}
  list.textContent='';
  var NL=String.fromCharCode(10);
- var hint=document.querySelector('.cars-hint'); if(hint)hint.classList.add('is-on');
  var lightbox=null, items=[], current=0;
  function onKey(e){ if(e.key==='Escape')closeBox(); else if(e.key==='ArrowRight')show(current+1); else if(e.key==='ArrowLeft')show(current-1); }
  function closeBox(){ if(lightbox){ lightbox.remove(); lightbox=null; } document.removeEventListener('keydown', onKey); }
@@ -2809,8 +2807,151 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
   var isVideo=car.mediaType==='video';
   var article=document.createElement('article'); article.className='card car-card';
   var body=document.createElement('div'); body.className='car-body';
-  var title=document.createElement('h3'); title.textContent=(car.caption||'Автомобиль из объявления').split(NL)[0].slice(0,120);
+  var heading=splitVehicleHeading((car.caption||'Автомобиль из объявления').split(NL)[0]);
+  if(heading.trim){var trim=document.createElement('div');trim.className='car-trim';trim.textContent=heading.trim;body.appendChild(trim);}
+  var title=document.createElement('h3'); title.textContent=heading.model.slice(0,120);
   body.appendChild(title);
+  function splitVehicleHeading(raw){
+   var original=String(raw||'Автомобиль из объявления').trim();
+   var trims=['GT-Line','GT Line','X-Line','X Line','Calligraphy','Noblesse','Prestige','Signature','Platinum','Limited','Ultimate','Premium','Luxury','Elegance','Adventure','High-Tech','Techno','Intense','Comfort','Classic','Active','Prime','Style','N Line','SX Prestige','SX','EX','LX','SE','SEL'];
+   for(var i=0;i<trims.length;i++){
+    var trim=trims[i], escaped=trim.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\  function renderCarDescription(root, rawCaption, titleText){');
+    var match=original.match(new RegExp('(?:\\s|[|·—–-])'+escaped+'
+   var lines=String(rawCaption||'').replaceAll(String.fromCharCode(13),'').replaceAll(String.fromCharCode(160),' ').split(String.fromCharCode(10)).map(function(line){return line.trim()});
+   while(lines.length&&!lines[0])lines.shift();
+   while(lines.length&&!lines[lines.length-1])lines.pop();
+   if(lines.length&&lines[0].slice(0,120)===String(titleText||''))lines.shift();
+   var paragraph=[],list=null;
+   function flushParagraph(){
+    if(!paragraph.length)return;
+    var p=document.createElement('p');p.className='car-description-paragraph';p.textContent=paragraph.join(' ');
+    root.appendChild(p);paragraph=[];
+   }
+   function flushList(){if(list&&list.children.length)root.appendChild(list);list=null;}
+   lines.forEach(function(line){
+    if(!line){flushParagraph();flushList();return;}
+    var sectionName=line.toLowerCase().replace(/:$/,'').trim();
+    if(['характеристики','комплектация','описание','состояние','двигатель','трансмиссия','привод','безопасность','опции','дополнительно'].indexOf(sectionName)>=0){
+     flushParagraph();flushList();
+     var h=document.createElement('h4');h.className='car-description-heading';h.textContent=sectionName;root.appendChild(h);return;
+    }
+    var bulletText=null;
+    if('•●▪◦✓✔-–—'.indexOf(line.charAt(0))>=0&&line.length>1&&line.charAt(1)===' ')bulletText=line.slice(2).trim();
+    else{
+     var space=line.indexOf(' ');
+     if(space>1&&(line.charAt(space-1)==='.'||line.charAt(space-1)===')')&&!isNaN(Number(line.slice(0,space-1))))bulletText=line.slice(space+1).trim();
+    }
+    if(bulletText){
+     flushParagraph();
+     if(!list){list=document.createElement('ul');list.className='car-description-list';}
+     var li=document.createElement('li');li.textContent=bulletText;list.appendChild(li);return;
+    }
+    flushList();
+    var colon=line.indexOf(':');
+    if(colon<0)colon=line.indexOf('：');
+    if(colon>=2&&colon<=36&&line.slice(colon+1).trim()){
+     flushParagraph();
+     var row=document.createElement('div');row.className='car-description-row';
+     var label=document.createElement('strong');label.textContent=line.slice(0,colon).trim();
+     var value=document.createElement('span');value.textContent=line.slice(colon+1).trim();
+     row.appendChild(label);row.appendChild(value);root.appendChild(row);return;
+    }
+    paragraph.push(line);
+   });
+   flushParagraph();flushList();
+  }
+  var description=document.createElement('div');description.className='car-description';
+  renderCarDescription(description,car.caption||'',heading.raw);
+  if(description.childNodes.length)body.appendChild(description);
+  var discuss=document.createElement('a');discuss.className='car-link';discuss.href='#request';discuss.textContent='Обсудить этот автомобиль →';body.appendChild(discuss);
+  if(media.length){
+   var gallery=document.createElement('div'); gallery.className='car-gallery';
+   var carItems=media.map(function(item){return typeof item==='string'?{url:item,video:isVideo}:{url:item.url,video:item.type==='video'};});
+   var stage=document.createElement('div'); stage.className='car-gallery-stage';
+   function createCarMedia(item,index){var el=document.createElement(item.video?'video':'img');el.className='car-gallery-main';el.src=item.url;if(item.video){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео автомобиля '+(index+1));}else{el.alt='Фотография автомобиля '+(index+1);el.loading='lazy';}return el;}
+   var current=createCarMedia(carItems[0],0);
+   stage.appendChild(current); gallery.appendChild(stage);
+   var photoIndex=0;
+   var count=document.createElement('span');count.className='car-gallery-count';count.textContent='1 / '+media.length;
+   var back=document.createElement('button');back.type='button';back.className='car-gallery-arrow is-prev';back.textContent='‹';back.setAttribute('aria-label','Предыдущее фото');
+   var forward=document.createElement('button');forward.type='button';forward.className='car-gallery-arrow is-next';forward.textContent='›';forward.setAttribute('aria-label','Следующее фото');
+   function showCarPhoto(nextIndex){
+    photoIndex=(nextIndex+media.length)%media.length;
+    var previous=current;
+    current=createCarMedia(carItems[photoIndex],photoIndex);
+    stage.replaceChild(current,previous);count.textContent=(photoIndex+1)+' / '+media.length;
+   }
+   back.hidden=forward.hidden=count.hidden=media.length<2;
+   back.onclick=function(){showCarPhoto(photoIndex-1)};
+   forward.onclick=function(){showCarPhoto(photoIndex+1)};
+   var touchStart=0;
+   gallery.addEventListener('touchstart',function(e){touchStart=e.changedTouches[0].clientX},{passive:true});
+   gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showCarPhoto(photoIndex+(delta<0?1:-1))},{passive:true});
+   stage.addEventListener('click',function(e){if(e.target&&e.target.tagName==='VIDEO')return;items=carItems;openBox(photoIndex)});
+   gallery.appendChild(back);gallery.appendChild(forward);gallery.appendChild(count);body.insertBefore(gallery,title);
+  }
+  article.appendChild(body); list.appendChild(article);
+ });
+}).catch(function(){
+ var list=document.getElementById('cars-list'); if(!list)return;
+ list.textContent='';
+ var card=document.createElement('article'); card.className='card dashed';
+ var body=document.createElement('div'); body.className='car-body';
+ var message=document.createElement('p'); message.className='car-text'; message.textContent='Не удалось загрузить автомобили. Проверьте соединение и попробуйте ещё раз.';
+ var retry=document.createElement('button'); retry.type='button'; retry.className='btn btn-dark'; retry.textContent='Повторить загрузку'; retry.addEventListener('click',loadCars);
+ body.appendChild(message); body.appendChild(retry); card.appendChild(body); list.appendChild(card);
+});
+}
+loadCars();
+// Главный слайдер: три реальные модели, автосмена каждые 5 секунд и ручное управление.
+(function(){
+  if(typeof document.querySelector!=='function')return;
+  var root=document.querySelector('.hero-standard');
+  if(!root || typeof root.querySelector!=='function')return;
+  var slides=root.querySelectorAll('.hero-slide');
+  var dots=root.querySelectorAll('.hero-dot');
+  var modelLabel=root.querySelector('.hero-model-name');
+  if(!slides.length)return;
+  var index=0, timer=null, paused=false;
+  var reducedMotion=!!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  function stopTimer(){if(timer!==null){window.clearInterval(timer);timer=null;}}
+  function startTimer(){
+    stopTimer();
+    if(!reducedMotion && !paused && document.visibilityState!=='hidden'){
+      timer=window.setInterval(function(){show(index+1)},5000);
+    }
+  }
+  function show(next){
+    slides[index].classList.remove('active');
+    if(dots[index]){dots[index].classList.remove('active');dots[index].setAttribute('aria-current','false');}
+    index=(next+slides.length)%slides.length;
+    slides[index].classList.add('active');
+    if(dots[index]){dots[index].classList.add('active');dots[index].setAttribute('aria-current','true');}
+    if(modelLabel)modelLabel.textContent=slides[index].getAttribute('data-model')||'';
+    startTimer();
+  }
+  if(dots[0])dots[0].setAttribute('aria-current','true');
+  if(modelLabel)modelLabel.textContent=slides[0].getAttribute('data-model')||'';
+  slides.forEach(function(slide){var match=String(slide.style.backgroundImage||'').match(/url\(["']?(.+?)["']?\)/);if(match){var preload=new Image();preload.src=match[1];}});
+  root.querySelector('.hero-prev')?.addEventListener('click',function(){show(index-1)});
+  root.querySelector('.hero-next')?.addEventListener('click',function(){show(index+1)});
+  dots.forEach(function(dot,i){dot.addEventListener('click',function(){show(i)})});
+  root.addEventListener('focusin',function(){paused=true;stopTimer();});
+  root.addEventListener('focusout',function(event){if(!root.contains(event.relatedTarget)){paused=false;startTimer();}});
+  document.addEventListener('visibilitychange',startTimer);
+  startTimer();
+})();
+</script>
+</body>
+</html>`;
+  return new Response(html,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"strict-origin-when-cross-origin"}});
+ }
+};
+,'i'));
+    if(match){var model=original.slice(0,match.index).trim().replace(/[|·—–-]+$/,'').trim();if(model)return {model:model,trim:trim.toUpperCase(),raw:original};}
+   }
+   return {model:original,trim:'',raw:original};
+  }
   function renderCarDescription(root, rawCaption, titleText){
    var lines=String(rawCaption||'').replaceAll(String.fromCharCode(13),'').replaceAll(String.fromCharCode(160),' ').split(String.fromCharCode(10)).map(function(line){return line.trim()});
    while(lines.length&&!lines[0])lines.shift();
