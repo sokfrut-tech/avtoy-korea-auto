@@ -2085,7 +2085,7 @@ export default {
     "x-content-type-options": "nosniff"
    }});
   }
-  const seoCarMatch = request.method === "GET" ? url.pathname.match(/^\/cars\/(car_-?\\d+_\\d+)\/?$/) : null;
+  const seoCarMatch = request.method === "GET" ? url.pathname.match(/^\/cars\/(car_-?\d+_\d+)\/?$/) : null;
   if (seoCarMatch) {
    if (!env.REVIEWS) return new Response("Not found", {status:404});
    const carId = seoCarMatch[1];
@@ -2126,8 +2126,8 @@ export default {
       const caption = publicCarCaption(car.caption);
       if (caption.length < 30 || (!catalogPhotoItems(car).length && !uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])).length)) continue;
       const id = key.name.slice("car_approved:".length);
-      if (!/^car_-?\\d+_\\d+$/.test(id)) continue;
-      const lastmod = car.publishedAt ? '<lastmod>' + new Date(car.publishedAt).toISOString().slice(0,10) + '</lastmod>' : '';
+      if (!/^car_-?\d+_\d+$/.test(id)) continue;
+      const publishedDate = car.publishedAt ? new Date(car.publishedAt) : null;\n      const lastmod = publishedDate && Number.isFinite(publishedDate.getTime()) ? '<lastmod>' + publishedDate.toISOString().slice(0,10) + '</lastmod>' : '';
       sitemapUrls.push('<url><loc>' + url.origin + '/cars/' + encodeURIComponent(id) + '</loc>' + lastmod + '<changefreq>weekly</changefreq><priority>0.8</priority></url>');
      }
      cursor = page.list_complete ? null : page.cursor;
