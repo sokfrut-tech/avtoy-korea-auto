@@ -1011,13 +1011,18 @@ function postPhotos(post) {
 }
 
 // Hide clearly undersized photo renditions from published vehicle galleries.
-// Unknown dimensions remain visible pending manual review.
+// Unknown-dimension legacy entries are hidden until re-upload or explicit admin review.
 function catalogPhotoItems(car) {
  const source = Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []);
  return uniqueFileItems(source).filter(photo => {
   const width = Number(photo.width) || 0, height = Number(photo.height) || 0;
-  if (!width || !height) return true;
-  return Math.max(width, height) >= 1280 && width * height >= 900000;
+  if (width > 0 && height > 0) {
+   return Math.max(width, height) >= 1280 && width * height >= 900000;
+  }
+  // A Telegram image sent as a document preserves its uploaded bytes. Without
+  // dimensions, only accept that explicit original-file path with a meaningful size.
+  // Legacy PhotoSize/file_id entries with unknown dimensions are hidden until re-upload.
+  return Boolean(photo.mime_type && Number(photo.file_size) >= 120000);
  });
 }
 
@@ -1034,19 +1039,28 @@ function largestPhotoOf(photo) {
 
 // Отправка всех фото и видео записи администратору.
 async function sendChannelMedia(env, adminId, photos, videos, caption) {
- // Telegram принимает не больше 10 медиа в одной группе: отправляем все фото пачками.
+ // Keep a stable numbered link between each admin preview and its car/moderation card.
+ // Telegram limits media groups to 10 items; every item receives its own ordinal caption.
+ const total = photos.length;
+ const title = String(caption || "").split(String.fromCharCode(10)).map(line => line.trim()).find(Boolean) || "";
+ const photoLabel = (number, original=false) => {
+  const marker = "Фото " + number + "/" + total + (original ? " · оригинал" : "");
+  return (title ? marker + " · " + title : marker).slice(0, 1024);
+ };
  for (let offset = 0; offset < photos.length; offset += 10) {
   const chunk = photos.slice(offset, offset + 10);
   const documentItems = chunk.filter(photo => photo.mime_type);
   const photoItems = chunk.filter(photo => !photo.mime_type);
   for (const photo of documentItems) {
-   await callTelegram(env, "sendDocument", { chat_id: adminId, document: photo.file_id, ...(offset === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
+   const number = photos.indexOf(photo) + 1;
+   await callTelegram(env, "sendDocument", { chat_id: adminId, document: photo.file_id, caption: photoLabel(number, true) });
   }
   if (photoItems.length > 1) {
-   const media = photoItems.map((photo, index) => ({ type: "photo", media: photo.file_id, ...(offset === 0 && documentItems.length === 0 && index === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) }));
+   const media = photoItems.map(photo => ({ type: "photo", media: photo.file_id, caption: photoLabel(photos.indexOf(photo) + 1) }));
    await callTelegram(env, "sendMediaGroup", { chat_id: adminId, media });
   } else if (photoItems.length === 1) {
-   await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: photoItems[0].file_id, ...(offset === 0 && documentItems.length === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) });
+   const photo = photoItems[0];
+   await callTelegram(env, "sendPhoto", { chat_id: adminId, photo: photo.file_id, caption: photoLabel(photos.indexOf(photo) + 1) });
   }
  }
  for (const video of videos) await callTelegram(env, "sendVideo", { chat_id: adminId, video: video.file_id });
@@ -1109,7 +1123,7 @@ function carPhotoQualityNote(photos) {
 
 async function handleCarPost(post, env, adminIds) {
  const chat = post.chat || {};
- if (String(chat.username || "").toLowerCase() !== "avtoykorea") return;
+ if (String(chat.username || "").toLowerCase() !== "avtoykorea") return "rejected";
  const created = sourcePostDate(post);
  const cutoff = Math.floor(Date.UTC(2026, 0, 1) / 1000);
  if (!created || created < cutoff) {
@@ -1117,19 +1131,26 @@ async function handleCarPost(post, env, adminIds) {
    chat_id: adminId,
    text: "⏭ Автомобиль не импортирован: публикация создана до 1 января 2026 года или дата источника недоступна. Для отзывов такого ограничения нет."
   })));
-  return;
+  return "rejected";
  }
  const caption = cleanPublicationText(post.caption || post.text).slice(0, 3000);
+ if (!caption.trim()) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env, "sendMessage", {
+   chat_id: adminId,
+   text: "⏭ Автомобиль не импортирован: в исходной публикации нет описания. Добавьте описание и отправьте публикацию повторно."
+  })));
+  return "rejected";
+ }
  const photos = await uniquePhotoFilesByContent(postPhotos(post), env);
  const videos = postVideos(post);
  const fileId = photos.length ? photos[photos.length - 1].file_id : (videos.length ? videos[0].file_id : null);
- if (!caption && !fileId) return;
- if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return; }
+ if (!caption && !fileId) return "rejected";
+ if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return "unavailable"; }
  const id = "car_" + String(chat.id).replace(/-/g,"") + "_" + messageNumberOf(post.message_id);
  const approved = await env.REVIEWS.get("car_approved:" + id);
  if (approved) {
   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"✅ Этот автомобиль уже опубликован на сайте. Повторная публикация не создана: https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id)})));
-  return;
+  return "already_published";
  }
  const existing = await env.REVIEWS.get("car_pending:" + id);
  if (existing) {
@@ -1139,7 +1160,7 @@ async function handleCarPost(post, env, adminIds) {
    await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "");
    await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная отправка: автомобиль всё ещё ожидает решения модератора.\n\n" + (saved.caption || "Описание отсутствует") + "\n\nИсточник: " + saved.sourceUrl,reply_markup:keyboard});
   }));
-  return;
+  return "already_pending";
  }
  const car = {id,caption,fileId,photos,videos,mediaType:videos.length && !photos.length ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id),createdAt:new Date().toISOString(),sourceDate:created};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
@@ -1148,6 +1169,7 @@ async function handleCarPost(post, env, adminIds) {
   await sendChannelMedia(env, adminId, photos, videos, caption);
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 ОДИН АВТОМОБИЛЬ · " + (caption.split(String.fromCharCode(10)).find(line => line.trim()) || "Без названия").slice(0,90) + "\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n" + carPhotoQualityNote(photos) + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
  }));
+ return "queued";
 }
 
 async function handleImportedReview(post, env, adminIds) {
@@ -1225,10 +1247,21 @@ async function handleImportChoice(callback, env, adminIds) {
  if (!raw) return answer("Публикация уже обработана или не найдена",true);
  const entry = JSON.parse(raw);
  const post = entry && entry.post ? entry.post : entry;
- if (kind === "car") await handleCarPost(post,env,adminIds);
- else await handleImportedReview(post,env,adminIds);
+ if (kind === "car") {
+  const result = await handleCarPost(post,env,adminIds);
+  await env.REVIEWS.delete(key);
+  const messages = {
+   queued: "Передано в модерацию автомобилей",
+   already_pending: "Автомобиль уже ожидает модерации",
+   already_published: "Автомобиль уже опубликован",
+   unavailable: "Не удалось передать: хранилище не настроено",
+   rejected: "Автомобиль не передан: проверьте сообщение администраторам"
+  };
+  return answer(messages[result] || messages.rejected, result === "rejected" || result === "unavailable");
+ }
+ await handleImportedReview(post,env,adminIds);
  await env.REVIEWS.delete(key);
- return answer(kind === "car" ? "Передано в модерацию автомобилей" : "Передано в модерацию отзывов");
+ return answer("Передано в модерацию отзывов");
 }
 
 async function resendChannelImportEntry(entry, id, env, adminIds) {
@@ -1345,7 +1378,7 @@ async function stageChannelPost(post, env, adminIds) {
  await env.REVIEWS.put("import_pending:" + id,JSON.stringify({...stored,post:stored}),{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, photos, videos, "");
+  await sendChannelMedia(env, adminId, photos, videos, String(post.caption || post.text || ""));
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Новая публикация из @avtoYkorea. Выберите раздел для импорта.\n\n" + String(post.caption || post.text || "Без текста").slice(0,2500) + "\n\nСнимки одного альбома объединяются в одну карточку.\nДата оригинала: " + (post.sourceDate ? new Date(post.sourceDate*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow"}) : "не определена"),reply_markup:keyboard}); }));
 }
 

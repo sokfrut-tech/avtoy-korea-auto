@@ -341,6 +341,23 @@ test("admin choosing review imports an old post regardless of its date", async (
   });
 });
 
+test("car import without a description is rejected before moderation", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await kv.put("import_pending:-100555_49", JSON.stringify({
+      chat:{id:-100555,username:"avtoYkorea"},message_id:49,sourceDate:1790000000,
+      photo:[{file_id:"CAR_WITHOUT_DESCRIPTION"}]
+    }));
+    await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_49")),reviewEnv(kv));
+    assert.equal((await kv.list({prefix:"car_pending:"})).keys.length,0);
+    assert.ok(calls.some(c=>c.method==="sendMessage" && /нет описания/.test(c.payload.text || "")));
+    const callbackAnswer = calls.find(c=>c.method==="answerCallbackQuery");
+    assert.match(callbackAnswer?.payload.text || "", /не передан/i, "callback must not claim a rejected car entered moderation");
+    assert.equal(callbackAnswer?.payload.show_alert, true);
+    assert.equal(await kv.get("car_approved:car_100555_49"),null);
+  });
+});
+
 test("admin choosing car rejects posts before 2026-01-01 and accepts boundary date", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
@@ -1464,9 +1481,9 @@ test("forwarded channel post: a failed admin delivery is restored by Telegram's 
 test("forwarded car album: all photos are shown on the site after publishing", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
-    await worker.fetch(webhookUpdate({ message: forwardedPart(701, 1001, "fw-8", { caption: "Kia K5 2021", photo: [{ file_id: "C1" }] }) }), reviewEnv(kv));
-    await worker.fetch(webhookUpdate({ message: forwardedPart(702, 1002, "fw-8", { photo: [{ file_id: "C2" }] }) }), reviewEnv(kv));
-    await worker.fetch(webhookUpdate({ message: forwardedPart(703, 1003, "fw-8", { photo: [{ file_id: "C3" }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(701, 1001, "fw-8", { caption: "Kia K5 2021", photo: [{ file_id: "C1", width: 1600, height: 1200, file_size: 350000 }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(702, 1002, "fw-8", { photo: [{ file_id: "C2", width: 1600, height: 1200, file_size: 350000 }] }) }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate({ message: forwardedPart(703, 1003, "fw-8", { photo: [{ file_id: "C3", width: 1600, height: 1200, file_size: 350000 }] }) }), reviewEnv(kv));
     await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_1001")), reviewEnv(kv));
     const carId = (await kv.list({ prefix: "car_pending:" })).keys[0].name.replace("car_pending:", "");
     await worker.fetch(webhookUpdate(callback(111111111, "carpub:" + carId)), reviewEnv(kv));
@@ -1474,6 +1491,9 @@ test("forwarded car album: all photos are shown on the site after publishing", a
     const car = body.cars.find(c => c.id === carId);
     assert.ok(car, "published car is on the site");
     assert.equal(car.mediaItems.length, 3, "all three album photos are shown");
+    const adminAlbum = calls.find(call => call.method === "sendMediaGroup" && call.payload.media && call.payload.media.length === 3);
+    assert.ok(adminAlbum, "admin receives one grouped visual preview for the vehicle album");
+    assert.deepEqual(adminAlbum.payload.media.map(item => item.caption), ["Фото 1/3 · Kia K5 2021", "Фото 2/3 · Kia K5 2021", "Фото 3/3 · Kia K5 2021"]);
   });
 });
 
@@ -2222,7 +2242,9 @@ test("channel car image documents preserve original file metadata through modera
     const car = JSON.parse(await kv.get("car_pending:car_100555_88"));
     assert.equal(car.photos[0].file_id, "CAR_ORIGINAL_JPEG");
     assert.equal(car.photos[0].file_name, "sorento-original.jpg");
-    assert.ok(calls.some(call => call.method === "sendDocument" && call.payload.document === "CAR_ORIGINAL_JPEG"));
+    const originalPreview = calls.find(call => call.method === "sendDocument" && call.payload.document === "CAR_ORIGINAL_JPEG");
+    assert.ok(originalPreview, "admin receives the original image file");
+    assert.ok(originalPreview.payload.caption.startsWith("Фото 1/1 · оригинал · Kia Sorento"));
   });
 });
 
@@ -2241,7 +2263,7 @@ test("car catalogue exposes mixed photo and video media with separate playback U
   await kv.put("car_approved:car_100555_777", JSON.stringify({
     id: "car_100555_777",
     caption: "Kia Sorento 2022",
-    photos: [{ file_id: "PHOTO1", file_unique_id: "PHOTO1_U" }],
+    photos: [{ file_id: "PHOTO1", file_unique_id: "PHOTO1_U", width: 1600, height: 1200, file_size: 350000 }],
     videos: [{ file_id: "VIDEO1", file_unique_id: "VIDEO1_U" }],
     mediaType: "photo",
     publishedAt: "2026-11-02T10:00:00Z"
@@ -2260,14 +2282,15 @@ test("car catalogue exposes mixed photo and video media with separate playback U
 });
 
 
-test("published car catalogue hides known low-resolution photos but keeps sharp photos and video", async () => {
+test("published car catalogue hides low-resolution and unverified legacy photos but keeps large photos, uploaded originals and video", async () => {
  const kv = memoryKV();
  await kv.put("car_approved:car_100555_778", JSON.stringify({
   id:"car_100555_778",caption:"Kia Sportage 2026",
   photos:[
    {file_id:"BLURRY_640",file_unique_id:"BLURRY_640_U",width:640,height:480,file_size:45000},
-   {file_id:"SHARP_1600",file_unique_id:"SHARP_1600_U",width:1600,height:1200,file_size:350000},
-   {file_id:"UNKNOWN_SIZE",file_unique_id:"UNKNOWN_SIZE_U"}
+   {file_id:"LARGE_1600",file_unique_id:"LARGE_1600_U",width:1600,height:1200,file_size:350000},
+   {file_id:"UNKNOWN_SIZE",file_unique_id:"UNKNOWN_SIZE_U"},
+   {file_id:"ORIGINAL_DOCUMENT",file_unique_id:"ORIGINAL_DOCUMENT_U",mime_type:"image/jpeg",file_size:420000}
   ],
   videos:[{file_id:"WALKAROUND",file_unique_id:"WALKAROUND_U"}],
   publishedAt:"2026-11-11T10:00:00Z"
@@ -2281,6 +2304,10 @@ test("published car catalogue hides known low-resolution photos but keeps sharp 
   {url:"/api/car-media/car_100555_778/video/0",type:"video"}
  ]);
  assert.equal(car.mediaItems.some(item=>item.url.includes("BLURRY")),false);
+ // Unknown legacy photo renditions must not leak into the public gallery.
+ // The image/document upload path is retained because it preserves source bytes.
+ const unknownLegacy = car.mediaItems.find(item=>item.url.endsWith("/photo/1"));
+ assert.ok(unknownLegacy, "the original document is the second accepted photo");
 });
 
 test("car import removes byte-identical reuploads but keeps different angles", async () => {

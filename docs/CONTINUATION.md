@@ -277,3 +277,80 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Source-level work is committed on the feature branch. Exact-head CI, runtime Telegram round-trip, real photo fidelity, and phone visual verification are pending. Do not merge or deploy without explicit owner approval.
 - Remaining media-quality investigation: trace actual published car image URL/rendition end-to-end; distinguish Telegram-compressed photo uploads from source images that were already blurry; implement duplicate suppression at the vehicle-post scope without deleting intentional repeated images across different vehicles; verify site renders full media and not an accidental thumbnail URL.
 - Next action: open PR and run full Worker/Cloudflare/Factory checks; inspect actual code/test results before any merge.
+
+
+## Strict published vehicle-photo filtering — 2026-11-12
+- Active branch: `fix/strict-published-photo-quality-2026-11-12`, based on commit `d921807d2c71d51493b3c6574bff4ad933a54515`.
+- Changed `catalogPhotoItems()`: published galleries now require known image dimensions meeting the existing 1280px longest-edge / 900,000-pixel threshold. Legacy Telegram photo renditions with missing dimensions are hidden rather than silently treated as verified.
+- Exception: image documents with an explicit safe image MIME type and file size >=120 KB remain eligible when dimensions are unavailable; Telegram document upload preserves uploaded bytes and is the preferred original-quality intake path.
+- Added regression coverage for low-resolution photos, unknown legacy renditions, retained large photos, original document uploads, and video continuity.
+- Important limitation: pixel dimensions and file size do not prove visual sharpness. This change filters undersized/unverifiable legacy renditions; it does not implement a blur detector. Human review of actual image content remains required.
+- No KV records were deleted or rewritten. No Cloudflare deployment, Telegram webhook change, secret change, or production mutation was performed.
+- Pending: run full test suite and security/build workflows on this exact branch; inspect CI results; visually verify image output in browser/mobile. Existing old photos hidden by the stricter filter need source-quality re-upload as Telegram FILE/DOCUMENT.
+- Next action: open a draft PR and verify CI before any merge or production release.
+
+- First CI run on the initial patch exposed two stale fixtures that represented Telegram PhotoSize objects without the width/height/file_size metadata Telegram supplies. The strict filter correctly hid them; updated those fixtures to use realistic 1600x1200 Telegram photo metadata. The new strict-filter regression test passed in that run; full suite rerun is pending on the updated head.
+
+- Exact code/test revision `24776e44f418be91be50874ea8ef49a3eb403fc8`: Worker tests passed; Cloudflare Worker checks passed; Factory Review functional/regression tests passed; Factory Review security/privacy tests passed. The earlier failures were limited to two legacy test fixtures missing Telegram PhotoSize metadata and were corrected.
+- Deploy workflow on that PR revision completed its test job successfully; Cloudflare secret verification and the actual Worker deployment steps were skipped because this was a PR. No production deployment occurred.
+- Factory Review Director / release evidence was still archiving its handoff artifact at the time of this update.
+- A documentation-only continuation update followed at `9a25d6922c126117f5660a35525397c2731ed526`; no Worker or test source changed after the passing code/test revision.
+
+## Admin vehicle-photo preview labeling — 2026-11-12
+- Updated `sendChannelMedia()` so each admin-side vehicle photo preview has an explicit ordinal caption (e.g. `Фото 1/3 · Kia K5 2021`); image documents are labeled as originals (e.g. `Фото 1/1 · оригинал · Kia Sorento`).
+- Added regression assertions for a three-photo forwarded vehicle album and an image-document original upload.
+- This improves association between admin preview images and the vehicle moderation card. It does not alter stored source `file_id` values or the website gallery.
+- Pending: exact-head CI for the new code/test revision; then inspect PR review and decide merge only after all required checks are green.
+
+- CI for the first numbered-preview test commit caught an invalid escaped slash in the new test's regular expression (the Worker code syntax check passed). Replaced that assertion with a literal `startsWith()` check. Exact-head CI rerun is pending; do not merge while checks are red.
+
+- Follow-up CI exposed that the initial channel-import preview call passed an empty caption, so the ordinal was present but the vehicle title was absent on the first admin preview. Updated it to pass the source post caption/text; this is the intended association fix, not a relaxed test. New exact-head CI pending.
+
+- Final review of the preview-label code found a multiline-caption edge case: the title extractor was splitting on a literal backslash sequence rather than line breaks. Replaced it with a newline-character split so the first non-empty vehicle-title line is used. New exact-head CI pending.
+
+- Final preview-label source revision `3c5b7931af65c3987d7ec9200651272014b9c814`: Worker regression tests passed; Cloudflare Worker syntax/private-admin routing checks passed; Factory Review full functional/regression tests passed; Factory Review security/privacy tests passed; Director/release evidence artifact archived successfully.
+- PR deploy workflow ran the syntax and Worker tests successfully, while Cloudflare secret verification and actual deployment steps were skipped. No production deploy was performed.
+- The current branch head after this evidence note is documentation-only; Worker source is unchanged from the passing `3c5b7931` revision.
+
+
+## Follow-up CI diagnosis — 2026-11-12
+
+- The preceding PR head `5af8947d762a00b2696057e5cbf7d31779c441ce` had all five workflows complete successfully: Worker tests, Cloudflare Worker checks, Factory Review, Factory Security Baseline, and Deploy workflow (the PR deploy workflow did not deploy production).
+- The next head `9b98dfc47cee217a64f0d7c824b8945a2804f14b` is a documentation-only addition of `PHOTO_BLUR_DETECTION_PLAN_2026-11-12.md`; Worker runtime source did not change in that commit.
+- All five workflow runs for `9b98dfc` failed at the same timestamp. Their jobs had `runner_id=0`, empty `runner_name`, no `started_at`, and empty `steps[]`. Retrying failed jobs reproduced the failure. This proves no runner executed the workflow steps; it does not identify the exact account-level cause.
+- Repository metadata confirms the repo is private but not archived or disabled. The available GitHub connector can read workflow runs and retry jobs, but cannot inspect or change repository/org billing, Actions hosted-runner policy, or account spending limits.
+- Do not infer that the CI failure is a source-code defect. The next required check is the GitHub Actions usage/billing and hosted-runner availability for the owner account. If minutes/spending are exhausted or hosted runners are restricted, an account owner must resolve that in GitHub Settings. Then rerun the exact PR head and require all checks to pass before merge.
+- No runtime source changes, merge, deployment, KV mutation, or Telegram configuration change were made during this diagnosis.
+
+
+## Latest retry and provider status — 2026-11-12
+
+- Retried the Worker tests run (`43147930096`) through the GitHub Actions rerun endpoint. GitHub accepted the retry, created job `130950845452`, then the job failed immediately without a runner assignment or executed steps. The job log endpoint returned BlobNotFound, consistent with no runner log being produced.
+- Rechecked all five latest-head workflow runs at `2cf9b6d735fe46d381b31bd9bee026404bec96f9`: each job still has `runner_id=0`, blank runner name, and zero steps. No workflow code or runtime source change can fix a job that never reaches a runner.
+- Public GitHub Status currently reports Actions operational and no active incident for Nov 12; its incident history records earlier Actions degradations on Nov 9 and Nov 10 as resolved. This makes a repository/account-specific hosted-runner or billing/policy restriction more likely, but the available connector cannot inspect those account settings.
+- No GitHub Actions settings, billing limits, runner configuration, secrets, production deployment, or merge were changed. Do not weaken required checks or bypass CI. Required owner-side action is to inspect repository/org Actions permissions and account Actions spending/usage limits, or open GitHub Support with the run IDs above if those settings look normal.
+
+
+## Photo-filter comment consistency — 2026-11-12
+
+- Final source review found a stale explanatory comment above `catalogPhotoItems()`: it said unknown-dimension entries remained visible, while the implemented filter correctly hides legacy entries without dimensions unless they are explicitly uploaded as sufficiently large image documents.
+- Corrected the comment only; no runtime logic or thresholds changed. Commit: `45e9093feef154a59caed9f76e96aace0ad6b018`.
+- The current PR head now requires a fresh exact-head CI run. Previous checks remain evidence only for their respective earlier SHAs; they are not claimed as verification of this new head. The hosted-runner allocation issue remains unresolved. No merge or production deployment.
+
+
+## Require vehicle description before car moderation — 2026-11-12
+
+- Code review found `handleCarPost()` accepted a photo-only vehicle post with an empty caption, despite the project requirement that vehicle listings must have a description.
+- Added an early guard: a car import with an empty cleaned caption is not staged for moderation; both configured admins receive a clear explanation to add a description and resend. No photo or KV publication data is created for that car.
+- Added regression test `car import without a description is rejected before moderation` covering a photo-only forwarded post.
+- Commits: Worker guard `8e329ab9dec6ddfa974425b1160952c9458ed9c3`; regression test `1ab83e659773680dbeaedc991bc3b95022f0c046`.
+- Verification status: test source was added but has not executed on the current head because GitHub Actions runner allocation remains unresolved. Do not claim this new test passed. No merge, deployment, KV mutation, or Telegram configuration change.
+
+
+## Accurate admin callback for rejected car imports — 2026-11-12
+
+- Review found a misleading Telegram callback: `handleImportChoice()` always answered “Передано в модерацию автомобилей” even when `handleCarPost()` rejected an old/undated post or a post without a description.
+- `handleCarPost()` now returns explicit outcomes (`queued`, `already_pending`, `already_published`, `unavailable`, `rejected`). The callback toast now reflects the outcome; rejected/unavailable cases show an alert instead of falsely claiming success.
+- Extended the missing-description regression test to assert that the callback does not claim the car entered moderation and displays an alert.
+- Commits: Worker `2b27b0ce1135fcec05698ef22e713f1de14719cc`; test `39cff0e646d8e82965078e5dbb2427bac9cb9f65`.
+- Verification: source/test review only; GitHub Actions runner allocation is still failing before any step runs. This change and test are not claimed as executed/passing. No merge or production deployment.
