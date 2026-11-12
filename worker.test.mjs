@@ -351,6 +351,9 @@ test("car import without a description is rejected before moderation", async () 
     await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_49")),reviewEnv(kv));
     assert.equal((await kv.list({prefix:"car_pending:"})).keys.length,0);
     assert.ok(calls.some(c=>c.method==="sendMessage" && /нет описания/.test(c.payload.text || "")));
+    const callbackAnswer = calls.find(c=>c.method==="answerCallbackQuery");
+    assert.match(callbackAnswer?.payload.text || "", /не передан/i, "callback must not claim a rejected car entered moderation");
+    assert.equal(callbackAnswer?.payload.show_alert, true);
     assert.equal(await kv.get("car_approved:car_100555_49"),null);
   });
 });
