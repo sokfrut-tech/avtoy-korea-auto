@@ -345,3 +345,12 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Added regression test `car import without a description is rejected before moderation` covering a photo-only forwarded post.
 - Commits: Worker guard `8e329ab9dec6ddfa974425b1160952c9458ed9c3`; regression test `1ab83e659773680dbeaedc991bc3b95022f0c046`.
 - Verification status: test source was added but has not executed on the current head because GitHub Actions runner allocation remains unresolved. Do not claim this new test passed. No merge, deployment, KV mutation, or Telegram configuration change.
+
+
+## Accurate admin callback for rejected car imports — 2026-11-12
+
+- Review found a misleading Telegram callback: `handleImportChoice()` always answered “Передано в модерацию автомобилей” even when `handleCarPost()` rejected an old/undated post or a post without a description.
+- `handleCarPost()` now returns explicit outcomes (`queued`, `already_pending`, `already_published`, `unavailable`, `rejected`). The callback toast now reflects the outcome; rejected/unavailable cases show an alert instead of falsely claiming success.
+- Extended the missing-description regression test to assert that the callback does not claim the car entered moderation and displays an alert.
+- Commits: Worker `2b27b0ce1135fcec05698ef22e713f1de14719cc`; test `39cff0e646d8e82965078e5dbb2427bac9cb9f65`.
+- Verification: source/test review only; GitHub Actions runner allocation is still failing before any step runs. This change and test are not claimed as executed/passing. No merge or production deployment.
