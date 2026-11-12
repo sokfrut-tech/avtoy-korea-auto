@@ -2066,6 +2066,33 @@ export default {
    const contentType = review.kind === "video" ? "video/mp4" : (imageType || "image/jpeg");
    return new Response(upstream.body, { headers: { "content-type": contentType, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
   }
+  if (request.method === "GET" && url.pathname === "/robots.txt") {
+   const body = [
+    "User-agent: *",
+    "Allow: /",
+    "Disallow: /admin",
+    "Disallow: /api/",
+    "Disallow: /telegram/",
+    "Sitemap: " + url.origin + "/sitemap.xml",
+    ""
+   ].join("\n");
+   return new Response(body, { headers: {
+    "content-type": "text/plain; charset=utf-8",
+    "cache-control": "public, max-age=3600",
+    "x-content-type-options": "nosniff"
+   }});
+  }
+  if (request.method === "GET" && url.pathname === "/sitemap.xml") {
+   const body = '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' +
+    '<url><loc>' + url.origin + '/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>' +
+    '</urlset>';
+   return new Response(body, { headers: {
+    "content-type": "application/xml; charset=utf-8",
+    "cache-control": "public, max-age=3600",
+    "x-content-type-options": "nosniff"
+   }});
+  }
   if(url.pathname==="/favicon.ico") return new Response(null,{status:204});
   const html = `<!doctype html>
 <html lang="ru">
@@ -2074,7 +2101,7 @@ export default {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#08090b">
 <meta name="description" content="Подбор автомобилей из Кореи, Китая и ОАЭ под ваш бюджет">
-<title>AVTOY KOREA: автомобили под заказ</title>
+<meta name="robots" content="index,follow,max-image-preview:large">\n<link rel="canonical" href="${url.origin}/">\n<meta property="og:type" content="website">\n<meta property="og:site_name" content="AVTOY KOREA">\n<meta property="og:title" content="AVTOY KOREA — автомобили из Кореи, Китая и ОАЭ">\n<meta property="og:description" content="Подбор автомобилей под бюджет, проверка, доставка и сопровождение покупки.">\n<meta property="og:url" content="${url.origin}/">\n<title>AVTOY KOREA: автомобили под заказ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
