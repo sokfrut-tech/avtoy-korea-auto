@@ -1134,6 +1134,13 @@ async function handleCarPost(post, env, adminIds) {
   return;
  }
  const caption = cleanPublicationText(post.caption || post.text).slice(0, 3000);
+ if (!caption.trim()) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env, "sendMessage", {
+   chat_id: adminId,
+   text: "⏭ Автомобиль не импортирован: в исходной публикации нет описания. Добавьте описание и отправьте публикацию повторно."
+  })));
+  return;
+ }
  const photos = await uniquePhotoFilesByContent(postPhotos(post), env);
  const videos = postVideos(post);
  const fileId = photos.length ? photos[photos.length - 1].file_id : (videos.length ? videos[0].file_id : null);
