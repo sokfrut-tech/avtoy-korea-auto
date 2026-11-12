@@ -329,3 +329,10 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Rechecked all five latest-head workflow runs at `2cf9b6d735fe46d381b31bd9bee026404bec96f9`: each job still has `runner_id=0`, blank runner name, and zero steps. No workflow code or runtime source change can fix a job that never reaches a runner.
 - Public GitHub Status currently reports Actions operational and no active incident for Nov 12; its incident history records earlier Actions degradations on Nov 9 and Nov 10 as resolved. This makes a repository/account-specific hosted-runner or billing/policy restriction more likely, but the available connector cannot inspect those account settings.
 - No GitHub Actions settings, billing limits, runner configuration, secrets, production deployment, or merge were changed. Do not weaken required checks or bypass CI. Required owner-side action is to inspect repository/org Actions permissions and account Actions spending/usage limits, or open GitHub Support with the run IDs above if those settings look normal.
+
+
+## Photo-filter comment consistency — 2026-11-12
+
+- Final source review found a stale explanatory comment above `catalogPhotoItems()`: it said unknown-dimension entries remained visible, while the implemented filter correctly hides legacy entries without dimensions unless they are explicitly uploaded as sufficiently large image documents.
+- Corrected the comment only; no runtime logic or thresholds changed. Commit: `45e9093feef154a59caed9f76e96aace0ad6b018`.
+- The current PR head now requires a fresh exact-head CI run. Previous checks remain evidence only for their respective earlier SHAs; they are not claimed as verification of this new head. The hosted-runner allocation issue remains unresolved. No merge or production deployment.
