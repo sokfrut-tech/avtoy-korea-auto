@@ -321,3 +321,11 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Repository metadata confirms the repo is private but not archived or disabled. The available GitHub connector can read workflow runs and retry jobs, but cannot inspect or change repository/org billing, Actions hosted-runner policy, or account spending limits.
 - Do not infer that the CI failure is a source-code defect. The next required check is the GitHub Actions usage/billing and hosted-runner availability for the owner account. If minutes/spending are exhausted or hosted runners are restricted, an account owner must resolve that in GitHub Settings. Then rerun the exact PR head and require all checks to pass before merge.
 - No runtime source changes, merge, deployment, KV mutation, or Telegram configuration change were made during this diagnosis.
+
+
+## Latest retry and provider status — 2026-11-12
+
+- Retried the Worker tests run (`43147930096`) through the GitHub Actions rerun endpoint. GitHub accepted the retry, created job `130950845452`, then the job failed immediately without a runner assignment or executed steps. The job log endpoint returned BlobNotFound, consistent with no runner log being produced.
+- Rechecked all five latest-head workflow runs at `2cf9b6d735fe46d381b31bd9bee026404bec96f9`: each job still has `runner_id=0`, blank runner name, and zero steps. No workflow code or runtime source change can fix a job that never reaches a runner.
+- Public GitHub Status currently reports Actions operational and no active incident for Nov 12; its incident history records earlier Actions degradations on Nov 9 and Nov 10 as resolved. This makes a repository/account-specific hosted-runner or billing/policy restriction more likely, but the available connector cannot inspect those account settings.
+- No GitHub Actions settings, billing limits, runner configuration, secrets, production deployment, or merge were changed. Do not weaken required checks or bypass CI. Required owner-side action is to inspect repository/org Actions permissions and account Actions spending/usage limits, or open GitHub Support with the run IDs above if those settings look normal.
