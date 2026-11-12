@@ -1011,7 +1011,7 @@ function postPhotos(post) {
 }
 
 // Hide clearly undersized photo renditions from published vehicle galleries.
-// Unknown dimensions remain visible pending manual review.
+// Unknown-dimension legacy entries are hidden until re-upload or explicit admin review.
 function catalogPhotoItems(car) {
  const source = Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []);
  return uniqueFileItems(source).filter(photo => {
