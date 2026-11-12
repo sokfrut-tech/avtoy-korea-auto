@@ -336,3 +336,12 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Final source review found a stale explanatory comment above `catalogPhotoItems()`: it said unknown-dimension entries remained visible, while the implemented filter correctly hides legacy entries without dimensions unless they are explicitly uploaded as sufficiently large image documents.
 - Corrected the comment only; no runtime logic or thresholds changed. Commit: `45e9093feef154a59caed9f76e96aace0ad6b018`.
 - The current PR head now requires a fresh exact-head CI run. Previous checks remain evidence only for their respective earlier SHAs; they are not claimed as verification of this new head. The hosted-runner allocation issue remains unresolved. No merge or production deployment.
+
+
+## Require vehicle description before car moderation — 2026-11-12
+
+- Code review found `handleCarPost()` accepted a photo-only vehicle post with an empty caption, despite the project requirement that vehicle listings must have a description.
+- Added an early guard: a car import with an empty cleaned caption is not staged for moderation; both configured admins receive a clear explanation to add a description and resend. No photo or KV publication data is created for that car.
+- Added regression test `car import without a description is rejected before moderation` covering a photo-only forwarded post.
+- Commits: Worker guard `8e329ab9dec6ddfa974425b1160952c9458ed9c3`; regression test `1ab83e659773680dbeaedc991bc3b95022f0c046`.
+- Verification status: test source was added but has not executed on the current head because GitHub Actions runner allocation remains unresolved. Do not claim this new test passed. No merge, deployment, KV mutation, or Telegram configuration change.
