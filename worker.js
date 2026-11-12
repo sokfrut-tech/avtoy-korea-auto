@@ -2127,7 +2127,8 @@ export default {
       if (caption.length < 30 || (!catalogPhotoItems(car).length && !uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])).length)) continue;
       const id = key.name.slice("car_approved:".length);
       if (!/^car_-?\d+_\d+$/.test(id)) continue;
-      const publishedDate = car.publishedAt ? new Date(car.publishedAt) : null;\n      const lastmod = publishedDate && Number.isFinite(publishedDate.getTime()) ? '<lastmod>' + publishedDate.toISOString().slice(0,10) + '</lastmod>' : '';
+      const publishedDate = car.publishedAt ? new Date(car.publishedAt) : null;
+      const lastmod = publishedDate && Number.isFinite(publishedDate.getTime()) ? '<lastmod>' + publishedDate.toISOString().slice(0,10) + '</lastmod>' : '';
       sitemapUrls.push('<url><loc>' + url.origin + '/cars/' + encodeURIComponent(id) + '</loc>' + lastmod + '<changefreq>weekly</changefreq><priority>0.8</priority></url>');
      }
      cursor = page.list_complete ? null : page.cursor;
