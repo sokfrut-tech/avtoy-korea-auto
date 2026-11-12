@@ -311,3 +311,13 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Final preview-label source revision `3c5b7931af65c3987d7ec9200651272014b9c814`: Worker regression tests passed; Cloudflare Worker syntax/private-admin routing checks passed; Factory Review full functional/regression tests passed; Factory Review security/privacy tests passed; Director/release evidence artifact archived successfully.
 - PR deploy workflow ran the syntax and Worker tests successfully, while Cloudflare secret verification and actual deployment steps were skipped. No production deploy was performed.
 - The current branch head after this evidence note is documentation-only; Worker source is unchanged from the passing `3c5b7931` revision.
+
+
+## Follow-up CI diagnosis — 2026-11-12
+
+- The preceding PR head `5af8947d762a00b2696057e5cbf7d31779c441ce` had all five workflows complete successfully: Worker tests, Cloudflare Worker checks, Factory Review, Factory Security Baseline, and Deploy workflow (the PR deploy workflow did not deploy production).
+- The next head `9b98dfc47cee217a64f0d7c824b8945a2804f14b` is a documentation-only addition of `PHOTO_BLUR_DETECTION_PLAN_2026-11-12.md`; Worker runtime source did not change in that commit.
+- All five workflow runs for `9b98dfc` failed at the same timestamp. Their jobs had `runner_id=0`, empty `runner_name`, no `started_at`, and empty `steps[]`. Retrying failed jobs reproduced the failure. This proves no runner executed the workflow steps; it does not identify the exact account-level cause.
+- Repository metadata confirms the repo is private but not archived or disabled. The available GitHub connector can read workflow runs and retry jobs, but cannot inspect or change repository/org billing, Actions hosted-runner policy, or account spending limits.
+- Do not infer that the CI failure is a source-code defect. The next required check is the GitHub Actions usage/billing and hosted-runner availability for the owner account. If minutes/spending are exhausted or hosted runners are restricted, an account owner must resolve that in GitHub Settings. Then rerun the exact PR head and require all checks to pass before merge.
+- No runtime source changes, merge, deployment, KV mutation, or Telegram configuration change were made during this diagnosis.
