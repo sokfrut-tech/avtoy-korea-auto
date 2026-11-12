@@ -341,6 +341,20 @@ test("admin choosing review imports an old post regardless of its date", async (
   });
 });
 
+test("car import without a description is rejected before moderation", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    await kv.put("import_pending:-100555_49", JSON.stringify({
+      chat:{id:-100555,username:"avtoYkorea"},message_id:49,sourceDate:1790000000,
+      photo:[{file_id:"CAR_WITHOUT_DESCRIPTION"}]
+    }));
+    await worker.fetch(webhookUpdate(callback(111111111,"imp:car:-100555_49")),reviewEnv(kv));
+    assert.equal((await kv.list({prefix:"car_pending:"})).keys.length,0);
+    assert.ok(calls.some(c=>c.method==="sendMessage" && /нет описания/.test(c.payload.text || "")));
+    assert.equal(await kv.get("car_approved:car_100555_49"),null);
+  });
+});
+
 test("admin choosing car rejects posts before 2026-01-01 and accepts boundary date", async () => {
   const kv = memoryKV();
   await withTelegramMock(async calls => {
