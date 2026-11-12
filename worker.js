@@ -1123,7 +1123,7 @@ function carPhotoQualityNote(photos) {
 
 async function handleCarPost(post, env, adminIds) {
  const chat = post.chat || {};
- if (String(chat.username || "").toLowerCase() !== "avtoykorea") return;
+ if (String(chat.username || "").toLowerCase() !== "avtoykorea") return "rejected";
  const created = sourcePostDate(post);
  const cutoff = Math.floor(Date.UTC(2026, 0, 1) / 1000);
  if (!created || created < cutoff) {
@@ -1131,7 +1131,7 @@ async function handleCarPost(post, env, adminIds) {
    chat_id: adminId,
    text: "⏭ Автомобиль не импортирован: публикация создана до 1 января 2026 года или дата источника недоступна. Для отзывов такого ограничения нет."
   })));
-  return;
+  return "rejected";
  }
  const caption = cleanPublicationText(post.caption || post.text).slice(0, 3000);
  if (!caption.trim()) {
@@ -1139,18 +1139,18 @@ async function handleCarPost(post, env, adminIds) {
    chat_id: adminId,
    text: "⏭ Автомобиль не импортирован: в исходной публикации нет описания. Добавьте описание и отправьте публикацию повторно."
   })));
-  return;
+  return "rejected";
  }
  const photos = await uniquePhotoFilesByContent(postPhotos(post), env);
  const videos = postVideos(post);
  const fileId = photos.length ? photos[photos.length - 1].file_id : (videos.length ? videos[0].file_id : null);
- if (!caption && !fileId) return;
- if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return; }
+ if (!caption && !fileId) return "rejected";
+ if (!env.REVIEWS) { await Promise.all(adminIds.map(id => callTelegram(env, "sendMessage", {chat_id:id,text:"Объявление получено, но хранилище REVIEWS не настроено."}))); return "unavailable"; }
  const id = "car_" + String(chat.id).replace(/-/g,"") + "_" + messageNumberOf(post.message_id);
  const approved = await env.REVIEWS.get("car_approved:" + id);
  if (approved) {
   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"✅ Этот автомобиль уже опубликован на сайте. Повторная публикация не создана: https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id)})));
-  return;
+  return "already_published";
  }
  const existing = await env.REVIEWS.get("car_pending:" + id);
  if (existing) {
@@ -1160,7 +1160,7 @@ async function handleCarPost(post, env, adminIds) {
    await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "");
    await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная отправка: автомобиль всё ещё ожидает решения модератора.\n\n" + (saved.caption || "Описание отсутствует") + "\n\nИсточник: " + saved.sourceUrl,reply_markup:keyboard});
   }));
-  return;
+  return "already_pending";
  }
  const car = {id,caption,fileId,photos,videos,mediaType:videos.length && !photos.length ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id),createdAt:new Date().toISOString(),sourceDate:created};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
@@ -1169,6 +1169,7 @@ async function handleCarPost(post, env, adminIds) {
   await sendChannelMedia(env, adminId, photos, videos, caption);
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 ОДИН АВТОМОБИЛЬ · " + (caption.split(String.fromCharCode(10)).find(line => line.trim()) || "Без названия").slice(0,90) + "\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n" + carPhotoQualityNote(photos) + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
  }));
+ return "queued";
 }
 
 async function handleImportedReview(post, env, adminIds) {
@@ -1246,10 +1247,21 @@ async function handleImportChoice(callback, env, adminIds) {
  if (!raw) return answer("Публикация уже обработана или не найдена",true);
  const entry = JSON.parse(raw);
  const post = entry && entry.post ? entry.post : entry;
- if (kind === "car") await handleCarPost(post,env,adminIds);
- else await handleImportedReview(post,env,adminIds);
+ if (kind === "car") {
+  const result = await handleCarPost(post,env,adminIds);
+  await env.REVIEWS.delete(key);
+  const messages = {
+   queued: "Передано в модерацию автомобилей",
+   already_pending: "Автомобиль уже ожидает модерации",
+   already_published: "Автомобиль уже опубликован",
+   unavailable: "Не удалось передать: хранилище не настроено",
+   rejected: "Автомобиль не передан: проверьте сообщение администраторам"
+  };
+  return answer(messages[result] || messages.rejected, result === "rejected" || result === "unavailable");
+ }
+ await handleImportedReview(post,env,adminIds);
  await env.REVIEWS.delete(key);
- return answer(kind === "car" ? "Передано в модерацию автомобилей" : "Передано в модерацию отзывов");
+ return answer("Передано в модерацию отзывов");
 }
 
 async function resendChannelImportEntry(entry, id, env, adminIds) {
