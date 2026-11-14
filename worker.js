@@ -1199,7 +1199,14 @@ async function handleCarPost(post, env, adminIds) {
   }));
   return;
  }
- const car = {id,caption,fileId,photos,videos,mediaType:videos.length && !photos.length ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id),createdAt:new Date().toISOString(),sourceDate:created};
+ const sourceMedia = Array.isArray(post.mediaItems) && post.mediaItems.length
+  ? mergeOrderedMediaItems([],post.mediaItems)
+  : mergeOrderedMediaItems([],orderedItemsFromPost(post));
+ const mediaItems = sourceMedia.mediaItems.filter(item => {
+  const identity = String(item.file_unique_id || item.file_id || "");
+  return [...photos,...videos].some(candidate => String(candidate.file_unique_id || candidate.file_id || "") === identity);
+ });
+ const car = {id,caption,fileId,photos,videos,mediaItems,mediaOrderKnown:sourceMedia.mediaOrderKnown && mediaItems.length === sourceMedia.mediaItems.length,mediaType:videos.length && !photos.length ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id),createdAt:new Date().toISOString(),sourceDate:created};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
@@ -1225,12 +1232,19 @@ async function handleImportedReview(post, env, adminIds) {
  const id = channelPostId(chat, number);
  if (await env.REVIEWS.get("approved:" + id)) return;
  const existingReview = await env.REVIEWS.get("pending:" + id);
+ const sourceMedia = Array.isArray(post.mediaItems) && post.mediaItems.length
+  ? mergeOrderedMediaItems([],post.mediaItems)
+  : mergeOrderedMediaItems([],orderedItemsFromPost(post));
  const review = existingReview ? JSON.parse(existingReview) : {
-  id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,photos:photoItems,videos:videoItems,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + number : "Пересылка администратора")
+  id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,photos:photoItems,videos:videoItems,mediaItems:sourceMedia.mediaItems,mediaOrderKnown:sourceMedia.mediaOrderKnown,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + number : "Пересылка администратора")
  };
  if (existingReview) {
   review.photos = uniqueFileItems([...(Array.isArray(review.photos) ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : [])), ...photoItems]);
   review.videos = uniqueFileItems([...(Array.isArray(review.videos) ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : [])), ...videoItems]);
+  const oldMedia = Array.isArray(review.mediaItems) ? review.mediaItems : [];
+  const mergedMedia = mergeOrderedMediaItems(oldMedia,sourceMedia.mediaItems);
+  review.mediaItems = mergedMedia.mediaItems;
+  review.mediaOrderKnown = (review.mediaOrderKnown === true || sourceMedia.mediaOrderKnown) && mergedMedia.mediaOrderKnown;
   if (!review.fileId) review.fileId = video || photo || null;
   review.hasPhoto = Boolean(review.photos.length || photo);
   if (!review.text && text) review.text = text;
@@ -1403,7 +1417,8 @@ async function stageChannelPost(post, env, adminIds) {
  }
  const photos = [...largestPhotoOf(post.photo), ...(imageDocumentItemFrom(post.document) ? [imageDocumentItemFrom(post.document)] : [])];
  const videos = postVideos(post);
- const stored = {...post,chat,message_id:Number(number),albumId:post.media_group_id ? String(post.media_group_id) : "",photo:photos,videos};
+ const mediaSeed = mergeOrderedMediaItems([], [...photos.map(item=>({...item,type:item.mime_type ? "document" : "photo",sourceMessageId:Number(post.message_id)||null})), ...videos.map(item=>({...item,type:"video",sourceMessageId:Number(post.message_id)||null}))]);
+ const stored = {...post,chat,message_id:Number(number),albumId:post.media_group_id ? String(post.media_group_id) : "",photo:photos,videos,mediaItems:mediaSeed.mediaItems,mediaOrderKnown:mediaSeed.mediaOrderKnown};
  await env.REVIEWS.put("import_pending:" + id,JSON.stringify({...stored,post:stored}),{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
