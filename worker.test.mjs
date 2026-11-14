@@ -2609,3 +2609,57 @@ test("vehicle media detects video per item, prioritizes photos and skips broken 
   assert.match(html, /if\(attempts>=carItems\.length\)gallery\.hidden=true/);
   assert.match(html, /carItems\.length<2/);
 });
+
+
+test("mixed Telegram channel album keeps photo-video-photo order through moderation and public API", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const forward = (privateId, sourceId, media) => webhookUpdate({ message: {
+      message_id: privateId,
+      chat: { id: 111111111, type: "private" },
+      from: { id: 111111111 },
+      forward_origin: { type: "channel", date: 1790000000, chat: { id: -100555, username: "avtoYkorea", type: "channel" }, message_id: sourceId },
+      media_group_id: "mixed-order-album-501",
+      caption: "Kia Sorento 2026",
+      ...media
+    }});
+    await worker.fetch(forward(7001, 501, { photo: [{ file_id: "P1", file_unique_id: "UP1", width: 1600, height: 900 }] }), reviewEnv(kv));
+    await worker.fetch(forward(7002, 502, { video: { file_id: "V2", file_unique_id: "UV2" } }), reviewEnv(kv));
+    await worker.fetch(forward(7003, 503, { photo: [{ file_id: "P3", file_unique_id: "UP3", width: 1600, height: 900 }] }), reviewEnv(kv));
+
+    const staged = JSON.parse(await kv.get("import_pending:-100555_501"));
+    assert.deepEqual(staged.post.mediaItems.map(item => item.type), ["photo", "video", "photo"]);
+    assert.deepEqual(staged.post.mediaItems.map(item => item.sourceMessageId), [501, 502, 503]);
+    assert.equal(staged.post.mediaOrderKnown, true);
+
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_501")), reviewEnv(kv));
+    const pending = JSON.parse(await kv.get("car_pending:car_100555_501"));
+    assert.deepEqual(pending.mediaItems.map(item => item.type), ["photo", "video", "photo"]);
+    assert.equal(pending.mediaOrderKnown, true);
+
+    await worker.fetch(webhookUpdate(callback(111111111, "carpubforce:car_100555_501")), reviewEnv(kv));
+    const response = await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv));
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    const car = body.cars.find(item => item.id === "car_100555_501");
+    assert.ok(car);
+    assert.equal(car.mediaOrderKnown, true);
+    assert.deepEqual(car.mediaItems.map(item => item.type), ["photo", "video", "photo"]);
+  });
+});
+
+test("legacy mixed car media without canonical source IDs is withheld from public media list", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:car_100555_777", JSON.stringify({
+    id: "car_100555_777", caption: "Legacy mixed album", mediaType: "photo",
+    photos: [{ file_id: "LEGACY_P", file_unique_id: "LEGACY_UP", width: 1600, height: 900 }],
+    videos: [{ file_id: "LEGACY_V", file_unique_id: "LEGACY_UV" }],
+    publishedAt: "2026-11-01T00:00:00.000Z"
+  }));
+  const response = await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv));
+  const body = await response.json();
+  const car = body.cars.find(item => item.id === "car_100555_777");
+  assert.equal(car.mediaOrderKnown, false);
+  assert.deepEqual(car.mediaItems, []);
+  assert.equal(car.media, null);
+});
