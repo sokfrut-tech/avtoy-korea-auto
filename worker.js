@@ -964,6 +964,8 @@ async function handleReviewCallback(callback, env, adminIds) {
   name: review.anonymous ? "" : review.name,
   fileId: review.fileId,
   videos: Array.isArray(review.videos) ? review.videos : [],
+  mediaItems: Array.isArray(review.mediaItems) ? review.mediaItems : [],
+  mediaOrderKnown: review.mediaOrderKnown === true,
   anonymous: Boolean(review.anonymous),
   photos: Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []),
   publishedAt: new Date().toISOString()
