@@ -16,7 +16,7 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout workflow repository
         uses: actions/checkout@v4
@@ -27,9 +27,18 @@ jobs:
           node-version: '22'
           cache: ''
 
-      - name: Fetch the exact GitLab research branch
+      - name: Fetch the exact private GitLab research branch
+        env:
+          GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
         run: |
-          git clone --depth 1 --branch research/russia-migration-assessment-2026-11-14 https://gitlab.com/sokfrut/avtoy-korea-auto.git "$RUNNER_TEMP/avtoy-korea-auto"
+          set -euo pipefail
+          if [ -z "${GITLAB_READ_TOKEN:-}" ]; then
+            echo "::error::Missing GITLAB_READ_TOKEN. Add a read_repository-only GitLab token as a GitHub Actions secret."
+            exit 1
+          fi
+          AUTH="$(printf 'oauth2:%s' "$GITLAB_READ_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=Authorization: Basic $AUTH" clone --depth 1 --branch research/russia-migration-assessment-2026-11-14 https://gitlab.com/sokfrut/avtoy-korea-auto.git "$RUNNER_TEMP/avtoy-korea-auto"
+          unset AUTH GITLAB_READ_TOKEN
           test -f "$RUNNER_TEMP/avtoy-korea-auto/standby/package.json"
 
       - name: Install standby dependencies
