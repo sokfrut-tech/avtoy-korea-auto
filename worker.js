@@ -58,7 +58,11 @@ function removePhotosAt(item, numbers) {
  const photos = Array.isArray(item.photos) ? item.photos : [];
  const remaining = photos.filter((_, index) => !numbers.includes(index + 1));
  item.photos = remaining;
- item.fileId = remaining.length ? remaining[remaining.length - 1].file_id : null;
+ if (Array.isArray(item.mediaItems)) {
+  const keep = new Set(remaining.map(photo => String(photo.file_unique_id || photo.file_id || "")));
+  item.mediaItems = item.mediaItems.filter(media => media.type === "video" || keep.has(String(media.file_unique_id || media.file_id || "")));
+ }
+ item.fileId = remaining.length ? remaining[remaining.length - 1].file_id : (Array.isArray(item.videos) && item.videos.length ? item.videos[0].file_id : null);
  return item;
 }
 
@@ -1212,9 +1216,11 @@ async function handleCarPost(post, env, adminIds) {
   }));
   return;
  }
- const sourceMedia = Array.isArray(post.mediaItems) && post.mediaItems.length
+ const hasSourceMediaItems = Array.isArray(post.mediaItems) && post.mediaItems.length > 0;
+ const sourceMedia = hasSourceMediaItems
   ? mergeOrderedMediaItems([],post.mediaItems)
   : mergeOrderedMediaItems([],orderedItemsFromPost(post));
+ if (hasSourceMediaItems) sourceMedia.mediaOrderKnown = post.mediaOrderKnown === true && sourceMedia.mediaOrderKnown;
  const mediaItems = sourceMedia.mediaItems.filter(item => {
   const identity = String(item.file_unique_id || item.file_id || "");
   return [...photos,...videos].some(candidate => String(candidate.file_unique_id || candidate.file_id || "") === identity);
@@ -1245,9 +1251,11 @@ async function handleImportedReview(post, env, adminIds) {
  const id = channelPostId(chat, number);
  if (await env.REVIEWS.get("approved:" + id)) return;
  const existingReview = await env.REVIEWS.get("pending:" + id);
- const sourceMedia = Array.isArray(post.mediaItems) && post.mediaItems.length
+ const hasSourceMediaItems = Array.isArray(post.mediaItems) && post.mediaItems.length > 0;
+ const sourceMedia = hasSourceMediaItems
   ? mergeOrderedMediaItems([],post.mediaItems)
   : mergeOrderedMediaItems([],orderedItemsFromPost(post));
+ if (hasSourceMediaItems) sourceMedia.mediaOrderKnown = post.mediaOrderKnown === true && sourceMedia.mediaOrderKnown;
  const review = existingReview ? JSON.parse(existingReview) : {
   id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,photos:photoItems,videos:videoItems,mediaItems:sourceMedia.mediaItems,mediaOrderKnown:sourceMedia.mediaOrderKnown,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + number : "Пересылка администратора")
  };
