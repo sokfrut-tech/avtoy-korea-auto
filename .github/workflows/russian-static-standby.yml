@@ -1,0 +1,66 @@
+name: Publish Russian static standby
+
+on:
+  push:
+    branches:
+      - deploy/russian-static-mirror-2026-11-15
+    paths:
+      - 'standby/**'
+      - '.github/workflows/russian-static-standby.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: russian-static-standby
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Export only already-public approved catalogue
+        run: node standby/scripts/export-live-public-catalog.mjs
+      - name: Build static pages
+        run: node standby/scripts/build-static-catalog.mjs standby/data/public-snapshot.json standby/public/media standby/pages
+      - name: Check output
+        run: |
+          test -s standby/pages/index.html
+          test -s standby/pages/robots.txt
+          test -d standby/pages/media
+      - name: Install Wrangler
+        run: npm install --global wrangler@4
+      - name: Create Pages project if missing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PAGES_PROJECT: avtoy-korea-russian-standby
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          STATUS=$(curl -sS -o /tmp/pages-project.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT")
+          if [ "$STATUS" = "404" ]; then
+            curl -fsS -X POST \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "{\"name\":\"$PAGES_PROJECT\",\"production_branch\":\"main\"}" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects"
+          elif [ "$STATUS" != "200" ]; then
+            cat /tmp/pages-project.json
+            exit 1
+          fi
+      - name: Deploy public static mirror
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler pages deploy standby/pages --project-name avtoy-korea-russian-standby --branch main
