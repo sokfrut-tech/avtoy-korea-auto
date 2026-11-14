@@ -5,7 +5,6 @@ on:
     branches:
       - deploy/russian-static-mirror-2026-11-15
     paths:
-      - 'standby/**'
       - '.github/workflows/russian-static-standby.yml'
   workflow_dispatch:
 
@@ -19,34 +18,77 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
+    env:
+      GITLAB_SOURCE_SHA: 2fe182560e35175bb1438fded60bcc1d5a74ff91
+      PAGES_PROJECT: avtoy-korea-russian-standby
     steps:
-      - name: Checkout
+      - name: Checkout workflow repository
         uses: actions/checkout@v4
-      - name: Setup Node
+
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-      - name: Export only already-public approved catalogue
-        run: node standby/scripts/export-live-public-catalog.mjs
-      - name: Build static pages
-        run: node standby/scripts/build-static-catalog.mjs standby/data/public-snapshot.json standby/public/media standby/pages
-      - name: Check output
+          node-version: '22'
+
+      - name: Fetch exact reviewed GitLab source
+        env:
+          GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
         run: |
-          test -s standby/pages/index.html
-          test -s standby/pages/robots.txt
-          test -d standby/pages/media
+          set -euo pipefail
+          if [ -z "${GITLAB_READ_TOKEN:-}" ]; then
+            echo "::error::Missing GITLAB_READ_TOKEN. Add a GitLab token with read_repository scope to GitHub Actions secrets."
+            exit 1
+          fi
+          AUTH="$(printf 'oauth2:%s' "$GITLAB_READ_TOKEN" | base64 -w0)"
+          mkdir -p "$RUNNER_TEMP/avtoy-korea-source"
+          cd "$RUNNER_TEMP/avtoy-korea-source"
+          git init
+          git remote add origin https://gitlab.com/sokfrut/avtoy-korea-auto.git
+          git -c "http.extraheader=Authorization: Basic $AUTH" fetch --depth 1 origin "$GITLAB_SOURCE_SHA"
+          git checkout --detach FETCH_HEAD
+          unset AUTH GITLAB_READ_TOKEN
+          test "$(git rev-parse HEAD)" = "$GITLAB_SOURCE_SHA"
+          test -f standby/package.json
+          echo "SOURCE_DIR=$RUNNER_TEMP/avtoy-korea-source/standby" >> "$GITHUB_ENV"
+
+      - name: Install dependencies and run complete regression suite
+        working-directory: ${{ runner.temp }}/avtoy-korea-source/standby
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+          npm run check
+
+      - name: Export public approved catalogue and local media
+        working-directory: ${{ runner.temp }}/avtoy-korea-source/standby
+        run: node scripts/export-live-public-catalog.mjs
+
+      - name: Build static catalogue
+        working-directory: ${{ runner.temp }}/avtoy-korea-source/standby
+        run: node scripts/build-static-catalog.mjs data/public-snapshot.json public/media pages
+
+      - name: Verify static output has no runtime origin dependency
+        working-directory: ${{ runner.temp }}/avtoy-korea-source/standby
+        run: node scripts/verify-static-origin.mjs pages
+
+      - name: Verify Cloudflare Pages credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || { echo "::error::Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}" || { echo "::error::Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+
       - name: Install Wrangler
         run: npm install --global wrangler@4
+
       - name: Create Pages project if missing
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PAGES_PROJECT: avtoy-korea-russian-standby
         run: |
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-          STATUS=$(curl -sS -o /tmp/pages-project.json -w '%{http_code}' \
+          set -euo pipefail
+          STATUS=$(curl -sS -o "$RUNNER_TEMP/pages-project.json" -w '%{http_code}' \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT")
           if [ "$STATUS" = "404" ]; then
@@ -56,11 +98,13 @@ jobs:
               --data "{\"name\":\"$PAGES_PROJECT\",\"production_branch\":\"main\"}" \
               "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects"
           elif [ "$STATUS" != "200" ]; then
-            cat /tmp/pages-project.json
+            cat "$RUNNER_TEMP/pages-project.json"
             exit 1
           fi
-      - name: Deploy public static mirror
+
+      - name: Deploy verified static mirror
+        working-directory: ${{ runner.temp }}/avtoy-korea-source/standby
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: wrangler pages deploy standby/pages --project-name avtoy-korea-russian-standby --branch main
+        run: wrangler pages deploy pages --project-name "$PAGES_PROJECT" --branch main
