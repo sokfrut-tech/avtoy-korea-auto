@@ -1243,10 +1243,10 @@ async function handleImportedReview(post, env, adminIds) {
  if (existingReview) {
   review.photos = uniqueFileItems([...(Array.isArray(review.photos) ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : [])), ...photoItems]);
   review.videos = uniqueFileItems([...(Array.isArray(review.videos) ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : [])), ...videoItems]);
-  const oldMedia = Array.isArray(review.mediaItems) ? review.mediaItems : [];
-  const mergedMedia = mergeOrderedMediaItems(oldMedia,sourceMedia.mediaItems);
+  const hadCanonicalOrder = Array.isArray(review.mediaItems) && review.mediaItems.length > 0;
+  const mergedMedia = mergeOrderedMediaItems(review.mediaItems || [],sourceMedia.mediaItems);
   review.mediaItems = mergedMedia.mediaItems;
-  review.mediaOrderKnown = (review.mediaOrderKnown === true || sourceMedia.mediaOrderKnown) && mergedMedia.mediaOrderKnown;
+  review.mediaOrderKnown = hadCanonicalOrder && review.mediaOrderKnown === true && mergedMedia.mediaOrderKnown;
   if (!review.fileId) review.fileId = video || photo || null;
   review.hasPhoto = Boolean(review.photos.length || photo);
   if (!review.text && text) review.text = text;
@@ -1327,9 +1327,13 @@ async function mergeChannelPartMedia(post, id, env) {
  if (importRaw) {
   const entry = JSON.parse(importRaw);
   const saved = entry.post || entry;
+  const hadSavedMedia = (Array.isArray(saved.photo) && saved.photo.length) || (Array.isArray(saved.videos) && saved.videos.length);
+  const hadCanonicalOrder = Array.isArray(saved.mediaItems) && saved.mediaItems.length > 0;
   saved.photo = uniqueFileItems([...(Array.isArray(saved.photo) ? saved.photo : []), ...photos]);
   saved.videos = uniqueFileItems([...(Array.isArray(saved.videos) ? saved.videos : []), ...videos]);
-  mergePostMediaOrder(saved,incomingItems);
+  const mergedOrder = mergeOrderedMediaItems(saved.mediaItems || [],incomingItems);
+  saved.mediaItems = mergedOrder.mediaItems;
+  saved.mediaOrderKnown = hadCanonicalOrder ? (saved.mediaOrderKnown === true && mergedOrder.mediaOrderKnown) : (!hadSavedMedia && mergedOrder.mediaOrderKnown);
   if (!saved.caption && post.caption) saved.caption = post.caption;
   entry.post = saved;
   entry.photo = saved.photo;
@@ -1341,9 +1345,13 @@ async function mergeChannelPartMedia(post, id, env) {
  const reviewRaw = await env.REVIEWS.get(reviewKey);
  if (reviewRaw) {
   const review = JSON.parse(reviewRaw);
+  const hadReviewMedia = (Array.isArray(review.photos) && review.photos.length) || (Array.isArray(review.videos) && review.videos.length) || Boolean(review.fileId);
+  const hadCanonicalOrder = Array.isArray(review.mediaItems) && review.mediaItems.length > 0;
   review.photos = uniqueFileItems([...(Array.isArray(review.photos) ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : [])), ...photos]);
   review.videos = uniqueFileItems([...(Array.isArray(review.videos) ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : [])), ...videos]);
-  mergePostMediaOrder(review,incomingItems);
+  const mergedOrder = mergeOrderedMediaItems(review.mediaItems || [],incomingItems);
+  review.mediaItems = mergedOrder.mediaItems;
+  review.mediaOrderKnown = hadCanonicalOrder ? (review.mediaOrderKnown === true && mergedOrder.mediaOrderKnown) : (!hadReviewMedia && mergedOrder.mediaOrderKnown);
   review.hasPhoto = Boolean(review.photos.length);
   if (!review.fileId) review.fileId = (review.photos[0] || review.videos[0] || {}).file_id || null;
   await env.REVIEWS.put(reviewKey, JSON.stringify(review));
@@ -1354,9 +1362,13 @@ async function mergeChannelPartMedia(post, id, env) {
  const carRaw = await env.REVIEWS.get(carKey);
  if (carRaw) {
   const car = JSON.parse(carRaw);
+  const hadCarMedia = (Array.isArray(car.photos) && car.photos.length) || (Array.isArray(car.videos) && car.videos.length) || Boolean(car.fileId);
+  const hadCanonicalOrder = Array.isArray(car.mediaItems) && car.mediaItems.length > 0;
   car.photos = uniqueFileItems([...(Array.isArray(car.photos) ? car.photos : []), ...photos]);
   car.videos = uniqueFileItems([...(Array.isArray(car.videos) ? car.videos : []), ...videos]);
-  mergePostMediaOrder(car,incomingItems);
+  const mergedOrder = mergeOrderedMediaItems(car.mediaItems || [],incomingItems);
+  car.mediaItems = mergedOrder.mediaItems;
+  car.mediaOrderKnown = hadCanonicalOrder ? (car.mediaOrderKnown === true && mergedOrder.mediaOrderKnown) : (!hadCarMedia && mergedOrder.mediaOrderKnown);
   if (!car.fileId) car.fileId = (car.photos[car.photos.length - 1] || car.videos[0] || {}).file_id || null;
   await env.REVIEWS.put(carKey, JSON.stringify(car));
  }
