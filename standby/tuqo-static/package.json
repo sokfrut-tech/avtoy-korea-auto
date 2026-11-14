@@ -1,0 +1,9 @@
+{
+  "name": "avtoy-korea-russian-static-mirror",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../scripts/export-live-public-catalog.mjs && node ../scripts/build-static-catalog.mjs data/public-snapshot.json public/media dist && node ../scripts/verify-static-origin.mjs dist && node check-static-budget.mjs dist"
+  }
+}
