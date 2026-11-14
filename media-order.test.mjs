@@ -53,3 +53,20 @@ test("photo-only records remain orderable when source IDs are present", () => {
   assert.deepEqual(result.mediaItems.map(item => item.file_id), ["p1", "p2"]);
   assert.equal(result.mediaOrderKnown, true);
 });
+
+test("separate album accumulators remain isolated", () => {
+  const albumA = mergeOrderedMediaItems([], [{ ...photo("a1", "a1"), sourceMessageId: 10 }]);
+  const albumB = mergeOrderedMediaItems([], [{ ...photo("b1", "b1"), sourceMessageId: 10 }]);
+  assert.deepEqual(albumA.mediaItems.map(item => item.file_id), ["a1"]);
+  assert.deepEqual(albumB.mediaItems.map(item => item.file_id), ["b1"]);
+});
+
+test("image documents keep their type and source position", () => {
+  const items = mediaItemsFromTelegramMessage({
+    message_id: 77,
+    document: { file_id: "doc", file_unique_id: "udoc", mime_type: "image/jpeg" }
+  });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].type, "document");
+  assert.equal(items[0].sourceMessageId, 77);
+});
