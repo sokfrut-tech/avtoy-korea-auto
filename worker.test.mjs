@@ -2663,3 +2663,37 @@ test("legacy mixed car media without canonical source IDs is withheld from publi
   assert.deepEqual(car.mediaItems, []);
   assert.equal(car.media, null);
 });
+
+
+test("mixed Telegram review album exposes typed media URLs in source order", async () => {
+  const kv = memoryKV();
+  await withTelegramMock(async calls => {
+    const forward = (privateId, sourceId, media) => webhookUpdate({ message: {
+      message_id: privateId,
+      chat: { id: 111111111, type: "private" },
+      from: { id: 111111111 },
+      forward_origin: { type: "channel", date: 1790000000, chat: { id: -100555, username: "avtoYkorea", type: "channel" }, message_id: sourceId },
+      media_group_id: "mixed-review-album-601",
+      caption: "Спасибо за автомобиль",
+      ...media
+    }});
+    await worker.fetch(forward(7101, 601, { photo: [{ file_id: "RP1", file_unique_id: "URP1", width: 1600, height: 900 }] }), reviewEnv(kv));
+    await worker.fetch(forward(7102, 602, { video: { file_id: "RV2", file_unique_id: "URV2" } }), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:review:-100555_601")), reviewEnv(kv));
+    const pending = JSON.parse(await kv.get("pending:-100555_601"));
+    assert.deepEqual(pending.mediaItems.map(item => item.type), ["photo", "video"]);
+    assert.equal(pending.mediaOrderKnown, true);
+
+    await worker.fetch(webhookUpdate(callback(111111111, "pub:-100555_601")), reviewEnv(kv));
+    const response = await worker.fetch(new Request("https://worker.test/api/reviews"), reviewEnv(kv));
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    const review = body.reviews.find(item => item.id === "-100555_601");
+    assert.ok(review);
+    assert.equal(review.mediaOrderKnown, true);
+    assert.deepEqual(review.mediaItems, [
+      "/api/review-media/-100555_601/photo/0",
+      "/api/review-media/-100555_601/video/0"
+    ]);
+  });
+});
