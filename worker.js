@@ -1275,16 +1275,7 @@ async function handleImportedReview(post, env, adminIds) {
   if (!status.mediaSent) {
    const photosToSend = uniqueFileItems(review.photos && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []));
    const videosToSend = uniqueFileItems(review.videos && review.videos.length ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : []));
-   for (let offset=0; offset<photosToSend.length; offset+=10) {
-    const chunk = photosToSend.slice(offset,offset+10);
-    if (chunk.length > 1) {
-     const media = chunk.map((item,index)=>({type:"photo",media:item.file_id,...(offset===0 && index===0 && text ? {caption:text.slice(0,1024)} : {})}));
-     await callTelegram(env,"sendMediaGroup",{chat_id:adminId,media});
-    } else {
-     await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:chunk[0].file_id,...(offset===0 && text ? {caption:text.slice(0,1024)} : {})});
-    }
-   }
-   for (const item of videosToSend) await callTelegram(env,"sendVideo",{chat_id:adminId,video:item.file_id});
+   await sendChannelMedia(env,adminId,photosToSend,videosToSend,text,review.mediaOrderKnown === true ? review.mediaItems : null);
    status.mediaSent = true;
    delivery.admins[String(adminId)] = status;
    await env.REVIEWS.put(deliveryKey,JSON.stringify(delivery),{expirationTtl:2592000});
@@ -1430,7 +1421,7 @@ async function stageChannelPost(post, env, adminIds) {
   const saved = JSON.parse(pendingCarRaw);
   const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + carId},{text:"❌ Отклонить",callback_data:"carrej:" + carId}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + carId}]]};
   await Promise.all(adminIds.map(async adminId => {
-   await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "");
+   await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "", saved.mediaOrderKnown === true ? saved.mediaItems : null);
    await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная пересылка: автомобиль всё ещё ожидает решения модератора.\n\n" + (saved.caption || "Описание отсутствует") + "\n\nИсточник: " + saved.sourceUrl,reply_markup:keyboard});
   }));
   return;
@@ -1487,7 +1478,9 @@ async function stageGroupMedia(msg, env, adminIds) {
   const adminKey = String(adminId);
   const status = state.notified[adminKey] || {mediaSentIds:[],cardSent:false};
   status.mediaSentIds = Array.isArray(status.mediaSentIds) ? status.mediaSentIds : [];
-  const mediaItems = [...postPhotos(state.post), ...postVideos(state.post)];
+  const mediaItems = state.post.mediaOrderKnown === true && Array.isArray(state.post.mediaItems)
+   ? state.post.mediaItems
+   : [...postPhotos(state.post), ...postVideos(state.post)];
   for (const item of mediaItems) {
    const identity = item.file_unique_id || item.file_id;
    if (status.mediaSentIds.includes(identity)) continue;
