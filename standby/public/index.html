@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#090b10">
+<meta name="description" content="Резервный сайт AVTOY KOREA: автомобили из Кореи, Китая и ОАЭ">
+<title>AVTOY KOREA — резервный сайт</title>
+<style>
+:root{color-scheme:dark;--bg:#090b10;--panel:#141923;--line:#2a3342;--text:#f5f7fb;--muted:#aeb8c8;--accent:#e84b3c}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 80% 0,#202b3d 0,transparent 38%),var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{width:min(1120px,calc(100% - 32px));margin:auto}header{padding:22px 0;border-bottom:1px solid var(--line)}
+.brand{font-weight:900;letter-spacing:.09em;font-size:20px}.brand span{color:var(--accent)}.muted{color:var(--muted)}
+.hero{padding:58px 0 38px}.eyebrow{color:#ff8b7f;text-transform:uppercase;letter-spacing:.16em;font-size:12px;font-weight:800}
+h1{font-size:clamp(34px,7vw,64px);line-height:1.04;max-width:760px;margin:14px 0}.hero p{color:var(--muted);max-width:660px}
+.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}.btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 19px;border-radius:12px;background:var(--accent);text-decoration:none;font-weight:800;border:0;color:white;cursor:pointer}
+.secondary{background:#202938;border:1px solid var(--line)}section{padding:24px 0 48px}h2{font-size:28px;margin:0 0 8px}.sub{color:var(--muted);margin:0 0 22px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr));gap:16px}.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.card img{width:100%;height:210px;object-fit:contain;background:#0b0e14}.card-body{padding:16px}.card h3{margin:0 0 8px;font-size:19px}
+.empty{padding:24px;border:1px dashed #475267;border-radius:14px;color:var(--muted)}.form{padding:22px;display:grid;gap:12px;max-width:640px}
+.form input,.form textarea{width:100%;background:#0b1018;border:1px solid #354154;border-radius:10px;color:white;padding:13px;font:inherit}
+.form textarea{min-height:100px;resize:vertical}.status{min-height:24px;color:#b8e5c3}.hp{position:absolute;left:-10000px}
+footer{border-top:1px solid var(--line);padding:25px 0;color:var(--muted);font-size:13px}
+@media(max-width:600px){.hero{padding:42px 0 24px}.card img{height:190px}}
+</style>
+</head>
+<body>
+<header><div class="wrap brand">AVTOY <span>KOREA</span> <small class="muted">/ резервный сайт</small></div></header>
+<main>
+<section class="wrap hero"><div class="eyebrow">Независимый резервный адрес</div><h1>Автомобили из Кореи, Китая и ОАЭ</h1>
+<p>Подбор автомобиля под ваш бюджет. Это независимая резервная площадка на случай перебоев с основным сайтом.</p>
+<div class="actions"><a class="btn" href="#request">Оставить заявку</a><a class="btn secondary" href="https://t.me/avtoYkorea" rel="noopener">Наш Telegram</a></div></section>
+<section class="wrap" id="cars"><h2>Автомобили</h2><p class="sub">Показываем только объявления из проверенного публичного снимка каталога.</p><div id="catalog" class="grid"><div class="empty">Загружаем каталог…</div></div></section>
+<section class="wrap" id="reviews"><h2>Отзывы клиентов</h2><p class="sub">Публикуются только одобренные отзывы и локально сохранённые материалы.</p><div id="reviewsGrid" class="grid"><div class="empty">Загружаем отзывы…</div></div></section>
+<section class="wrap" id="request"><h2>Оставить заявку</h2><p class="sub">Контактные данные видят только администраторы. Если Telegram временно недоступен, заявка останется в очереди.</p>
+<form class="panel form" id="requestForm"><input name="name" placeholder="Ваше имя" maxlength="100" required><input name="contact" placeholder="Телефон или Telegram" maxlength="160" required><input name="model" placeholder="Какой автомобиль интересует" maxlength="180"><textarea name="comment" placeholder="Бюджет, пожелания, вопросы" maxlength="1500"></textarea><input class="hp" name="website" tabindex="-1" autocomplete="off"><button class="btn" type="submit">Отправить заявку</button><div class="status" id="formStatus" role="status" aria-live="polite"></div></form>
+</section></main>
+<footer><div class="wrap">AVTOY KOREA · Резервная площадка. Основной сайт и Telegram-канал могут работать независимо от этого адреса.</div></footer>
+<script>
+function esc(value){return String(value==null?'':value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+async function loadCars(){
+ const root=document.getElementById('catalog');
+ try{
+  const response=await fetch('/api/cars',{headers:{accept:'application/json'}});
+  if(!response.ok)throw new Error('catalog unavailable');
+  const data=await response.json();
+  if(!data.cars||!data.cars.length){root.innerHTML='<div class="empty">Резервный каталог пока не заполнен. Оставьте заявку — подберём автомобиль.</div>';return}
+  root.innerHTML=data.cars.map(function(car){
+   const media=(car.mediaItems||[]).find(function(item){return item.type==='photo'});const video=(car.mediaItems||[]).find(function(item){return item.type==='video'});
+   const image=media&&media.url?'<img src="'+esc(media.url)+'" alt="'+esc(car.caption)+'" loading="lazy">':(video&&video.url?'<video controls preload="metadata" style="width:100%;max-height:240px;background:#080a0f"><source src="'+esc(video.url)+'"></video>':'');
+   return '<article class="card">'+image+'<div class="card-body"><h3>'+esc(car.caption)+'</h3><p class="muted">'+esc(car.description||'Подробности уточняйте у менеджера')+'</p><a class="btn secondary" href="/cars/'+encodeURIComponent(car.id)+'">Подробнее</a></div></article>';
+  }).join('');
+ }catch(error){root.innerHTML='<div class="empty">Каталог временно недоступен. Вы можете оставить заявку — она будет сохранена.</div>'}
+}
+document.getElementById('requestForm').addEventListener('submit',async function(event){
+ event.preventDefault();const form=event.currentTarget;const status=document.getElementById('formStatus');const button=form.querySelector('button');button.disabled=true;status.textContent='Отправляем…';
+ const values=Object.fromEntries(new FormData(form));
+ const requestKey=form.dataset.requestKey||(form.dataset.requestKey=crypto.randomUUID());
+ try{
+  const response=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json','idempotency-key':requestKey},body:JSON.stringify(values)});
+  const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||'Не удалось отправить заявку');
+  status.textContent=body.message;delete form.dataset.requestKey;form.reset();
+ }catch(error){status.textContent=error.message||'Ошибка связи. Попробуйте позже.'}
+ finally{button.disabled=false}
+});
+async function loadReviews(){const root=document.getElementById('reviewsGrid');try{const response=await fetch('/api/reviews');if(!response.ok)throw Error();const data=await response.json();if(!data.reviews||!data.reviews.length){root.innerHTML='<div class="empty">Пока нет опубликованных отзывов.</div>';return}root.innerHTML=data.reviews.map(function(review){const media=review.mediaItems&&review.mediaItems[0];const visual=media?(media.type==='video'?'<video controls preload="metadata" style="width:100%;max-height:260px;background:#080a0f"><source src="'+esc(media.url)+'"></video>':'<img src="'+esc(media.url)+'" alt="Фото из отзыва" loading="lazy">'):'';return '<article class="card">'+visual+'<div class="card-body"><p>'+esc(review.text)+'</p></div></article>'}).join('')}catch(error){root.innerHTML='<div class="empty">Отзывы временно недоступны.</div>'}}
+loadCars();loadReviews();
+</script>
+</body></html>
