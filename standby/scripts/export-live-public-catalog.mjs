@@ -15,7 +15,10 @@ const carsData = await getJson('/api/cars');
 const reviewsData = await getJson('/api/reviews');
 if (!Array.isArray(carsData.cars) || !Array.isArray(reviewsData.reviews)) throw new Error('Public catalogue API returned an unexpected schema');
 let mediaCount = 0;
+const MAX_MEDIA_FILES = 19990; // leave room for HTML, CSS, robots.txt and future static assets
 async function localize(items, prefix) {
+  if (!Array.isArray(items)) throw new Error('Invalid public media list');
+  if (mediaCount + items.length > MAX_MEDIA_FILES) throw new Error('Export exceeds the Cloudflare Pages file-count safety limit');
   const localized = [];
   for (let index = 0; index < items.length; index++) {
     const item = items[index];
