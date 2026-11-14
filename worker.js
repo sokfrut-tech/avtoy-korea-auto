@@ -228,7 +228,7 @@ async function showSiteList(chatId, env) {
 async function sendPendingCarCard(env, adminIds, car, id, lead) {
  const keyboard = { inline_keyboard: [[{ text: "✅ Опубликовать", callback_data: "carpub:" + id }, { text: "❌ Отклонить", callback_data: "carrej:" + id }], [{ text: "✏️ Редактировать описание", callback_data: "caredit:" + id }]] };
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, postPhotos(car), postVideos(car), car.caption || "");
+  await sendChannelMedia(env, adminId, postPhotos(car), postVideos(car), car.caption || "", car.mediaOrderKnown === true ? car.mediaItems : null);
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: lead + "\n\n" + (car.caption || "Описание отсутствует") + "\n\nИсточник: " + (car.sourceUrl || "не указан"), reply_markup: keyboard });
  }));
 }
@@ -528,7 +528,7 @@ async function sendReviewCardTo(env, adminIds, review, id, lead) {
   [{ text: "🙈 Скрыть имя", callback_data: `anon:${id}` }, { text: "✏️ Редактировать текст", callback_data: `edit:${id}` }]
  ] };
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, photos, videos, review.text ? String(review.text).slice(0, 1024) : "");
+  await sendChannelMedia(env, adminId, photos, videos, review.text ? String(review.text).slice(0, 1024) : "", review.mediaOrderKnown === true ? review.mediaItems : null);
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: (lead ? lead + "\n\n" : "") + formatReviewCard(review) + (photos.length + videos.length > 1 ? "\nФотографий: " + photos.length + (videos.length ? ", видео: " + videos.length : "") : ""), reply_markup: keyboard });
  }));
 }
@@ -1093,8 +1093,19 @@ function largestPhotoOf(photo) {
 }
 
 // Отправка всех фото и видео записи администратору.
-async function sendChannelMedia(env, adminId, photos, videos, caption) {
- // Telegram принимает не больше 10 медиа в одной группе: отправляем все фото пачками.
+async function sendChannelMedia(env, adminId, photos, videos, caption, orderedItems = null) {
+ if (Array.isArray(orderedItems) && orderedItems.length && orderedItems.every(item => Number.isSafeInteger(Number(item.sourceMessageId)) && Number(item.sourceMessageId) > 0)) {
+  let first = true;
+  for (const item of orderedItems) {
+   const type = item.type === "video" ? "video" : (item.type === "document" || item.mime_type ? "document" : "photo");
+   const field = type;
+   const payload = {chat_id:adminId,[field]:item.file_id,...(first && caption ? {caption:String(caption).slice(0,1024)} : {})};
+   await callTelegram(env,type === "video" ? "sendVideo" : (type === "document" ? "sendDocument" : "sendPhoto"),payload);
+   first = false;
+  }
+  return;
+ }
+ // Legacy photo-only or video-only records keep their original per-type order.
  for (let offset = 0; offset < photos.length; offset += 10) {
   const chunk = photos.slice(offset, offset + 10);
   const documentItems = chunk.filter(photo => photo.mime_type);
@@ -1196,7 +1207,7 @@ async function handleCarPost(post, env, adminIds) {
   const saved = JSON.parse(existing);
   const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
   await Promise.all(adminIds.map(async adminId => {
-   await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "");
+   await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "", saved.mediaOrderKnown === true ? saved.mediaItems : null);
    await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная отправка: автомобиль всё ещё ожидает решения модератора.\n\n" + (saved.caption || "Описание отсутствует") + "\n\nИсточник: " + saved.sourceUrl,reply_markup:keyboard});
   }));
   return;
@@ -1212,7 +1223,7 @@ async function handleCarPost(post, env, adminIds) {
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, photos, videos, caption);
+  await sendChannelMedia(env, adminId, photos, videos, caption, mediaItems.length && sourceMedia.mediaOrderKnown ? mediaItems : null);
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 ОДИН АВТОМОБИЛЬ · " + (caption.split(String.fromCharCode(10)).find(line => line.trim()) || "Без названия").slice(0,90) + "\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n" + carPhotoQualityNote(photos) + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
  }));
 }
@@ -1312,7 +1323,7 @@ async function resendChannelImportEntry(entry, id, env, adminIds) {
  const videos = postVideos(post);
  const caption = String(post.caption || post.text || "Без текста").slice(0,2500);
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, photos, videos, post.caption ? String(post.caption) : "");
+  await sendChannelMedia(env, adminId, photos, videos, post.caption ? String(post.caption) : "", post.mediaOrderKnown === true ? post.mediaItems : null);
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная пересылка из @avtoYkorea. Публикация ещё не опубликована; выберите действие.\n\n" + caption + "\n\nИсточник: https://t.me/" + (post.chat && post.chat.username || "avtoYkorea") + "/" + post.message_id,reply_markup:keyboard}); }));
 }
 
@@ -1436,7 +1447,7 @@ async function stageChannelPost(post, env, adminIds) {
  await env.REVIEWS.put("import_pending:" + id,JSON.stringify({...stored,post:stored}),{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, photos, videos, "");
+  await sendChannelMedia(env, adminId, photos, videos, "", stored.mediaOrderKnown === true ? stored.mediaItems : null);
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Новая публикация из @avtoYkorea. Выберите раздел для импорта.\n\n" + String(post.caption || post.text || "Без текста").slice(0,2500) + "\n\nСнимки одного альбома объединяются в одну карточку.\nДата оригинала: " + (post.sourceDate ? new Date(post.sourceDate*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow"}) : "не определена"),reply_markup:keyboard}); }));
 }
 
