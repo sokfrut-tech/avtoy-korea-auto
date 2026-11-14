@@ -1,0 +1,45 @@
+name: Standby independent validation
+
+on:
+  push:
+    branches:
+      - deploy/russian-static-mirror-2026-11-15
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standby-validation
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: ''
+
+      - name: Fetch the exact GitLab research branch
+        run: |
+          git clone --depth 1 --branch research/russia-migration-assessment-2026-11-14 https://gitlab.com/sokfrut/avtoy-korea-auto.git "$RUNNER_TEMP/avtoy-korea-auto"
+          test -f "$RUNNER_TEMP/avtoy-korea-auto/standby/package.json"
+
+      - name: Install standby dependencies
+        working-directory: ${{ runner.temp }}/avtoy-korea-auto/standby
+        run: npm install --no-audit --no-fund
+
+      - name: Run complete regression suite
+        working-directory: ${{ runner.temp }}/avtoy-korea-auto/standby
+        run: npm test
+
+      - name: Run syntax and source checks
+        working-directory: ${{ runner.temp }}/avtoy-korea-auto/standby
+        run: npm run check
