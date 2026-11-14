@@ -59,9 +59,36 @@ jobs:
           npm test
           npm run check
 
-      - name: Export public approved catalogue and local media
+      # Never build the archive from the public Worker API: source KV is the
+      # authority for approved records, and Telegram files are mirrored locally.
+      - name: Export only approved Cloudflare KV records (private workspace)
         working-directory: ${{ runner.temp }}/avtoy-korea-source/standby
-        run: node scripts/export-live-public-catalog.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_KV_NAMESPACE_ID: 302a622dc2514025b2118c8f3216beac
+        run: node scripts/export-approved-kv.mjs data/private-approved-export.json --confirm-approved-public-export
+
+      - name: Inventory approved Telegram media (private report)
+        working-directory: ${{ runner.temp }}/avtoy-korea-source/standby
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          node scripts/inventory-approved-media.mjs data/private-approved-export.json data/private-media-inventory.json
+          node --input-type=module -e "import fs from 'node:fs'; const r=JSON.parse(fs.readFileSync('data/private-media-inventory.json','utf8')); const t=r.totals; if(t.incompleteRecords || t.lookupFailures || t.filesOverDownloadLimit) throw new Error('Approved media inventory is incomplete; refusing publication');"
+
+      - name: Mirror approved Telegram media locally
+        working-directory: ${{ runner.temp }}/avtoy-korea-source/standby
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: node scripts/mirror-approved-media.mjs data/private-approved-export.json data/media-map.json public/media
+
+      - name: Build sanitized public snapshot and verify exact source parity
+        working-directory: ${{ runner.temp }}/avtoy-korea-source/standby
+        run: |
+          node scripts/build-public-snapshot.mjs data/private-approved-export.json data/public-snapshot.json data/media-map.json
+          node scripts/verify-public-parity.mjs data/private-approved-export.json data/public-snapshot.json data/media-map.json
+          node scripts/create-public-manifest.mjs data/public-snapshot.json public/media data/public-manifest.json
 
       - name: Build static catalogue
         working-directory: ${{ runner.temp }}/avtoy-korea-source/standby
