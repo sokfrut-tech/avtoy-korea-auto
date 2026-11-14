@@ -7,6 +7,12 @@ on:
     paths:
       - "standby/**"
       - ".github/workflows/standby-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "standby/**"
+      - ".github/workflows/standby-ci.yml"
   workflow_dispatch:
 
 permissions:
