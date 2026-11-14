@@ -1,3 +1,4 @@
+import { mergeOrderedMediaItems, orderedMediaFromRecord } from "./media-order.js";
 
 async function beginModerationEdit(callback, env, type, id, answer) {
  const adminId = String((callback.from && callback.from.id) || "");
@@ -1004,6 +1005,63 @@ function uniqueFileItems(list) {
  return out;
 }
 
+function orderedItemsFromPost(post) {
+ const sourceId = Number(post && (post.sourceMessageId || post.message_id));
+ const sourceMessageId = Number.isSafeInteger(sourceId) && sourceId > 0 ? sourceId : null;
+ const photos = postPhotos(post).map(item => ({ ...item, type: item.mime_type ? "document" : "photo", sourceMessageId }));
+ const videos = postVideos(post).map(item => ({ ...item, type: "video", sourceMessageId }));
+ return [...photos, ...videos];
+}
+
+function mergePostMediaOrder(post, incomingItems) {
+ const merged = mergeOrderedMediaItems(Array.isArray(post.mediaItems) ? post.mediaItems : [], incomingItems);
+ post.mediaItems = merged.mediaItems;
+ post.mediaOrderKnown = merged.mediaOrderKnown;
+ return post;
+}
+
+function publicCarMediaOrder(car, photos, videos) {
+ const ordered = orderedMediaFromRecord(car);
+ const identity = item => String(item.file_unique_id || item.file_id || "");
+ if (ordered.mediaOrderKnown) {
+  const output = [];
+  for (const item of ordered.mediaItems) {
+   const photoIndex = photos.findIndex(candidate => identity(candidate) === identity(item));
+   if (photoIndex >= 0) { output.push({ url: "/api/car-media/" + car.id + "/photo/" + photoIndex, type: "photo" }); continue; }
+   const videoIndex = videos.findIndex(candidate => identity(candidate) === identity(item));
+   if (videoIndex >= 0) output.push({ url: "/api/car-media/" + car.id + "/video/" + videoIndex, type: "video" });
+  }
+  return { mediaItems: output, mediaOrderKnown: output.length === ordered.mediaItems.length };
+ }
+ const mixedLegacy = photos.length > 0 && videos.length > 0;
+ const mediaItems = [
+  ...photos.map((_, index) => ({ url: "/api/car-media/" + car.id + "/photo/" + index, type: "photo" })),
+  ...videos.map((_, index) => ({ url: "/api/car-media/" + car.id + "/video/" + index, type: "video" }))
+ ];
+ return { mediaItems, mediaOrderKnown: !mixedLegacy };
+}
+
+function publicReviewMediaOrder(review, photos, videos) {
+ const ordered = orderedMediaFromRecord(review);
+ const identity = item => String(item.file_unique_id || item.file_id || "");
+ if (ordered.mediaOrderKnown) {
+  const output = [];
+  for (const item of ordered.mediaItems) {
+   const photoIndex = photos.findIndex(candidate => identity(candidate) === identity(item));
+   if (photoIndex >= 0) { output.push({ url: "/api/review-media/" + review.id + "/photo/" + photoIndex, type: "photo" }); continue; }
+   const videoIndex = videos.findIndex(candidate => identity(candidate) === identity(item));
+   if (videoIndex >= 0) output.push({ url: "/api/review-media/" + review.id + "/video/" + videoIndex, type: "video" });
+  }
+  return { mediaItems: output, mediaOrderKnown: output.length === ordered.mediaItems.length };
+ }
+ const mixedLegacy = photos.length > 0 && videos.length > 0;
+ const mediaItems = [
+  ...photos.map((_, index) => ({ url: "/api/review-media/" + review.id + "/photo/" + index, type: "photo" })),
+  ...videos.map((_, index) => ({ url: "/api/review-media/" + review.id + "/video/" + index, type: "video" }))
+ ];
+ return { mediaItems, mediaOrderKnown: !mixedLegacy };
+}
+
 function postPhotos(post) {
  const items = Array.isArray(post.photos) ? post.photos : (Array.isArray(post.photo) ? post.photo : []);
  const documentPhoto = imageDocumentItemFrom(post.document);
@@ -1246,6 +1304,7 @@ async function resendChannelImportEntry(entry, id, env, adminIds) {
 async function mergeChannelPartMedia(post, id, env) {
  const photos = [...largestPhotoOf(post.photo), ...(imageDocumentItemFrom(post.document) ? [imageDocumentItemFrom(post.document)] : [])];
  const videos = postVideos(post);
+ const incomingItems = [...photos.map(item => ({...item,type:item.mime_type ? "document" : "photo",sourceMessageId:Number(post.message_id)||null})), ...videos.map(item => ({...item,type:"video",sourceMessageId:Number(post.message_id)||null}))];
  if (!photos.length && !videos.length) return;
  const importKey = "import_pending:" + id;
  const importRaw = await env.REVIEWS.get(importKey);
@@ -1254,6 +1313,7 @@ async function mergeChannelPartMedia(post, id, env) {
   const saved = entry.post || entry;
   saved.photo = uniqueFileItems([...(Array.isArray(saved.photo) ? saved.photo : []), ...photos]);
   saved.videos = uniqueFileItems([...(Array.isArray(saved.videos) ? saved.videos : []), ...videos]);
+  mergePostMediaOrder(saved,incomingItems);
   if (!saved.caption && post.caption) saved.caption = post.caption;
   entry.post = saved;
   entry.photo = saved.photo;
@@ -1267,6 +1327,7 @@ async function mergeChannelPartMedia(post, id, env) {
   const review = JSON.parse(reviewRaw);
   review.photos = uniqueFileItems([...(Array.isArray(review.photos) ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : [])), ...photos]);
   review.videos = uniqueFileItems([...(Array.isArray(review.videos) ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : [])), ...videos]);
+  mergePostMediaOrder(review,incomingItems);
   review.hasPhoto = Boolean(review.photos.length);
   if (!review.fileId) review.fileId = (review.photos[0] || review.videos[0] || {}).file_id || null;
   await env.REVIEWS.put(reviewKey, JSON.stringify(review));
@@ -1279,6 +1340,7 @@ async function mergeChannelPartMedia(post, id, env) {
   const car = JSON.parse(carRaw);
   car.photos = uniqueFileItems([...(Array.isArray(car.photos) ? car.photos : []), ...photos]);
   car.videos = uniqueFileItems([...(Array.isArray(car.videos) ? car.videos : []), ...videos]);
+  mergePostMediaOrder(car,incomingItems);
   if (!car.fileId) car.fileId = (car.photos[car.photos.length - 1] || car.videos[0] || {}).file_id || null;
   await env.REVIEWS.put(carKey, JSON.stringify(car));
  }
