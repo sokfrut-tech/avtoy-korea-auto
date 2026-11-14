@@ -1,0 +1,19 @@
+{
+  "name": "avtoy-korea-russian-standby",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "dependencies": {
+    "@ydbjs/auth": "^6.3.0",
+    "@ydbjs/core": "^6.3.1",
+    "@ydbjs/query": "^6.3.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check server.mjs && node --check storage/ydb-inbox-store.mjs && node --check test/ydb-inbox-store.test.mjs && node --check test/snapshot.test.mjs && node --check test/server.test.mjs && node --check scripts/build-public-snapshot.mjs && node --check scripts/export-approved-kv.mjs && node --check scripts/create-public-manifest.mjs && node --check scripts/mirror-approved-media.mjs && node --check scheduler/retry-worker.mjs && node --check scheduler/retry-worker.test.mjs && node --check scripts/image-metadata.mjs && node --check test/image-metadata.test.mjs"
+  }
+}
