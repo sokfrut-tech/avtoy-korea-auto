@@ -1,0 +1,22 @@
+# GitLab CI fallback for the AVTOY KOREA Worker.
+# This pipeline runs the same dependency-free checks as the GitHub workflow.
+# It deliberately does NOT deploy to Cloudflare; production release remains gated separately.
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - when: never
+
+stages:
+  - verify
+
+worker-regression:
+  stage: verify
+  image: node:22-alpine
+  interruptible: true
+  script:
+    - node --version
+    - node --check worker.js
+    - node --test worker.test.mjs
