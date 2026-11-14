@@ -2,12 +2,12 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(process.argv[2] || 'pages');
-const resourceAttrs = /<(?:img|video|audio|source|script|iframe|embed|object|link)\\b[^>]*?\\b(?:src|href|poster)\\s*=\\s*[\"']\\s*(?:https?:)?\\/\\//i;
-const cssRemote = /url\\(\\s*[\"']?\\s*(?:https?:)?\\/\\//i;
-const jsRemote = /\\b(?:fetch|import)\\s*\\(\\s*(['\\x22\\x60])\\s*(?:https?:)?\\/\\//i;
-const jsSocket = /\\bnew\\s+(?:WebSocket|EventSource)\\s*\\(\\s*(['\\x22\\x60])\\s*(?:wss?:)?\\/\\//i;
-const xhrRemote = /\\.open\\s*\\(\\s*['\\x22](?:GET|POST|PUT|PATCH|DELETE)['\\x22]\\s*,\\s*['\\x22]https?:\\/\\//i;
-const forbidden = /(?:workers\\.dev|cloudflare(?:pages)?\\.dev|appdeploy\\.ai|appdeploy\\.com)/i;
+const resourceAttrs = /<(?:img|video|audio|source|script|iframe|embed|object|link)\b[^>]*?\b(?:src|href|poster)\s*=\s*["']\s*(?:https?:)?\/\//i;
+const cssRemote = /url\(\s*["']?\s*(?:https?:)?\/\//i;
+const jsRemote = /\b(?:fetch|import)\s*\(\s*(['\x22\x60])\s*(?:https?:)?\/\//i;
+const jsSocket = /\bnew\s+(?:WebSocket|EventSource)\s*\(\s*(['\x22\x60])\s*(?:wss?:)?\/\//i;
+const xhrRemote = /\.open\s*\(\s*['\x22](?:GET|POST|PUT|PATCH|DELETE)['\x22]\s*,\s*['\x22]https?:\/\//i;
+const forbidden = /(?:workers\.dev|cloudflare(?:pages)?\.dev|appdeploy\.ai|appdeploy\.com)/i;
 
 async function walk(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -36,4 +36,4 @@ for (const file of files) {
   }
   checked++;
 }
-process.stdout.write('Static origin check passed: ' + checked + ' text assets checked; no external resource origins found.\\n');
+process.stdout.write('Static origin check passed: ' + checked + ' text assets checked; no external resource origins found.\n');
