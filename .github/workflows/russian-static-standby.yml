@@ -8,6 +8,8 @@ on:
       - '.github/workflows/russian-static-standby.yml'
   workflow_dispatch:
 
+# Telegram Bot API credentials are supplied only at runtime via TELEGRAM_BOT_TOKEN.
+
 permissions:
   contents: read
 
