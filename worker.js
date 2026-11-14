@@ -1013,10 +1013,14 @@ function uniqueFileItems(list) {
 
 function orderedItemsFromPost(post) {
  const sourceId = Number(post && (post.sourceMessageId || post.message_id));
- const sourceMessageId = Number.isSafeInteger(sourceId) && sourceId > 0 ? sourceId : null;
- const photos = postPhotos(post).map(item => ({ ...item, type: item.mime_type ? "document" : "photo", sourceMessageId }));
- const videos = postVideos(post).map(item => ({ ...item, type: "video", sourceMessageId }));
- return [...photos, ...videos];
+ const photos = postPhotos(post);
+ const videos = postVideos(post);
+ // A single Telegram message carries one media object. Multiple legacy objects
+ // have already lost their per-part message IDs, so do not invent a shared ID.
+ const sourceMessageId = photos.length + videos.length === 1 && Number.isSafeInteger(sourceId) && sourceId > 0 ? sourceId : null;
+ const photoItems = photos.map(item => ({ ...item, type: item.mime_type ? "document" : "photo", sourceMessageId }));
+ const videoItems = videos.map(item => ({ ...item, type: "video", sourceMessageId }));
+ return [...photoItems, ...videoItems];
 }
 
 function mergePostMediaOrder(post, incomingItems) {
