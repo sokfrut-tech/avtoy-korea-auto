@@ -20,7 +20,7 @@ The build downloads only public catalogue records from the existing public Worke
 - Any public API/schema/media error aborts the build.
 - Mixed photo/video records without proven original ordering abort the build.
 - Any media item above the exporter's 25 MB safety limit aborts the build.
-- The output must stay below 140 MiB and 1,800 files. This is a safety margin under Tuqo Free's published 150 MB storage limit.
+- The output must stay below 125 MiB and 1,800 files. This is a safety margin under Tuqo Free's published 150 MB storage limit.
 - No partial catalogue is published by this build.
 
 ## Important provider limitation
