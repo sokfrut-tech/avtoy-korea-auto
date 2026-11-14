@@ -1,8 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-const base = new URL(process.env.SOURCE_WORKER_URL || 'https://avto-y-korea-auto.sokfrut.workers.dev/');
-if (base.protocol !== 'https:' || base.hostname !== 'avto-y-korea-auto.sokfrut.workers.dev') throw new Error('Unexpected public source host');
+const base = new URL(process.env.SOURCE_WORKER_URL || 'https://avtoy-korea-auto.sokfrut.workers.dev/');
+if (base.protocol !== 'https:' || base.hostname !== 'avtoy-korea-auto.sokfrut.workers.dev') throw new Error('Unexpected public source host');
 const mediaRoot = path.resolve('public/media');
 await fs.rm(mediaRoot, { recursive:true, force:true });
 await fs.mkdir(mediaRoot, { recursive:true });
