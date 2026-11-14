@@ -21,6 +21,8 @@ for (const [kind, records] of [['car', snapshot.cars], ['review', snapshot.revie
   }
 }
 const out = path.resolve(outputDir);
+const cwd = path.resolve('.');
+if (out === cwd || !out.startsWith(cwd + path.sep)) throw new Error('Refusing to replace an output directory outside the repository workspace');
 await fs.rm(out, { recursive:true, force:true });
 await fs.mkdir(path.join(out, 'media'), { recursive:true });
 for (const name of mediaNames) {
