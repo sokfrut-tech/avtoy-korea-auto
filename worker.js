@@ -1434,6 +1434,7 @@ async function stageGroupMedia(msg, env, adminIds) {
  const documentPhoto = imageDocumentItemFrom(msg.document);
  if (documentPhoto) photos.push(documentPhoto);
  const videos = postVideos(msg);
+ const incomingItems = [...photos.map(item=>({...item,type:item.mime_type ? "document" : "photo",sourceMessageId:Number(msg.message_id)||null})), ...videos.map(item=>({...item,type:"video",sourceMessageId:Number(msg.message_id)||null}))];
  if (!photos.length && !videos.length) return false;
  const id = reviewIdFor(msg.chat.id, msg);
  if (await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) return true;
@@ -1441,11 +1442,16 @@ async function stageGroupMedia(msg, env, adminIds) {
  let state = JSON.parse(await env.REVIEWS.get(key) || "null");
  if (!state || !state.post) {
   const albumNumber = msg.media_group_id ? String(msg.media_group_id).replace(/[^0-9]/g, "").slice(0, 40) : String(msg.message_id);
-  state = {type:"group_media",post:{...msg,message_id:albumNumber,photo:photos,videos,sourceType:"group"},notified:{}};
+  const ordered = mergeOrderedMediaItems([],incomingItems);
+  state = {type:"group_media",post:{...msg,message_id:albumNumber,photo:photos,videos,mediaItems:ordered.mediaItems,mediaOrderKnown:ordered.mediaOrderKnown,sourceType:"group"},notified:{}};
  } else {
   const saved = state.post;
   saved.photo = uniqueFileItems([...(Array.isArray(saved.photo) ? saved.photo : []), ...photos]);
   saved.videos = uniqueFileItems([...(Array.isArray(saved.videos) ? saved.videos : []), ...videos]);
+  const hadCanonicalOrder = Array.isArray(saved.mediaItems) && saved.mediaItems.length > 0;
+  const merged = mergeOrderedMediaItems(saved.mediaItems || [],incomingItems);
+  saved.mediaItems = merged.mediaItems;
+  saved.mediaOrderKnown = hadCanonicalOrder ? (saved.mediaOrderKnown === true && merged.mediaOrderKnown) : false;
   if (!saved.caption && msg.caption) saved.caption = msg.caption;
   state.post = saved;
  }
