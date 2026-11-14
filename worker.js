@@ -1034,11 +1034,12 @@ function publicCarMediaOrder(car, photos, videos) {
   return { mediaItems: output, mediaOrderKnown: output.length === ordered.mediaItems.length };
  }
  const mixedLegacy = photos.length > 0 && videos.length > 0;
+ if (mixedLegacy) return { mediaItems: [], mediaOrderKnown: false };
  const mediaItems = [
   ...photos.map((_, index) => ({ url: "/api/car-media/" + car.id + "/photo/" + index, type: "photo" })),
   ...videos.map((_, index) => ({ url: "/api/car-media/" + car.id + "/video/" + index, type: "video" }))
  ];
- return { mediaItems, mediaOrderKnown: !mixedLegacy };
+ return { mediaItems, mediaOrderKnown: true };
 }
 
 function publicReviewMediaOrder(review, photos, videos) {
@@ -1055,11 +1056,12 @@ function publicReviewMediaOrder(review, photos, videos) {
   return { mediaItems: output, mediaOrderKnown: output.length === ordered.mediaItems.length };
  }
  const mixedLegacy = photos.length > 0 && videos.length > 0;
+ if (mixedLegacy) return { mediaItems: [], mediaOrderKnown: false };
  const mediaItems = [
   ...photos.map((_, index) => ({ url: "/api/review-media/" + review.id + "/photo/" + index, type: "photo" })),
   ...videos.map((_, index) => ({ url: "/api/review-media/" + review.id + "/video/" + index, type: "video" }))
  ];
- return { mediaItems, mediaOrderKnown: !mixedLegacy };
+ return { mediaItems, mediaOrderKnown: true };
 }
 
 function postPhotos(post) {
@@ -2082,7 +2084,7 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = catalogPhotoItems(car); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))]; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = catalogPhotoItems(car); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const ordered = publicCarMediaOrder(car,photoItems,videoItems); const mediaItems = ordered.mediaItems; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaOrderKnown:ordered.mediaOrderKnown,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
@@ -2119,26 +2121,32 @@ export default {
       if (!raw) continue;
       const r = JSON.parse(raw);
       const photos = uniqueFileItems(Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []));
-      const mediaItems = r.kind === "video" ? (r.fileId ? [`/api/review-media/${r.id}/0`] : []) : photos.map((_,index)=>`/api/review-media/${r.id}/${index}`);
-      const media = r.fileId ? `/api/review-media/${r.id}` : null;
-      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems});
+      const videos = uniqueFileItems(Array.isArray(r.videos) && r.videos.length ? r.videos : (r.kind === "video" && r.fileId ? [{file_id:r.fileId}] : []));
+      const ordered = publicReviewMediaOrder(r,photos,videos);
+      const mediaItems = ordered.mediaItems.map(item=>item.url);
+      const media = mediaItems[0] || null;
+      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems,mediaOrderKnown:ordered.mediaOrderKnown});
      }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
    return Response.json({ reviews }, { headers: { "cache-control": "no-store" } });
   }
-  const mediaMatch = url.pathname.match(/^\/api\/review-media\/(-?\d+_\d+)(?:\/(\d+))?$/);
+  const mediaMatch = url.pathname.match(/^\/api\/review-media\/(-?\d+_\d+)(?:\/(photo|video)\/(\d+)|\/(\d+))?$/);
   if (request.method === "GET" && mediaMatch) {
    // Файлы отдаются через Worker: токен бота в браузер не попадает.
    if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found", { status: 404 });
    const raw = await env.REVIEWS.get(`approved:${mediaMatch[1]}`);
    if (!raw) return new Response("Not found", { status: 404 });
    const review = JSON.parse(raw);
-   const index = Number(mediaMatch[2] || 0);
+   const mediaType = mediaMatch[2] || (review.kind === "video" ? "video" : "photo");
+   const index = Number(mediaMatch[3] || mediaMatch[4] || 0);
    const photos = uniqueFileItems(Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []));
-   const photoItem = photos[index];
-   const fileId = review.kind === "video" ? (index === 0 ? review.fileId : null) : (photoItem && photoItem.file_id);
+   const videos = uniqueFileItems(Array.isArray(review.videos) && review.videos.length ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : []));
+   const photoItem = mediaType === "photo" ? photos[index] : null;
+   const videoItem = mediaType === "video" ? videos[index] : null;
+   const selectedItem = photoItem || videoItem;
+   const fileId = selectedItem && selectedItem.file_id;
    if (!fileId) return new Response("Not found", { status: 404 });
    const info = await callTelegram(env, "getFile", { file_id: fileId }).catch(() => null);
    const path = info && info.result && info.result.file_path;
@@ -2146,7 +2154,7 @@ export default {
    const upstream = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${path}`);
    if (!upstream.ok) return new Response("Bad Gateway", { status: 502 });
    const imageType = photoItem && photoItem.mime_type;
-   const contentType = review.kind === "video" ? "video/mp4" : (imageType || "image/jpeg");
+   const contentType = mediaType === "video" ? "video/mp4" : (imageType || "image/jpeg");
    return new Response(upstream.body, { headers: { "content-type": contentType, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
   }
   if(url.pathname==="/favicon.ico") return new Response(null,{status:204});
