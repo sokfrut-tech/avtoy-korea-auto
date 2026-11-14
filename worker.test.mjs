@@ -2623,25 +2623,26 @@ test("mixed Telegram channel album keeps photo-video-photo order through moderat
       caption: "Kia Sorento 2026",
       ...media
     }});
+    // Deliberately deliver source message 503 first: webhook arrival order must not win.
+    await worker.fetch(forward(7003, 503, { photo: [{ file_id: "P3", file_unique_id: "UP3", width: 1600, height: 900 }] }), reviewEnv(kv));
     await worker.fetch(forward(7001, 501, { photo: [{ file_id: "P1", file_unique_id: "UP1", width: 1600, height: 900 }] }), reviewEnv(kv));
     await worker.fetch(forward(7002, 502, { video: { file_id: "V2", file_unique_id: "UV2" } }), reviewEnv(kv));
-    await worker.fetch(forward(7003, 503, { photo: [{ file_id: "P3", file_unique_id: "UP3", width: 1600, height: 900 }] }), reviewEnv(kv));
 
-    const staged = JSON.parse(await kv.get("import_pending:-100555_501"));
+    const staged = JSON.parse(await kv.get("import_pending:-100555_503"));
     assert.deepEqual(staged.post.mediaItems.map(item => item.type), ["photo", "video", "photo"]);
     assert.deepEqual(staged.post.mediaItems.map(item => item.sourceMessageId), [501, 502, 503]);
     assert.equal(staged.post.mediaOrderKnown, true);
 
-    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_501")), reviewEnv(kv));
-    const pending = JSON.parse(await kv.get("car_pending:car_100555_501"));
+    await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_503")), reviewEnv(kv));
+    const pending = JSON.parse(await kv.get("car_pending:car_100555_503"));
     assert.deepEqual(pending.mediaItems.map(item => item.type), ["photo", "video", "photo"]);
     assert.equal(pending.mediaOrderKnown, true);
 
-    await worker.fetch(webhookUpdate(callback(111111111, "carpubforce:car_100555_501")), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(111111111, "carpubforce:car_100555_503")), reviewEnv(kv));
     const response = await worker.fetch(new Request("https://worker.test/api/cars"), reviewEnv(kv));
     assert.equal(response.status, 200);
     const body = await response.json();
-    const car = body.cars.find(item => item.id === "car_100555_501");
+    const car = body.cars.find(item => item.id === "car_100555_503");
     assert.ok(car);
     assert.equal(car.mediaOrderKnown, true);
     assert.deepEqual(car.mediaItems.map(item => item.type), ["photo", "video", "photo"]);
