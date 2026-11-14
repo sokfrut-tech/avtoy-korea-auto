@@ -2697,3 +2697,20 @@ test("mixed Telegram review album exposes typed media URLs in source order", asy
     ]);
   });
 });
+
+
+test("legacy split import arrays do not gain a fabricated shared message ID", async () => {
+  const kv = memoryKV();
+  await kv.put("import_pending:-100555_778", JSON.stringify({
+    chat: { id: -100555, username: "avtoYkorea" },
+    message_id: 778,
+    sourceDate: 1790000000,
+    caption: "Legacy mixed media",
+    photo: [{ file_id: "OLD_P", file_unique_id: "OLD_UP", width: 1600, height: 900 }],
+    videos: [{ file_id: "OLD_V", file_unique_id: "OLD_UV" }]
+  }));
+  await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_778")), reviewEnv(kv));
+  const car = JSON.parse(await kv.get("car_pending:car_100555_778"));
+  assert.equal(car.mediaOrderKnown, false);
+  assert.ok(car.mediaItems.every(item => item.sourceMessageId === null));
+});
