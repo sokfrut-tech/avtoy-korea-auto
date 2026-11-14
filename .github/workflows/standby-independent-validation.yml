@@ -1,4 +1,5 @@
 name: Standby independent validation
+# Revalidate after configuring the private GitLab read token.
 
 on:
   push:
