@@ -5,6 +5,7 @@ import path from 'node:path';
 const base = new URL(process.env.SOURCE_WORKER_URL || 'https://avtoy-korea-auto.sokfrut.workers.dev/');
 if (base.protocol !== 'https:' || base.hostname !== 'avtoy-korea-auto.sokfrut.workers.dev') throw new Error('Unexpected public source host');
 const mediaRoot = path.resolve('public/media');
+await fs.mkdir(path.dirname(mediaRoot), { recursive:true });
 const stageRoot = await fs.mkdtemp(path.join(path.dirname(mediaRoot), '.media-staging-'));
 const backupRoot = mediaRoot + '.backup-' + process.pid + '-' + Date.now();
 let previousMoved = false;
