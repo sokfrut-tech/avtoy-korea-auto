@@ -562,7 +562,8 @@ test('MAX webhook rejects malformed, oversized and unsupported updates', async t
 
 
 test('operator panel HTML is explicitly non-cacheable', async t => {
-  const { base }=await fixture(t);
+  const { base,dir }=await fixture(t);
+  await writeFile(path.join(dir,'public','ops.html'), '<title>Operator panel</title>');
   const response=await fetch(base+'/ops');
   assert.equal(response.status,200);
   assert.match(response.headers.get('cache-control') || '',/no-store/);
