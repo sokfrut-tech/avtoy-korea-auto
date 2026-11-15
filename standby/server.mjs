@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createMaxAdapter } from './channels/max-adapter.mjs';
+import { authenticateOperator, operatorCan, parseOperatorConfig, operatorPermissions } from './security/operator-auth.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -41,12 +42,28 @@ function validateEnquiry(input) {
   return { value:{ name, contact, model, comment } };
 }
 
-export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir = PUBLIC, env = process.env, fetchImpl = fetch, clock = () => Date.now(), inboxStore = null, requestStore = null, maxEventStore = requestStore, telegramTimeoutMs = 15_000, maxTimeoutMs = 10_000 } = {}) {
+export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir = PUBLIC, env = process.env, fetchImpl = fetch, clock = () => Date.now(), inboxStore = null, requestStore = null, maxEventStore = requestStore, auditStore = requestStore, telegramTimeoutMs = 15_000, maxTimeoutMs = 10_000 } = {}) {
   const inboxFile = path.join(dataDir, 'inbox.json');
   const snapshotFile = path.join(dataDir, 'public-snapshot.json');
   let writeChain = Promise.resolve();
   const rate = new Map();
   const maxAdapter = createMaxAdapter({ token:env.MAX_BOT_TOKEN, operatorChatId:env.MAX_OPERATOR_CHAT_ID, fetchImpl, timeoutMs:maxTimeoutMs });
+  const operatorConfig = env.STANDBY_OPERATORS_JSON ? parseOperatorConfig(env.STANDBY_OPERATORS_JSON) : null;
+  function authorizeOperator(req, permission) {
+    if (operatorConfig) {
+      const actor = authenticateOperator(req.headers.authorization, operatorConfig);
+      if (!actor) return { error:'unauthorized' };
+      if (!operatorCan(actor, permission)) return { error:'forbidden', actor };
+      return { actor, legacy:false };
+    }
+    const legacyToken = env.NODE_ENV !== 'production' && env.STANDBY_ADMIN_TOKEN;
+    if (legacyToken && safeEqual(req.headers.authorization?.replace(/^Bearer\s+/i,''), legacyToken)) return { actor:{ id:'legacy-local-admin', role:'owner' }, legacy:true };
+    return { error:'unauthorized' };
+  }
+  async function auditOperatorAction(actor, action, targetType, targetId, metadata = {}) {
+    if (!auditStore || typeof auditStore.recordOperatorAuditEvent !== 'function') throw new Error('Durable operator audit store is unavailable');
+    await auditStore.recordOperatorAuditEvent({ eventId:randomUUID(), occurredAt:new Date(clock()).toISOString(), actorId:actor.id, actorRole:actor.role, action, targetType, targetId, outcome:'accepted', metadata });
+  }
   const enqueueWrite = (operation) => { const next = writeChain.then(operation); writeChain = next.catch(() => {}); return next; };
   async function readInbox() {
     if (inboxStore) return inboxStore.readInbox();
@@ -282,18 +299,30 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     }
     if (req.method === 'GET' && url.pathname === '/ops') return sendFile(res,path.join(publicDir,'ops.html'));
     if (req.method === 'GET' && url.pathname === '/ops/inbox') {
-      if (!env.STANDBY_ADMIN_TOKEN || !safeEqual(req.headers.authorization?.replace(/^Bearer\s+/i,''),env.STANDBY_ADMIN_TOKEN)) return json(res,401,{ error:'Unauthorized' });
+      const auth = authorizeOperator(req,'inbox:read');
+      if (auth.error === 'unauthorized') return json(res,401,{ error:'Unauthorized' });
+      if (auth.error === 'forbidden') return json(res,403,{ error:'Forbidden' });
+      if (!auth.legacy) {
+        try { await auditOperatorAction(auth.actor,'inbox.read','inbox','all'); }
+        catch { return json(res,503,{ error:'Operator audit storage is unavailable.' }); }
+      }
       if (requestStore) {
         const items = await requestStore.listPrivateEnquiries({ limit:100 });
-        return json(res,200,{ items:items.map(({id,name,contact,model,comment,createdAt,status,attempts,lastError})=>({id,name,contact,model,comment,createdAt,status,attempts,lastError})) });
+        return json(res,200,{ operator:auth.actor, permissions:operatorPermissions(auth.actor.role), items:items.map(({id,name,contact,model,comment,createdAt,status,attempts,lastError})=>({id,name,contact,model,comment,createdAt,status,attempts,lastError})) });
       }
       const inbox = await readInbox();
-      return json(res,200,{ items:inbox.map(({id,name,contact,model,comment,createdAt,status,attempts,lastError})=>({id,name,contact,model,comment,createdAt,status,attempts,lastError})) });
+      return json(res,200,{ operator:auth.actor, permissions:operatorPermissions(auth.actor.role), items:inbox.map(({id,name,contact,model,comment,createdAt,status,attempts,lastError})=>({id,name,contact,model,comment,createdAt,status,attempts,lastError})) });
     }
     if (req.method === 'POST' && url.pathname === '/ops/retry') {
-      if (!env.STANDBY_ADMIN_TOKEN || !safeEqual(req.headers.authorization?.replace(/^Bearer\s+/i,''),env.STANDBY_ADMIN_TOKEN)) return json(res,401,{ error:'Unauthorized' });
+      const auth = authorizeOperator(req,'notifications:retry');
+      if (auth.error === 'unauthorized') return json(res,401,{ error:'Unauthorized' });
+      if (auth.error === 'forbidden') return json(res,403,{ error:'Forbidden' });
+      if (!auth.legacy) {
+        try { await auditOperatorAction(auth.actor,'notifications.retry','queue','due'); }
+        catch { return json(res,503,{ error:'Operator audit storage is unavailable.' }); }
+      }
       const results = await retryDue();
-      return json(res,200,{ processed:results.length,results });
+      return json(res,200,{ operator:auth.actor, processed:results.length,results });
     }
     if (req.method === 'GET') {
       const relative = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
