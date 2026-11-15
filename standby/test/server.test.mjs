@@ -561,6 +561,15 @@ test('MAX webhook rejects malformed, oversized and unsupported updates', async t
 });
 
 
+test('operator panel HTML is explicitly non-cacheable', async t => {
+  const { base }=await fixture(t);
+  const response=await fetch(base+'/ops');
+  assert.equal(response.status,200);
+  assert.match(response.headers.get('cache-control') || '',/no-store/);
+  assert.equal(response.headers.get('cross-origin-resource-policy'),'same-origin');
+  assert.equal(response.headers.get('x-content-type-options'),'nosniff');
+});
+
 test('operator panel is served locally and does not embed an admin token', async t => {
   const {base,dir}=await fixture(t);
   await writeFile(path.join(dir,'public','ops.html'),'<!doctype html><title>AVTOY operator panel</title><script>let token = ""; fetch("/ops/inbox")</script>');
