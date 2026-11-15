@@ -195,11 +195,52 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     return Object.freeze({ cutoff, limit: take });
   }
   async function ensureOperatorAuditSchema() {
+    await sql`CREATE TABLE IF NOT EXISTS standby_operator_auth_rate_limits (
+      key_digest Utf8 NOT NULL,
+      window_start Utf8 NOT NULL,
+      failures Uint32 NOT NULL,
+      PRIMARY KEY (key_digest)
+    )`;
     await sql`CREATE TABLE IF NOT EXISTS standby_operator_audit_events (
       event_id Utf8 NOT NULL, occurred_at Utf8, actor_id Utf8, actor_role Utf8, action Utf8,
       target_type Utf8, target_id Utf8, outcome Utf8, metadata Utf8,
       PRIMARY KEY (event_id)
     )`;
+  }
+
+  async function consumeOperatorAuthFailure({ keyDigest, now = clock(), windowMs = 600_000, maxFailures = 10 } = {}) {
+    if (!/^[a-f0-9]{64}$/.test(String(keyDigest || ''))) throw new TypeError('A SHA-256 rate-limit key digest is required');
+    if (!Number.isInteger(windowMs) || windowMs < 60_000 || windowMs > 60 * 60_000) throw new TypeError('windowMs must be between 1 and 60 minutes');
+    if (!Number.isInteger(maxFailures) || maxFailures < 1 || maxFailures > 100) throw new TypeError('maxFailures must be between 1 and 100');
+    const nowIso = iso(now);
+    const cutoff = new Date(Number(new Date(nowIso)) - windowMs).toISOString();
+    await ensureOperatorAuditSchema();
+    return sql.begin({ isolation:'serializableReadWrite', idempotent:true }, async tx => {
+      const row = firstRow(await tx`SELECT key_digest, window_start, failures FROM standby_operator_auth_rate_limits WHERE key_digest = ${keyDigest}`);
+      if (!row || row.window_start <= cutoff) {
+        await tx`UPSERT INTO standby_operator_auth_rate_limits (key_digest, window_start, failures) VALUES (${keyDigest}, ${nowIso}, 1)`;
+        return { allowed:true, failures:1, windowStart:nowIso };
+      }
+      const failures = Number(row.failures || 0);
+      if (failures >= maxFailures) return { allowed:false, failures, windowStart:row.window_start };
+      const next = failures + 1;
+      await tx`UPSERT INTO standby_operator_auth_rate_limits (key_digest, window_start, failures) VALUES (${keyDigest}, ${row.window_start}, ${next})`;
+      return { allowed:true, failures:next, windowStart:row.window_start };
+    });
+  }
+
+  async function pruneOperatorAuthRateLimits({ before, limit = 500 } = {}) {
+    const cutoffDate = new Date(before);
+    if (!before || !Number.isFinite(cutoffDate.getTime())) throw new TypeError('A valid rate-limit retention cutoff is required');
+    const cutoff = cutoffDate.toISOString();
+    if (!Number.isInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 500) throw new TypeError('limit must be an integer between 1 and 500');
+    const take = Number(limit);
+    await sql`DELETE FROM standby_operator_auth_rate_limits ON
+      SELECT key_digest FROM standby_operator_auth_rate_limits
+      WHERE window_start < ${cutoff}
+      ORDER BY window_start
+      LIMIT ${take}`;
+    return Object.freeze({ cutoff, limit:take });
   }
 
   async function recordOperatorAuditEvent(event) {
@@ -239,5 +280,5 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     }));
   }
 
-  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, ensureOperatorAuditSchema, recordOperatorAuditEvent, listOperatorAuditEvents });
+  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, ensureOperatorAuditSchema, consumeOperatorAuthFailure, pruneOperatorAuthRateLimits, recordOperatorAuditEvent, listOperatorAuditEvents });
 }
