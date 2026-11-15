@@ -503,3 +503,58 @@ test('YDB request completion uses a stable operator receipt', async t => {
   assert.deepEqual(completed.requiredAdminIds, ['operators']);
   assert.ok(completed.deliveredAdminIds.includes('operators'));
 });
+
+
+test('MAX webhook persists allowlisted operator-group event metadata before HTTP 200', async t => {
+  const stored = [];
+  const maxEventStore = { async recordMaxWebhookEvent(event) { stored.push(event); return { duplicate:false }; } };
+  const { base } = await fixture(t, { maxEventStore, env:{ MAX_WEBHOOK_SECRET:'test_secret-123', MAX_OPERATOR_CHAT_ID:'987654321' } });
+  const update = { update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'msg-001',text:'!status 12345678'}} };
+  const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'test_secret-123'},body:JSON.stringify(update)});
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{ok:true,duplicate:false});
+  assert.equal(stored.length,1);
+  assert.equal(stored[0].eventType,'message_created');
+  assert.equal(stored[0].chatId,'987654321');
+  assert.equal(stored[0].messageId,'msg-001');
+  assert.equal(stored[0].senderUserId,'12345');
+  assert.equal(Object.hasOwn(stored[0],'text'),false);
+});
+
+test('MAX webhook rejects missing or incorrect secret before persistence', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{maxEventStore:{async recordMaxWebhookEvent(){writes++;}},env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321'}});
+  const body=JSON.stringify({update_type:'message_created',timestamp:1794740000000,message:{recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'m1'}}});
+  for(const secret of [undefined,'wrong-secret']){
+    const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json',...(secret?{'x-max-bot-api-secret':secret}:{})},body});
+    assert.equal(response.status,401);
+  }
+  assert.equal(writes,0);
+});
+
+test('MAX webhook rejects events outside the configured operator group', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{maxEventStore:{async recordMaxWebhookEvent(){writes++;}},env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321'}});
+  const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify({update_type:'message_created',timestamp:1794740000000,message:{recipient:{chat_id:111111111,chat_type:'chat'},body:{mid:'other-chat'}}})});
+  assert.equal(response.status,403);
+  assert.equal(writes,0);
+});
+
+test('MAX webhook does not acknowledge without durable storage or when persistence fails', async t => {
+  const payload={update_type:'message_created',timestamp:1794740000000,message:{recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'m1'}}};
+  const headers={'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'};
+  const noStore=await fixture(t,{env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321'}});
+  assert.equal((await fetch(noStore.base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify(payload)})).status,503);
+  const failed=await fixture(t,{env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321'},maxEventStore:{async recordMaxWebhookEvent(){throw new Error('db down');}}});
+  assert.equal((await fetch(failed.base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify(payload)})).status,503);
+});
+
+test('MAX webhook rejects malformed, oversized and unsupported updates', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321'},maxEventStore:{async recordMaxWebhookEvent(){writes++;}}});
+  const headers={'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'};
+  assert.equal((await fetch(base+'/api/max/webhook',{method:'POST',headers,body:'{'})).status,400);
+  assert.equal((await fetch(base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify({update_type:'bot_started',timestamp:1794740000000,chat_id:987654321})})).status,400);
+  assert.equal((await fetch(base+'/api/max/webhook',{method:'POST',headers,body:' '.repeat(65000)})).status,413);
+  assert.equal(writes,0);
+});
