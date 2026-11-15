@@ -118,7 +118,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     };
   }
   async function receiveMaxWebhook(req, res) {
-    if (!/^[A-Za-z0-9_-]{5,256}$/.test(String(env.MAX_WEBHOOK_SECRET || '')) || !/^\\d+$/.test(String(env.MAX_OPERATOR_CHAT_ID || ''))) return json(res,503,{ ok:false,error:'MAX webhook is not configured.' });
+    if (!/^[A-Za-z0-9_-]{5,256}$/.test(String(env.MAX_WEBHOOK_SECRET || '')) || ! /^-?\d{1,20}$/.test(String(env.MAX_OPERATOR_CHAT_ID || ''))) return json(res,503,{ ok:false,error:'MAX webhook is not configured.' });
     if (!safeEqual(req.headers['x-max-bot-api-secret'],env.MAX_WEBHOOK_SECRET)) return json(res,401,{ ok:false,error:'Unauthorized' });
     if (!maxEventStore || typeof maxEventStore.recordMaxWebhookEvent !== 'function') return json(res,503,{ ok:false,error:'Durable MAX event storage is unavailable.' });
     let update;
