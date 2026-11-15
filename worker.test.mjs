@@ -1292,6 +1292,7 @@ test("channel album imported as one review keeps every photo through publication
    {url:"/api/review-media/-100555_440/photo/0",type:"photo"},
    {url:"/api/review-media/-100555_440/photo/1",type:"photo"}
   ]);
+  assert.equal(body.reviews[0].mediaOrderKnown,false,"legacy photo arrays do not have Telegram source IDs proving their order");
  });
 });
 
