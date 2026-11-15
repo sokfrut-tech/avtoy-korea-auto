@@ -174,5 +174,25 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     });
   }
 
-  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery });
+  /**
+   * Delete at most 500 old MAX webhook receipts per call. The cutoff is an
+   * explicit ISO timestamp supplied by the retention scheduler; no implicit
+   * clock or unbounded table-wide DELETE is used.
+   */
+  async function pruneMaxWebhookEvents({ before, limit = 500 } = {}) {
+    const cutoffDate = new Date(before);
+    if (!before || !Number.isFinite(cutoffDate.getTime())) throw new TypeError('A valid retention cutoff timestamp is required');
+    const cutoff = cutoffDate.toISOString();
+    if (!Number.isInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 500) {
+      throw new TypeError('limit must be an integer between 1 and 500');
+    }
+    const take = Number(limit);
+    await sql`DELETE FROM standby_max_webhook_events ON
+      SELECT event_digest FROM standby_max_webhook_events
+      WHERE received_at < ${cutoff}
+      ORDER BY received_at
+      LIMIT ${take}`;
+    return Object.freeze({ cutoff, limit: take });
+  }
+  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents });
 }
