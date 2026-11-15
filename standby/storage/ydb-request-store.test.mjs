@@ -8,6 +8,7 @@ function fakeSql() {
   const calls = [];
   const maxEvents = new Map();
   const fakeAudit = new Map();
+  const rateLimits = new Map();
   async function execute(strings, ...values) {
     const q = strings.join(' ? ').replace(/\\s+/g, ' ').trim();
     calls.push(q);
@@ -23,6 +24,19 @@ function fakeSql() {
       const [cutoff, limit] = values;
       const expired = [...maxEvents.values()].filter(row => row.received_at < cutoff).sort((a,b) => a.received_at.localeCompare(b.received_at)).slice(0, Number(limit));
       for (const row of expired) maxEvents.delete(row.event_digest);
+      return [];
+    }
+    if (q.startsWith('CREATE TABLE IF NOT EXISTS standby_operator_auth_rate_limits')) return [];
+    if (q.startsWith('SELECT key_digest, window_start, failures FROM standby_operator_auth_rate_limits')) {
+      const row=rateLimits.get(values[0]); return row ? [[{...row}]] : [];
+    }
+    if (q.startsWith('UPSERT INTO standby_operator_auth_rate_limits')) {
+      const [key_digest,window_start,failures]=values; rateLimits.set(key_digest,{key_digest,window_start,failures}); return [];
+    }
+    if (q.startsWith('DELETE FROM standby_operator_auth_rate_limits ON')) {
+      const [cutoff,limit]=values;
+      const rows=[...rateLimits.values()].filter(row=>row.window_start<cutoff).sort((a,b)=>a.window_start.localeCompare(b.window_start)).slice(0,Number(limit));
+      for(const row of rows) rateLimits.delete(row.key_digest);
       return [];
     }
     if (q.startsWith('CREATE TABLE IF NOT EXISTS standby_operator_audit_events')) return [];
@@ -72,7 +86,7 @@ function fakeSql() {
     return [];
   }
   execute.begin = async (_options, callback) => callback(execute);
-  return { sql:execute, enquiries, idempotency, maxEvents, fakeAudit, calls };
+  return { sql:execute, enquiries, idempotency, maxEvents, fakeAudit, rateLimits, calls };
 }
 
 test('creates one request per row and stores only a digest for idempotency', async () => {
@@ -202,4 +216,37 @@ test('operator audit listing returns only stored audit fields in reverse chronol
   assert.equal(rows[0].actorId,'operator-a');
   assert.deepEqual(rows[0].metadata,{count:2});
   assert.equal(Object.hasOwn(rows[0],'phone'),false);
+});
+
+
+test('distributed auth limiter counts failures by digest and blocks at the configured threshold', async () => {
+  const fake=fakeSql(); const store=createYdbRequestStore({sql:fake.sql,clock:()=>Date.parse('2026-11-15T12:00:00.000Z')});
+  const key='a'.repeat(64);
+  for(let i=1;i<=10;i++){
+    const result=await store.consumeOperatorAuthFailure({keyDigest:key,now:Date.parse('2026-11-15T12:00:00.000Z'),maxFailures:10});
+    assert.equal(result.allowed,true); assert.equal(result.failures,i);
+  }
+  const blocked=await store.consumeOperatorAuthFailure({keyDigest:key,now:Date.parse('2026-11-15T12:00:00.000Z'),maxFailures:10});
+  assert.equal(blocked.allowed,false); assert.equal(blocked.failures,10);
+  assert.equal(fake.rateLimits.size,1);
+});
+
+test('distributed auth limiter starts a fresh window and validates inputs', async () => {
+  const fake=fakeSql(); const store=createYdbRequestStore({sql:fake.sql});
+  const key='b'.repeat(64);
+  await store.consumeOperatorAuthFailure({keyDigest:key,now:'2026-11-15T12:00:00.000Z'});
+  const next=await store.consumeOperatorAuthFailure({keyDigest:key,now:'2026-11-15T12:11:00.000Z'});
+  assert.equal(next.allowed,true); assert.equal(next.failures,1);
+  await assert.rejects(()=>store.consumeOperatorAuthFailure({keyDigest:'bad'}),/digest/);
+  await assert.rejects(()=>store.consumeOperatorAuthFailure({keyDigest:key,windowMs:1000}),/windowMs/);
+});
+
+test('distributed auth limiter cleanup deletes only expired buckets in bounded batches', async () => {
+  const fake=fakeSql(); const store=createYdbRequestStore({sql:fake.sql});
+  await store.consumeOperatorAuthFailure({keyDigest:'c'.repeat(64),now:'2026-11-14T00:00:00.000Z'});
+  await store.consumeOperatorAuthFailure({keyDigest:'d'.repeat(64),now:'2026-11-15T00:00:00.000Z'});
+  await store.pruneOperatorAuthRateLimits({before:'2026-11-15T00:00:00.000Z',limit:1});
+  assert.equal(fake.rateLimits.has('c'.repeat(64)),false);
+  assert.equal(fake.rateLimits.has('d'.repeat(64)),true);
+  await assert.rejects(()=>store.pruneOperatorAuthRateLimits({}),/cutoff/);
 });
