@@ -42,6 +42,20 @@ function validateEnquiry(input) {
   return { value:{ name, contact, model, comment } };
 }
 
+export function assertProductionRequestStore({ nodeEnv = 'test', inboxStoreMode = '', ydbConnectionString = '', requestStore = null } = {}) {
+  if (nodeEnv !== 'production') return true;
+  if (inboxStoreMode !== 'v2') {
+    throw new Error('Production Russian standby requires INBOX_STORE=v2; local JSON inbox is not durable production storage');
+  }
+  if (!ydbConnectionString || !requestStore) {
+    throw new Error('Production Russian standby requires a connected durable YDB request store; refusing local JSON fallback');
+  }
+  const required = ['verifySchema','createEnquiry','getEnquiry','claimEnquiry','claimDueEnquiries','listPrivateEnquiries','completeDelivery'];
+  const missing = required.filter(name => typeof requestStore[name] !== 'function');
+  if (missing.length) throw new Error('Production Russian standby request store is incomplete: ' + missing.join(', '));
+  return true;
+}
+
 export function assertDurableAdminRuntime({ operatorsConfigured = false, maxWebhookConfigured = false, requestStore = null } = {}) {
   if (!operatorsConfigured && !maxWebhookConfigured) return true;
   if (!requestStore || typeof requestStore.ensureMaxWebhookSchema !== 'function' || typeof requestStore.verifySchema !== 'function') {
@@ -449,6 +463,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       await inboxStore.ensureSchema();
       process.stdout.write('YDB inbox storage enabled\n');
     }
+    assertProductionRequestStore({ nodeEnv:process.env.NODE_ENV, inboxStoreMode:process.env.INBOX_STORE, ydbConnectionString:process.env.YDB_CONNECTION_STRING, requestStore });
     assertDurableAdminRuntime({
       operatorsConfigured:Boolean(process.env.STANDBY_OPERATORS_JSON),
       maxWebhookConfigured:Boolean(process.env.MAX_WEBHOOK_SECRET),
