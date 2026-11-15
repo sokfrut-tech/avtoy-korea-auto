@@ -56,7 +56,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
       if (!operatorCan(actor, permission)) return { error:'forbidden', actor };
       return { actor, legacy:false };
     }
-    const legacyToken = env.NODE_ENV !== 'production' && env.STANDBY_ADMIN_TOKEN;
+    const legacyToken = ['test','development'].includes(env.NODE_ENV) && env.STANDBY_ADMIN_TOKEN;
     if (legacyToken && safeEqual(req.headers.authorization?.replace(/^Bearer\s+/i,''), legacyToken)) return { actor:{ id:'legacy-local-admin', role:'owner' }, legacy:true };
     return { error:'unauthorized' };
   }
