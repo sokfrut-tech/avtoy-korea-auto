@@ -17,9 +17,10 @@ Date: 2026-11-15
 6. The application PR includes a regression test that deleting one photo from a mixed album leaves the remaining video/photo sequence intact.
 
 ## Verification limits
+- A syntax-only parse check passed for the four PR #78 source/test files and the five GitLab inventory/mirror/parity source/test files. The check used the available JavaScript isolate after removing module import/export declarations; it is not equivalent to Node.js `--check` or executing the tests.
 - GitHub Actions for PR #78 have failed before test steps started; no runner logs were available. The tests have not been executed.
-- GitLab CI previously failed at the account identity-verification gate before jobs ran. Do not attempt to bypass that gate.
-- The current GitLab deployment branch has not had a successful test run after these changes. Treat the changes as reviewed source only, not verified runtime behavior.
+- The latest GitLab pipeline for this branch failed before creating any jobs (job list empty). Earlier failures showed the account identity-verification gate. Do not attempt to bypass that gate.
+- The current GitLab deployment branch has not had a successful test run after these changes. Treat the changes as syntax-screened source only, not verified runtime behavior.
 
 ## Safe next sequence
 1. Obtain a legitimate Node.js test runtime with no paid resource and no identity-gate bypass.
