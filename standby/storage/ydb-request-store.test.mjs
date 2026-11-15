@@ -285,7 +285,7 @@ test('YDB schema verification checks queue indexes as well as required tables', 
   const fake=fakeSql();
   const store=createYdbRequestStore({sql:fake.sql,schemaManagedExternally:true});
   await store.verifySchema();
-  const queries=fake.calls.map(call=>call.query);
+  const queries=fake.calls;
   assert.ok(queries.some(q=>q.includes('VIEW idx_due_queue')));
   assert.ok(queries.some(q=>q.includes('VIEW idx_expired_lease')));
 });
