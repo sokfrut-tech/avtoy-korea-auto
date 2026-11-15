@@ -920,12 +920,13 @@ test("channel album imports one vehicle with all photos", async () => {
     assert.equal(staged.post.caption, "Kia Sorento 2022");
     assert.deepEqual(staged.post.photo.map(p => p.file_id), ["PHOTO_1","PHOTO_2"]);
     assert.equal(calls.filter(c => c.method === "sendMessage" && c.payload.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === "imp:car:-100555_77").length, 2); // one notification per configured admin
+    const previewMediaCount = calls.filter(c => c.method === "sendPhoto" && String(c.payload.chat_id) === "111111111").length;
     await worker.fetch(webhookUpdate(callback(111111111, "imp:car:-100555_77")), reviewEnv(kv));
     const cars = await kv.list({prefix:"car_pending:"});
     assert.equal(cars.keys.length, 1);
     const car = JSON.parse(await kv.get(cars.keys[0].name));
     assert.deepEqual(car.photos.map(p => p.file_id), ["PHOTO_1","PHOTO_2"]);
-    assert.deepEqual(calls.filter(c => c.method === "sendPhoto" && String(c.payload.chat_id) === "111111111").map(c => c.payload.photo), ["PHOTO_1", "PHOTO_2"], "known source order is delivered sequentially");
+    assert.deepEqual(calls.filter(c => c.method === "sendPhoto" && String(c.payload.chat_id) === "111111111").slice(previewMediaCount).map(c => c.payload.photo), ["PHOTO_1", "PHOTO_2"], "moderation delivery sends the complete known-order album sequentially after the initial import preview");
   });
 });
 
@@ -1279,10 +1280,11 @@ test("channel album imported as one review keeps every photo through publication
   await worker.fetch(webhookUpdate(second),reviewEnv(kv));
   const staged=JSON.parse(await kv.get("import_pending:-100555_440"));
   assert.deepEqual(staged.post.photo.map(p=>p.file_id),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"]);
+  const previewMediaCount=calls.filter(c=>c.method==="sendPhoto"&&String(c.payload.chat_id)==="111111111").length;
   await worker.fetch(webhookUpdate(callback(111111111,"imp:review:-100555_440")),reviewEnv(kv));
   const pending=JSON.parse(await kv.get("pending:-100555_440"));
   assert.deepEqual(pending.photos.map(p=>p.file_id),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"]);
-  assert.deepEqual(calls.filter(c=>c.method==="sendPhoto"&&String(c.payload.chat_id)==="111111111").map(c=>c.payload.photo),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"],"known source order is delivered sequentially");
+  assert.deepEqual(calls.filter(c=>c.method==="sendPhoto"&&String(c.payload.chat_id)==="111111111").slice(previewMediaCount).map(c=>c.payload.photo),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"],"moderation delivery sends the complete known-order album sequentially after the initial import preview");
   await worker.fetch(webhookUpdate(callback(111111111,"pub:-100555_440")),reviewEnv(kv));
   const approved=JSON.parse(await kv.get("approved:-100555_440"));
   assert.deepEqual(approved.photos.map(p=>p.file_id),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"]);
