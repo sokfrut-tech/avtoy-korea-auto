@@ -22,22 +22,24 @@ button{border:0;background:var(--accent);color:white;font-weight:650;cursor:poin
 <header><div><div class="muted">AVTOY KOREA</div><h1>Панель оператора</h1></div><span class="muted">Резервный контур</span></header>
 <section id="login" class="card login">
 <h2>Вход для администратора</h2>
-<p class="muted">Введите административный ключ резервного сервера. Ключ хранится только в памяти этой вкладки и не сохраняется в браузере.</p>
+<p class="muted">Введите свой персональный ключ оператора. Он хранится только в памяти этой вкладки и не сохраняется в браузере.</p>
 <form id="loginForm"><label for="token">Административный ключ</label><input id="token" type="password" autocomplete="off" required><button type="submit">Открыть заявки</button></form>
 <p id="loginError" class="error" role="status"></p>
 </section>
 <section id="dashboard" class="hidden">
 <div class="card">
-<div class="actions"><button id="refresh" class="secondary">Обновить список</button><button id="retry">Повторить ожидающие уведомления</button><button id="logout" class="secondary">Выйти</button></div>
-<p id="summary" class="muted">Загрузка…</p><p id="actionError" class="error" role="status"></p>
+<div class="actions"><button id="refresh" class="secondary">Обновить список</button><button id="retry">Повторить ожидающие уведомления</button><button id="auditButton" class="secondary hidden">Журнал действий</button><button id="logout" class="secondary">Выйти</button></div>
+<p id="operatorInfo" class="muted"></p><p id="summary" class="muted">Загрузка…</p><p id="actionError" class="error" role="status"></p>
 </div>
 <div class="card"><h2>Заявки клиентов</h2><div id="requests"><div class="empty">Загрузка…</div></div></div>
+<div id="auditSection" class="card hidden"><h2>Журнал действий операторов</h2><div id="auditEvents"><div class="empty">Загрузка…</div></div></div>
 <div class="card"><p class="muted">Связь с клиентом выполняется по указанному в заявке контакту. Автоматическая отправка ответов через Telegram/MAX и история переписки пока не подключены.</p></div>
 </section>
 </main>
 <script>
 'use strict';
 let adminToken = '';
+let currentPermissions = [];
 const byId = id => document.getElementById(id);
 const safe = value => String(value ?? '');
 function setError(id,message){byId(id).textContent=message||'';}
@@ -72,15 +74,40 @@ function render(items){
   root.append(card);
  }
 }
+function renderAudit(events){
+ const root=byId('auditEvents');root.replaceChildren();
+ if(!events.length){root.append(node('div','empty','Записей пока нет.'));return;}
+ for(const event of events){
+  const item=node('article','request');
+  item.append(node('h3','',safe(event.action)+' · '+safe(event.outcome)));
+  item.append(node('div','meta',safe(event.actorId)+' · '+safe(event.actorRole)+' · '+(event.occurredAt?new Date(event.occurredAt).toLocaleString('ru-RU'):'')));
+  item.append(node('p','detail','Цель: '+safe(event.targetType)+' / '+safe(event.targetId)));
+  root.append(item);
+ }
+}
+async function loadAudit(){
+ setError('actionError','');byId('auditButton').disabled=true;
+ try{const data=await api('/ops/audit');renderAudit(data.events||[]);byId('auditSection').classList.remove('hidden');}
+ catch(error){setError('actionError',error.message);}
+ finally{byId('auditButton').disabled=false;}
+}
 async function load(){
  setError('actionError','');byId('refresh').disabled=true;
- try{const data=await api('/ops/inbox');render(data.items||[]);byId('login').classList.add('hidden');byId('dashboard').classList.remove('hidden');}
- catch(error){setError('actionError',error.message);if(/ключ|сессия/i.test(error.message))logout();}
+ try{
+  const data=await api('/ops/inbox');render(data.items||[]);
+  currentPermissions=data.permissions||[];
+  byId('operatorInfo').textContent='Оператор: '+safe(data.operator?.id)+' · роль: '+safe(data.operator?.role);
+  byId('retry').classList.toggle('hidden',!currentPermissions.includes('notifications:retry'));
+  byId('auditButton').classList.toggle('hidden',!currentPermissions.includes('audit:read'));
+  byId('auditSection').classList.add('hidden');
+  byId('login').classList.add('hidden');byId('dashboard').classList.remove('hidden');
+ } catch(error){setError('actionError',error.message);if(/ключ|сессия/i.test(error.message))logout();}
  finally{byId('refresh').disabled=false;}
 }
-function logout(){adminToken='';byId('token').value='';byId('dashboard').classList.add('hidden');byId('login').classList.remove('hidden');}
+function logout(){adminToken='';currentPermissions=[];byId('token').value='';byId('dashboard').classList.add('hidden');byId('auditSection').classList.add('hidden');byId('login').classList.remove('hidden');}
 byId('loginForm').addEventListener('submit',async event=>{event.preventDefault();adminToken=byId('token').value;try{const data=await api('/ops/inbox');render(data.items||[]);byId('token').value='';byId('login').classList.add('hidden');byId('dashboard').classList.remove('hidden');setError('loginError','');}catch(error){adminToken='';setError('loginError',error.message);}});
 byId('refresh').addEventListener('click',load);
+byId('auditButton').addEventListener('click',loadAudit);
 byId('retry').addEventListener('click',async()=>{byId('retry').disabled=true;setError('actionError','');try{const result=await api('/ops/retry',{method:'POST'});await load();setError('actionError','Обработано заявок: '+result.processed);}catch(error){setError('actionError',error.message);}finally{byId('retry').disabled=false;}});
 byId('logout').addEventListener('click',logout);
 </script>
