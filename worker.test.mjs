@@ -2257,6 +2257,7 @@ test("car catalogue exposes mixed photo and video media with separate playback U
   assert.ok(html.includes("max-height:none;min-height:220px"), "mobile gallery is no longer restricted to a short preview");
   assert.ok(html.includes("item.type||item.mimeType||item.mime_type"), "each gallery item keeps its own media type");
   assert.ok(html.includes("createCarMedia"), "gallery creates photo and video elements per item");
+  assert.ok(!html.includes("carItems.sort("), "public car gallery must not reorder the API's source sequence");
 });
 
 
@@ -2693,9 +2694,11 @@ test("mixed Telegram review album exposes typed media URLs in source order", asy
     assert.ok(review);
     assert.equal(review.mediaOrderKnown, true);
     assert.deepEqual(review.mediaItems, [
-      "/api/review-media/-100555_601/photo/0",
-      "/api/review-media/-100555_601/video/0"
+      { url: "/api/review-media/-100555_601/photo/0", type: "photo" },
+      { url: "/api/review-media/-100555_601/video/0", type: "video" }
     ]);
+    const html = await (await worker.fetch(new Request("https://worker.test/"), reviewEnv(kv))).text();
+    assert.ok(html.includes("showReviewMedia"), "review gallery renders mixed photo/video media in source order");
   });
 });
 
