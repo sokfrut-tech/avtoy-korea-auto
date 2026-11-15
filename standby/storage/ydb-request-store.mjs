@@ -228,5 +228,16 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
       VALUES (${String(event.eventId)}, ${occurredAt}, ${actorId}, ${actorRole}, ${action}, ${targetType}, ${targetId}, ${outcome}, ${JSON.stringify(safeMetadata)})`;
     return { eventId:String(event.eventId), recorded:true };
   }
-  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, ensureOperatorAuditSchema, recordOperatorAuditEvent });
+  async function listOperatorAuditEvents({ limit = 100 } = {}) {
+    const take = boundedLimit(limit);
+    const result = await sql`SELECT event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata
+      FROM standby_operator_audit_events ORDER BY occurred_at DESC LIMIT ${take}`;
+    return (result?.[0] || []).map(row => ({
+      eventId:row.event_id, occurredAt:row.occurred_at, actorId:row.actor_id, actorRole:row.actor_role,
+      action:row.action, targetType:row.target_type, targetId:row.target_id, outcome:row.outcome,
+      metadata:parseJson(row.metadata,{})
+    }));
+  }
+
+  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, ensureOperatorAuditSchema, recordOperatorAuditEvent, listOperatorAuditEvents });
 }
