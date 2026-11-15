@@ -738,14 +738,25 @@ test('legacy shared token is denied in development unless test mode is explicit'
 });
 
 
-test('production admin and MAX webhook configuration require durable YDB capabilities at startup', () => {
+test('production admin and MAX webhook require complete durable YDB request, audit and receipt capabilities', () => {
   assert.equal(assertDurableAdminRuntime(),true);
   assert.throws(() => assertDurableAdminRuntime({ operatorsConfigured:true }), /durable YDB/);
   assert.throws(() => assertDurableAdminRuntime({ maxWebhookConfigured:true }), /durable YDB/);
-  assert.throws(() => assertDurableAdminRuntime({ operatorsConfigured:true, requestStore:{ensureMaxWebhookSchema(){}} }), /audit storage/);
-  const store={ensureMaxWebhookSchema(){},ensureOperatorAuditSchema(){}};
+  const base={ensureMaxWebhookSchema(){}};
+  assert.throws(() => assertDurableAdminRuntime({operatorsConfigured:true,requestStore:base}), /durable enquiry persistence/);
+  assert.throws(() => assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:base}), /durable enquiry persistence/);
+  const store={
+    ...base,
+    createEnquiry(){},getEnquiry(){},claimEnquiry(){},claimDueEnquiries(){},listPrivateEnquiries(){},completeDelivery(){},
+    ensureOperatorAuditSchema(){},consumeOperatorAuthFailure(){},recordOperatorAuditEvent(){},listOperatorAuditEvents(){},
+    recordMaxWebhookEvent(){}
+  };
   assert.equal(assertDurableAdminRuntime({operatorsConfigured:true,requestStore:store}),true);
   assert.equal(assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:store}),true);
+  const noMaxReceipts={...store,recordMaxWebhookEvent:undefined};
+  assert.throws(()=>assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:noMaxReceipts}),/idempotent webhook receipt storage/);
+  const noAudit={...store,recordOperatorAuditEvent:undefined};
+  assert.throws(()=>assertDurableAdminRuntime({operatorsConfigured:true,requestStore:noAudit}),/audit, rate-limit and inbox/);
 });
 
 
