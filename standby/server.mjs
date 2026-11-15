@@ -47,8 +47,20 @@ export function assertDurableAdminRuntime({ operatorsConfigured = false, maxWebh
   if (!requestStore || typeof requestStore.ensureMaxWebhookSchema !== 'function') {
     throw new Error('Per-operator administration and MAX webhook require a durable YDB request store');
   }
-  if (operatorsConfigured && typeof requestStore.ensureOperatorAuditSchema !== 'function') {
-    throw new Error('Per-operator administration requires durable YDB operator audit storage');
+  const enquiryCapabilities = ['createEnquiry','getEnquiry','claimEnquiry','claimDueEnquiries','listPrivateEnquiries','completeDelivery'];
+  const missingEnquiryCapabilities = enquiryCapabilities.filter(name => typeof requestStore[name] !== 'function');
+  if (missingEnquiryCapabilities.length) {
+    throw new Error('Russian standby requires durable enquiry persistence and delivery queue capabilities: ' + missingEnquiryCapabilities.join(', '));
+  }
+  if (maxWebhookConfigured && typeof requestStore.recordMaxWebhookEvent !== 'function') {
+    throw new Error('MAX webhook requires durable idempotent webhook receipt storage');
+  }
+  if (operatorsConfigured) {
+    const operatorCapabilities = ['ensureOperatorAuditSchema','consumeOperatorAuthFailure','recordOperatorAuditEvent','listOperatorAuditEvents','listPrivateEnquiries'];
+    const missingOperatorCapabilities = operatorCapabilities.filter(name => typeof requestStore[name] !== 'function');
+    if (missingOperatorCapabilities.length) {
+      throw new Error('Per-operator administration requires durable YDB audit, rate-limit and inbox capabilities: ' + missingOperatorCapabilities.join(', '));
+    }
   }
   return true;
 }
