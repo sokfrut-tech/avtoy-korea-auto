@@ -742,7 +742,7 @@ test('production admin and MAX webhook require complete durable YDB request, aud
   assert.equal(assertDurableAdminRuntime(),true);
   assert.throws(() => assertDurableAdminRuntime({ operatorsConfigured:true }), /durable YDB/);
   assert.throws(() => assertDurableAdminRuntime({ maxWebhookConfigured:true }), /durable YDB/);
-  const base={ensureMaxWebhookSchema(){}};
+  const base={ensureMaxWebhookSchema(){},verifySchema(){}};
   assert.throws(() => assertDurableAdminRuntime({operatorsConfigured:true,requestStore:base}), /durable enquiry persistence/);
   assert.throws(() => assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:base}), /durable enquiry persistence/);
   const store={
