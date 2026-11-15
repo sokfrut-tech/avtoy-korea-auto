@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { assertDurableAdminRuntime, createStandbyApp } from '../server.mjs';
+import { assertDurableAdminRuntime, assertProductionRequestStore, createStandbyApp } from '../server.mjs';
 
 async function fixture(t, options = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'avtoy-standby-'));
