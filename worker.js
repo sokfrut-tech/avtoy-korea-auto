@@ -2153,8 +2153,8 @@ export default {
       const photos = uniqueFileItems(Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []));
       const videos = uniqueFileItems(Array.isArray(r.videos) && r.videos.length ? r.videos : (r.kind === "video" && r.fileId ? [{file_id:r.fileId}] : []));
       const ordered = publicReviewMediaOrder(r,photos,videos);
-      const mediaItems = ordered.mediaItems.map(item=>item.url);
-      const media = mediaItems[0] || null;
+      const mediaItems = ordered.mediaItems;
+      const media = mediaItems[0] ? mediaItems[0].url : null;
       reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems,mediaOrderKnown:ordered.mediaOrderKnown});
      }
      cursor = page.list_complete ? null : page.cursor;
@@ -2910,35 +2910,41 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
   list.textContent='';dots.textContent='';
   data.reviews.forEach(function(rv,index){
     var card=document.createElement('article');card.className='card';
-    var mediaItems=Array.isArray(rv.mediaItems)&&rv.mediaItems.length?rv.mediaItems:(rv.media?[rv.media]:[]);
-    if(rv.kind==='video'){
-      var label=document.createElement('div');label.className='review-video-label';label.textContent='Видео клиента';card.appendChild(label);
-      mediaItems.forEach(function(mediaUrl){var el=document.createElement('video');el.className='review-media';el.src=mediaUrl;el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео клиента');card.appendChild(el)});
-    }else if(mediaItems.length){
+    var mediaItems=(Array.isArray(rv.mediaItems)&&rv.mediaItems.length?rv.mediaItems:(rv.media?[rv.media]:[])).map(function(item){
+      if(typeof item==='string')return {url:item,type:rv.kind==='video'?'video':'photo'};
+      return {url:item.url||item.src||'',type:item.type||'photo'};
+    }).filter(function(item){return !!item.url;});
+    if(mediaItems.length){
+      var hasVideo=mediaItems.some(function(item){return item.type==='video';});
+      var hasPhoto=mediaItems.some(function(item){return item.type!=='video';});
+      if(hasVideo){var label=document.createElement('div');label.className='review-video-label';label.textContent=hasPhoto?'Фото и видео клиента':'Видео клиента';card.appendChild(label);}
       var gallery=document.createElement('div');gallery.className='review-gallery';
-      var photoLink=document.createElement('a');photoLink.className='review-gallery-photo';photoLink.target='_blank';photoLink.rel='noopener';
-      var photo=document.createElement('img');photo.className='review-gallery-image';photo.loading='eager';photo.decoding='async';photo.alt='Фотография автомобиля клиента';
-      photoLink.appendChild(photo);gallery.appendChild(photoLink);
-      var photoIndex=0;
-      function showReviewPhoto(nextIndex){
-        photoIndex=(nextIndex+mediaItems.length)%mediaItems.length;
-        photo.src=mediaItems[photoIndex];photoLink.href=mediaItems[photoIndex];
-        photo.alt='Фотография автомобиля клиента '+(photoIndex+1);
-        counter.textContent=(photoIndex+1)+' / '+mediaItems.length;
-        back.disabled=mediaItems.length<2;forward.disabled=mediaItems.length<2;
-        back.hidden=forward.hidden=mediaItems.length<2;
-        counter.hidden=mediaItems.length<2;
-      }
-      var back=document.createElement('button');back.type='button';back.className='review-gallery-arrow is-prev';back.textContent='‹';back.setAttribute('aria-label','Предыдущее фото');
-      var forward=document.createElement('button');forward.type='button';forward.className='review-gallery-arrow is-next';forward.textContent='›';forward.setAttribute('aria-label','Следующее фото');
+      var stage=document.createElement('div');stage.className='review-gallery-stage';gallery.appendChild(stage);
+      var mediaIndex=0;
+      var back=document.createElement('button');back.type='button';back.className='review-gallery-arrow is-prev';back.textContent='‹';back.setAttribute('aria-label','Предыдущее фото или видео');
+      var forward=document.createElement('button');forward.type='button';forward.className='review-gallery-arrow is-next';forward.textContent='›';forward.setAttribute('aria-label','Следующее фото или видео');
       var counter=document.createElement('span');counter.className='review-gallery-count';
-      back.addEventListener('click',function(){showReviewPhoto(photoIndex-1)});
-      forward.addEventListener('click',function(){showReviewPhoto(photoIndex+1)});
+      function showReviewMedia(nextIndex){
+        mediaIndex=(nextIndex+mediaItems.length)%mediaItems.length;
+        var item=mediaItems[mediaIndex];stage.textContent='';
+        if(item.type==='video'){
+          var video=document.createElement('video');video.className='review-media';video.src=item.url;video.controls=true;video.playsInline=true;video.preload='metadata';video.setAttribute('aria-label','Видео клиента');stage.appendChild(video);
+        }else{
+          var link=document.createElement('a');link.className='review-gallery-photo';link.href=item.url;link.target='_blank';link.rel='noopener';
+          var image=document.createElement('img');image.className='review-gallery-image';image.src=item.url;image.loading='eager';image.decoding='async';image.alt='Фотография автомобиля клиента '+(mediaIndex+1);
+          link.appendChild(image);stage.appendChild(link);
+        }
+        counter.textContent=(mediaIndex+1)+' / '+mediaItems.length;
+        back.disabled=mediaItems.length<2;forward.disabled=mediaItems.length<2;
+        back.hidden=forward.hidden=mediaItems.length<2;counter.hidden=mediaItems.length<2;
+      }
+      back.addEventListener('click',function(){showReviewMedia(mediaIndex-1)});
+      forward.addEventListener('click',function(){showReviewMedia(mediaIndex+1)});
       gallery.appendChild(back);gallery.appendChild(forward);gallery.appendChild(counter);
       var touchStart=0;
       gallery.addEventListener('touchstart',function(e){touchStart=e.changedTouches[0].clientX},{passive:true});
-      gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showReviewPhoto(photoIndex+(delta<0?1:-1))},{passive:true});
-      showReviewPhoto(0);card.appendChild(gallery);
+      gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showReviewMedia(mediaIndex+(delta<0?1:-1))},{passive:true});
+      showReviewMedia(0);card.appendChild(gallery);
     }
     // Отзывы на сайте показываем только как фото/видео: текст публикации не выводим.
     list.appendChild(card);
@@ -3080,7 +3086,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
     return /\\.(mp4|m4v|mov|webm|ogv|m3u8|mpd)$/.test(url);
    }
    var carItems=media.map(function(item){return {url:typeof item==='string'?item:(item.url||item.src||''),video:isVideoMedia(item)};}).filter(function(item){return !!item.url;});
-   carItems.sort(function(a,b){return Number(a.video)-Number(b.video);});
+
    var stage=document.createElement('div'); stage.className='car-gallery-stage';
    var failedMedia={}; function createCarMedia(item,index){var el=document.createElement(item.video?'video':'img');el.className='car-gallery-main';el.src=item.url;if(item.video){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео автомобиля '+(index+1));}else{el.alt='Фотография автомобиля '+(index+1);el.loading='lazy';}el.addEventListener('error',function(){failedMedia[index]=true;var next=(index+1)%carItems.length,attempts=0;while(failedMedia[next]&&attempts<carItems.length){next=(next+1)%carItems.length;attempts++;}if(attempts>=carItems.length)gallery.hidden=true;else showCarPhoto(next);},{once:true});return el;}
    var current=createCarMedia(carItems[0],0);
