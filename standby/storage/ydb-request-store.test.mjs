@@ -6,9 +6,18 @@ function fakeSql() {
   const enquiries = new Map();
   const idempotency = new Map();
   const calls = [];
+  const maxEvents = new Map();
   async function execute(strings, ...values) {
     const q = strings.join(' ? ').replace(/\\s+/g, ' ').trim();
     calls.push(q);
+    if (q.startsWith('SELECT event_digest FROM standby_max_webhook_events')) {
+      const row = maxEvents.get(values[0]); return row ? [[{ ...row }]] : [];
+    }
+    if (q.startsWith('INSERT INTO standby_max_webhook_events')) {
+      const [digest,eventType,eventTimestamp,chatId,messageId,senderUserId,receivedAt] = values;
+      maxEvents.set(digest,{event_digest:digest,event_type:eventType,event_timestamp:eventTimestamp,chat_id:chatId,message_id:messageId,sender_user_id:senderUserId,received_at:receivedAt});
+      return [];
+    }
     if (q.startsWith('SELECT request_id, expires_at FROM standby_idempotency')) {
       const row = idempotency.get(values[0]); return row ? [[{ ...row }]] : [];
     }
@@ -104,4 +113,23 @@ test('interleaves expired delivery leases with due enquiries instead of starving
   const claimed = await store.claimDueEnquiries({ now:start + 2_000, limit:2 });
   assert.equal(claimed.length, 2);
   assert.ok(claimed.some(item => item.id === first.item.id), 'expired lease must not be pushed behind every due request');
+});
+
+
+test('MAX webhook event persistence is idempotent and stores only event metadata', async () => {
+  const fake=fakeSql();
+  const store=createYdbRequestStore({sql:fake.sql,clock:()=>1_800_000_000_000});
+  await store.ensureMaxWebhookSchema();
+  const event={digest:'a'.repeat(64),eventType:'message_created',eventTimestamp:1_800_000_000_000,chatId:'987654321',messageId:'mid-1',senderUserId:'user-1'};
+  assert.deepEqual(await store.recordMaxWebhookEvent(event),{duplicate:false});
+  assert.deepEqual(await store.recordMaxWebhookEvent(event),{duplicate:true});
+  assert.equal(fake.maxEvents.size,1);
+  assert.equal(fake.maxEvents.get(event.digest).message_id,'mid-1');
+  assert.equal(Object.hasOwn(fake.maxEvents.get(event.digest),'text'),false);
+});
+
+test('MAX webhook event persistence rejects invalid digests and unsupported types', async () => {
+  const store=createYdbRequestStore({sql:fakeSql().sql});
+  await assert.rejects(()=>store.recordMaxWebhookEvent({digest:'bad',eventType:'message_created',eventTimestamp:1,chatId:'1'}),/SHA-256/);
+  await assert.rejects(()=>store.recordMaxWebhookEvent({digest:'b'.repeat(64),eventType:'bot_started',eventTimestamp:1,chatId:'1'}),/Unsupported/);
 });
