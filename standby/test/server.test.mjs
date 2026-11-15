@@ -625,8 +625,9 @@ test('per-operator auth enforces roles and records durable audit before inbox ac
   assert.equal((await inbox.json()).operator.id,'op-1');
   const retry=await fetch(base+'/ops/retry',{method:'POST',headers:{authorization:'Bearer '+token}});
   assert.equal(retry.status,403);
-  assert.equal(audit.length,1);
+  assert.equal(audit.length,2);
   assert.equal(audit[0].action,'inbox.read');
+  assert.equal(audit[1].action,'auth.forbidden');
 });
 
 test('per-operator sensitive actions fail closed when durable audit is unavailable', async t => {
@@ -697,4 +698,25 @@ test('operator panel exposes audit only through role-aware controls', async () =
   assert.match(html,/operatorInfo/);
   assert.doesNotMatch(html,/localStorage|sessionStorage/);
   assert.match(html,/textContent/);
+});
+
+test('failed operator authentication is audited without credentials and rate limited', async t => {
+  const token='E'.repeat(43);
+  const { digestOperatorToken } = await import('../security/operator-auth.mjs');
+  const events=[];
+  const auditStore={async recordOperatorAuditEvent(event){events.push(event)}};
+  const { base }=await fixture(t,{
+    env:{STANDBY_OPERATORS_JSON:JSON.stringify([{id:'operator-z',tokenHash:digestOperatorToken(token),role:'operator',enabled:true}])},
+    auditStore
+  });
+  const bad='F'.repeat(43);
+  for(let i=0;i<10;i++){
+    const response=await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer '+bad}});
+    assert.equal(response.status,401);
+  }
+  const blocked=await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer '+bad}});
+  assert.equal(blocked.status,429);
+  assert.equal(events.length,10);
+  assert.ok(events.every(event=>event.action==='auth.denied' && event.actorId==='unauthenticated'));
+  assert.equal(JSON.stringify(events).includes(bad),false);
 });
