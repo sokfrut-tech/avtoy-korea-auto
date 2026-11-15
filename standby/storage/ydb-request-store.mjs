@@ -196,7 +196,7 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
   }
   async function ensureOperatorAuditSchema() {
     await sql`CREATE TABLE IF NOT EXISTS standby_operator_audit_events (
-      event_id Utf8, occurred_at Utf8, actor_id Utf8, actor_role Utf8, action Utf8,
+      event_id Utf8 NOT NULL, occurred_at Utf8, actor_id Utf8, actor_role Utf8, action Utf8,
       target_type Utf8, target_id Utf8, outcome Utf8, metadata Utf8,
       PRIMARY KEY (event_id)
     )`;
@@ -212,7 +212,7 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     const targetId = String(event.targetId || '');
     const outcome = String(event.outcome || '');
     if (!/^[A-Za-z0-9._-]{1,64}$/.test(actorId) || !['viewer','operator','supervisor','owner'].includes(actorRole)) throw new TypeError('Invalid audit actor');
-    if (!/^[a-z][a-z0-9._-]{1,63}$/.test(action) || !/^[a-z][a-z0-9._-]{0,31}$/.test(targetType) || targetId.length > 100 || !['accepted','denied','failed'].includes(outcome)) throw new TypeError('Invalid audit event fields');
+    if (!/^[a-z][a-z0-9._-]{1,63}$/.test(action) || !/^[a-z][a-z0-9._-]{0,31}$/.test(targetType) || ! /^[A-Za-z0-9._:-]{1,100}$/.test(targetId) || !['accepted','denied','failed'].includes(outcome)) throw new TypeError('Invalid audit event fields');
     const metadata = event.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata) ? event.metadata : {};
     const safeMetadata = {};
     for (const [key,value] of Object.entries(metadata)) {
