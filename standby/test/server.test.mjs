@@ -647,3 +647,18 @@ test('production does not accept the legacy shared admin token', async t => {
   const response=await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer legacy-secret'}});
   assert.equal(response.status,401);
 });
+
+test('supervisor retry is durably audited before queue work begins', async t => {
+  const token='C'.repeat(43);
+  const { digestOperatorToken } = await import('../security/operator-auth.mjs');
+  const order=[];
+  const requestStore={async claimDueEnquiries(){order.push('retry');return []}};
+  const auditStore={async recordOperatorAuditEvent(event){order.push('audit');assert.equal(event.action,'notifications.retry')}};
+  const { base }=await fixture(t,{
+    env:{STANDBY_OPERATORS_JSON:JSON.stringify([{id:'supervisor-2',tokenHash:digestOperatorToken(token),role:'supervisor',enabled:true}])},
+    requestStore,auditStore
+  });
+  const response=await fetch(base+'/ops/retry',{method:'POST',headers:{authorization:'Bearer '+token}});
+  assert.equal(response.status,200);
+  assert.deepEqual(order,['audit','retry']);
+});
