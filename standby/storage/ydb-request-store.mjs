@@ -194,5 +194,39 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
       LIMIT ${take}`;
     return Object.freeze({ cutoff, limit: take });
   }
-  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents });
+  async function ensureOperatorAuditSchema() {
+    await sql`CREATE TABLE IF NOT EXISTS standby_operator_audit_events (
+      event_id Utf8, occurred_at Utf8, actor_id Utf8, actor_role Utf8, action Utf8,
+      target_type Utf8, target_id Utf8, outcome Utf8, metadata Utf8,
+      PRIMARY KEY (event_id)
+    )`;
+  }
+
+  async function recordOperatorAuditEvent(event) {
+    if (!event || !/^[A-Za-z0-9_-]{8,80}$/.test(String(event.eventId || ''))) throw new TypeError('A valid audit event ID is required');
+    const occurredAt = iso(event.occurredAt);
+    const actorId = String(event.actorId || '');
+    const actorRole = String(event.actorRole || '');
+    const action = String(event.action || '');
+    const targetType = String(event.targetType || '');
+    const targetId = String(event.targetId || '');
+    const outcome = String(event.outcome || '');
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(actorId) || !['viewer','operator','supervisor','owner'].includes(actorRole)) throw new TypeError('Invalid audit actor');
+    if (!/^[a-z][a-z0-9._-]{1,63}$/.test(action) || !/^[a-z][a-z0-9._-]{0,31}$/.test(targetType) || targetId.length > 100 || !['accepted','denied','failed'].includes(outcome)) throw new TypeError('Invalid audit event fields');
+    const metadata = event.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata) ? event.metadata : {};
+    const safeMetadata = {};
+    for (const [key,value] of Object.entries(metadata)) {
+      if (!['count','processed','role','status','reason'].includes(key)) throw new TypeError('Unsupported audit metadata field');
+      if (typeof value === 'number' && Number.isFinite(value)) safeMetadata[key] = value;
+      else if (typeof value === 'boolean') safeMetadata[key] = value;
+      else if (typeof value === 'string' && /^[a-z0-9._-]{1,40}$/i.test(value)) safeMetadata[key] = value;
+      else throw new TypeError('Unsafe audit metadata value');
+    }
+    await ensureOperatorAuditSchema();
+    await sql`INSERT INTO standby_operator_audit_events
+      (event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata)
+      VALUES (${String(event.eventId)}, ${occurredAt}, ${actorId}, ${actorRole}, ${action}, ${targetType}, ${targetId}, ${outcome}, ${JSON.stringify(safeMetadata)})`;
+    return { eventId:String(event.eventId), recorded:true };
+  }
+  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, ensureOperatorAuditSchema, recordOperatorAuditEvent });
 }
