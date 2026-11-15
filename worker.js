@@ -2428,7 +2428,7 @@ footer{border-top-color:#ffffff18}
 
 /* AVTOY KOREA review photo slider — one full-size image per card */
 .review-carousel .reviews>article{display:flex;flex-direction:column;align-items:stretch;gap:0}
-.review-gallery{position:relative;width:100%;max-width:100%;height:clamp(170px,22vw,250px);margin:0 0 4px;overflow:hidden;border-radius:14px;background:#080d14}
+.review-gallery{position:relative;width:100%;max-width:100%;height:clamp(170px,22vw,250px);margin:0 0 4px;overflow:hidden;border-radius:14px;background:#080d14}.review-gallery-stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
 .review-gallery-photo{display:flex;width:100%;height:100%;align-items:center;justify-content:center}
 .review-gallery-image{display:block;width:100%;height:100%;object-fit:contain;object-position:center}
 .review-gallery-arrow{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border:1px solid #ffffff55;border-radius:50%;background:#090d14c9;color:#fff;font-size:25px;line-height:1;display:grid;place-items:center;cursor:pointer;z-index:2}
@@ -2928,7 +2928,7 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
         mediaIndex=(nextIndex+mediaItems.length)%mediaItems.length;
         var item=mediaItems[mediaIndex];stage.textContent='';
         if(item.type==='video'){
-          var video=document.createElement('video');video.className='review-media';video.src=item.url;video.controls=true;video.playsInline=true;video.preload='metadata';video.setAttribute('aria-label','Видео клиента');stage.appendChild(video);
+          var video=document.createElement('video');video.className='review-media';video.src=item.url;video.controls=true;video.playsInline=true;video.preload='metadata';video.style.width='100%';video.style.height='100%';video.style.objectFit='contain';video.setAttribute('aria-label','Видео клиента');stage.appendChild(video);
         }else{
           var link=document.createElement('a');link.className='review-gallery-photo';link.href=item.url;link.target='_blank';link.rel='noopener';
           var image=document.createElement('img');image.className='review-gallery-image';image.src=item.url;image.loading='eager';image.decoding='async';image.alt='Фотография автомобиля клиента '+(mediaIndex+1);
