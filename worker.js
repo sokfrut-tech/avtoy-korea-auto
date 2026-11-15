@@ -2154,7 +2154,7 @@ export default {
       const videos = uniqueFileItems(Array.isArray(r.videos) && r.videos.length ? r.videos : (r.kind === "video" && r.fileId ? [{file_id:r.fileId}] : []));
       const ordered = publicReviewMediaOrder(r,photos,videos);
       const mediaItems = ordered.mediaItems;
-      const media = mediaItems[0] ? mediaItems[0].url : null;
+      const media = r.fileId ? `/api/review-media/${r.id}` : null;
       reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems,mediaOrderKnown:ordered.mediaOrderKnown});
      }
      cursor = page.list_complete ? null : page.cursor;
