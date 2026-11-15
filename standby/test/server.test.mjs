@@ -11,7 +11,8 @@ async function fixture(t, options = {}) {
   const publicDir = path.join(dir, 'public');
   await mkdir(publicDir, { recursive: true });
   await writeFile(path.join(publicDir, 'index.html'), '<title>AVTOY KOREA — резервный сайт</title>');
-  const app = createStandbyApp({ dataDir: path.join(dir, 'data'), publicDir, ...options });
+  const { env = {}, ...appOptions } = options;
+  const app = createStandbyApp({ dataDir: path.join(dir, 'data'), publicDir, ...appOptions, env:{ NODE_ENV:'test', ...env } });
   const server = http.createServer(app);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -661,4 +662,10 @@ test('supervisor retry is durably audited before queue work begins', async t => 
   const response=await fetch(base+'/ops/retry',{method:'POST',headers:{authorization:'Bearer '+token}});
   assert.equal(response.status,200);
   assert.deepEqual(order,['audit','retry']);
+});
+
+test('legacy shared token is denied when NODE_ENV is missing, not only in production', async t => {
+  const { base }=await fixture(t,{env:{NODE_ENV:'',STANDBY_ADMIN_TOKEN:'legacy-secret'}});
+  const response=await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer legacy-secret'}});
+  assert.equal(response.status,401);
 });
