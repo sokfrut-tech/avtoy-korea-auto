@@ -13,7 +13,7 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;ma
 h1{font-size:24px;margin:0}h2{font-size:18px;margin:0 0 12px}.muted{color:var(--muted)}.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin:14px 0}
 input,button{font:inherit;border-radius:10px;padding:12px 14px}input{width:100%;background:#0b1018;color:var(--text);border:1px solid var(--line);margin:8px 0 12px}
 button{border:0;background:var(--accent);color:white;font-weight:650;cursor:pointer}button.secondary{background:#273244}button:disabled{opacity:.55;cursor:wait}
-.actions{display:flex;gap:10px;flex-wrap:wrap}.login{max-width:480px}.request{border-top:1px solid var(--line);padding:16px 0}.request:first-child{border-top:0}.request h3{margin:0 0 8px;font-size:16px}.meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:13px}.status{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:3px 9px}.status.delivered{color:var(--ok)}.status.queued,.status.sending{color:var(--warn)}.detail{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0}.error{color:#ff9a91;min-height:1.5em}.hidden{display:none!important}.empty{padding:22px 0;text-align:center;color:var(--muted)}
+.actions{display:flex;gap:10px;flex-wrap:wrap}.login{max-width:480px}.request{border-top:1px solid var(--line);padding:16px 0}.request:first-child{border-top:0}.request h3{margin:0 0 8px;font-size:16px}.contact-actions{display:flex;gap:8px;margin:6px 0 10px}.contact-actions a{display:inline-block;text-decoration:none;color:var(--text);background:#273244;border:1px solid var(--line);border-radius:9px;padding:7px 11px;font-size:13px}.meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:13px}.status{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:3px 9px}.status.delivered{color:var(--ok)}.status.queued,.status.sending{color:var(--warn)}.detail{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0}.error{color:#ff9a91;min-height:1.5em}.hidden{display:none!important}.empty{padding:22px 0;text-align:center;color:var(--muted)}
 @media(max-width:560px){main{width:min(100% - 20px,980px);padding-top:18px}h1{font-size:20px}.card{padding:14px}}
 </style>
 </head>
@@ -59,6 +59,13 @@ function render(items){
   card.append(title,meta);
   card.append(node('p','detail','Имя: '+safe(item.name)));
   card.append(node('p','detail','Контакт: '+safe(item.contact)));
+  const phone=safe(item.contact).replace(/[^0-9+]/g,'');
+  if(/^\+?\d{7,16}$/.test(phone)){
+   const actions=node('div','contact-actions');
+   const call=node('a','', 'Позвонить');call.href='tel:'+phone;
+   const sms=node('a','', 'SMS');sms.href='sms:'+phone;
+   actions.append(call,sms);card.append(actions);
+  }
   if(item.model)card.append(node('p','detail','Автомобиль: '+safe(item.model)));
   if(item.comment)card.append(node('p','detail','Комментарий: '+safe(item.comment)));
   if(item.lastError)card.append(node('p','error','Последняя ошибка: '+safe(item.lastError)));
