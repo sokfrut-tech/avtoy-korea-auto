@@ -269,6 +269,20 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
       VALUES (${String(event.eventId)}, ${occurredAt}, ${actorId}, ${actorRole}, ${action}, ${targetType}, ${targetId}, ${outcome}, ${JSON.stringify(safeMetadata)})`;
     return { eventId:String(event.eventId), recorded:true };
   }
+  async function pruneOperatorAuditEvents({ before, limit = 500 } = {}) {
+    const cutoffDate = new Date(before);
+    if (!before || !Number.isFinite(cutoffDate.getTime())) throw new TypeError('A valid audit retention cutoff is required');
+    const cutoff = cutoffDate.toISOString();
+    if (!Number.isInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 500) throw new TypeError('limit must be an integer between 1 and 500');
+    const take = Number(limit);
+    await sql`DELETE FROM standby_operator_audit_events ON
+      SELECT event_id FROM standby_operator_audit_events
+      WHERE occurred_at < ${cutoff}
+      ORDER BY occurred_at
+      LIMIT ${take}`;
+    return Object.freeze({ cutoff, limit:take });
+  }
+
   async function listOperatorAuditEvents({ limit = 100 } = {}) {
     const take = boundedLimit(limit);
     const result = await sql`SELECT event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata
@@ -280,5 +294,5 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     }));
   }
 
-  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, ensureOperatorAuditSchema, consumeOperatorAuthFailure, pruneOperatorAuthRateLimits, recordOperatorAuditEvent, listOperatorAuditEvents });
+  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, ensureOperatorAuditSchema, consumeOperatorAuthFailure, pruneOperatorAuthRateLimits, recordOperatorAuditEvent, listOperatorAuditEvents, pruneOperatorAuditEvents });
 }
