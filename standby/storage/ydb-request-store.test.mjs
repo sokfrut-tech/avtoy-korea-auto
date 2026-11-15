@@ -18,6 +18,12 @@ function fakeSql() {
       maxEvents.set(digest,{event_digest:digest,event_type:eventType,event_timestamp:eventTimestamp,chat_id:chatId,message_id:messageId,sender_user_id:senderUserId,received_at:receivedAt});
       return [];
     }
+    if (q.startsWith('DELETE FROM standby_max_webhook_events ON')) {
+      const [cutoff, limit] = values;
+      const expired = [...maxEvents.values()].filter(row => row.received_at < cutoff).sort((a,b) => a.received_at.localeCompare(b.received_at)).slice(0, Number(limit));
+      for (const row of expired) maxEvents.delete(row.event_digest);
+      return [];
+    }
     if (q.startsWith('SELECT request_id, expires_at FROM standby_idempotency')) {
       const row = idempotency.get(values[0]); return row ? [[{ ...row }]] : [];
     }
@@ -132,4 +138,31 @@ test('MAX webhook event persistence rejects invalid digests and unsupported type
   const store=createYdbRequestStore({sql:fakeSql().sql});
   await assert.rejects(()=>store.recordMaxWebhookEvent({digest:'bad',eventType:'message_created',eventTimestamp:1,chatId:'1'}),/SHA-256/);
   await assert.rejects(()=>store.recordMaxWebhookEvent({digest:'b'.repeat(64),eventType:'bot_started',eventTimestamp:1,chatId:'1'}),/Unsupported/);
+});
+
+test('MAX webhook retention deletes only old events in bounded batches', async () => {
+  let now = Date.parse('2026-11-15T12:00:00.000Z');
+  const fake = fakeSql();
+  const store = createYdbRequestStore({ sql:fake.sql, clock:()=>now });
+  await store.ensureMaxWebhookSchema();
+  const event = (digest) => ({ digest:digest.repeat(64), eventType:'message_created', eventTimestamp:now, chatId:'987654321', messageId:'mid-'+digest, senderUserId:'12345' });
+  await store.recordMaxWebhookEvent(event('a'));
+  now += 86_400_000;
+  await store.recordMaxWebhookEvent(event('b'));
+  now += 86_400_000;
+  await store.recordMaxWebhookEvent(event('c'));
+  const result = await store.pruneMaxWebhookEvents({ before:'2026-11-16T00:00:00.000Z', limit:1 });
+  assert.equal(result.limit,1);
+  assert.equal(fake.maxEvents.size,2);
+  assert.equal(fake.maxEvents.has('a'.repeat(64)),false);
+  assert.equal(fake.maxEvents.has('b'.repeat(64)),true);
+  assert.equal(fake.maxEvents.has('c'.repeat(64)),true);
+  assert.ok(fake.calls.some(q => q.startsWith('DELETE FROM standby_max_webhook_events ON')));
+});
+
+test('MAX webhook retention rejects missing cutoff and unsafe batch limits', async () => {
+  const store = createYdbRequestStore({ sql:fakeSql().sql });
+  await assert.rejects(() => store.pruneMaxWebhookEvents({}), /cutoff/);
+  await assert.rejects(() => store.pruneMaxWebhookEvents({ before:'2026-11-15T00:00:00Z', limit:0 }), /limit/);
+  await assert.rejects(() => store.pruneMaxWebhookEvents({ before:'2026-11-15T00:00:00Z', limit:501 }), /limit/);
 });
