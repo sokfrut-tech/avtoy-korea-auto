@@ -737,3 +737,24 @@ test('production admin and MAX webhook configuration require durable YDB capabil
   assert.equal(assertDurableAdminRuntime({operatorsConfigured:true,requestStore:store}),true);
   assert.equal(assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:store}),true);
 });
+
+
+test('operator authentication uses the durable shared rate limiter when available', async t => {
+  const token='G'.repeat(43);
+  const { digestOperatorToken } = await import('../security/operator-auth.mjs');
+  const calls=[];
+  const auditStore={
+    async consumeOperatorAuthFailure(input){calls.push(input);return {allowed:calls.length<=2,failures:calls.length}},
+    async recordOperatorAuditEvent(){}
+  };
+  const {base}=await fixture(t,{
+    env:{STANDBY_OPERATORS_JSON:JSON.stringify([{id:'operator-shared',tokenHash:digestOperatorToken(token),role:'operator',enabled:true}])},
+    auditStore
+  });
+  for(let i=0;i<3;i++){
+    const response=await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer '+'H'.repeat(43)}});
+    assert.equal(response.status,i<2?401:429);
+  }
+  assert.equal(calls.length,3);
+  assert.match(calls[0].keyDigest,/^[a-f0-9]{64}$/);
+});
