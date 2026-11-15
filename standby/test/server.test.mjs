@@ -780,3 +780,15 @@ test('operator authentication uses the durable shared rate limiter when availabl
   assert.equal(calls.length,3);
   assert.match(calls[0].keyDigest,/^[a-f0-9]{64}$/);
 });
+
+
+test('production Russian standby cannot start with local JSON or a partial YDB request store', () => {
+  assert.equal(assertProductionRequestStore(),true);
+  assert.equal(assertProductionRequestStore({nodeEnv:'test'}),true);
+  assert.throws(()=>assertProductionRequestStore({nodeEnv:'production',inboxStoreMode:'',ydbConnectionString:'grpcs://db'}),/INBOX_STORE=v2/);
+  assert.throws(()=>assertProductionRequestStore({nodeEnv:'production',inboxStoreMode:'v2'}),/connected durable YDB/);
+  const partial={verifySchema(){},createEnquiry(){}};
+  assert.throws(()=>assertProductionRequestStore({nodeEnv:'production',inboxStoreMode:'v2',ydbConnectionString:'grpcs://db',requestStore:partial}),/request store is incomplete/);
+  const complete={verifySchema(){},createEnquiry(){},getEnquiry(){},claimEnquiry(){},claimDueEnquiries(){},listPrivateEnquiries(){},completeDelivery(){}};
+  assert.equal(assertProductionRequestStore({nodeEnv:'production',inboxStoreMode:'v2',ydbConnectionString:'grpcs://db',requestStore:complete}),true);
+});
