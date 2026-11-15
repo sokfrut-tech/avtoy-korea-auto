@@ -46,10 +46,11 @@ function digestKey(key) {
  * these short serializable transactions. This adapter is opt-in; the HTTP
  * server selects it only when INBOX_STORE=v2 is explicitly configured.
  */
-export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory = randomUUID } = {}) {
+export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory = randomUUID, schemaManagedExternally = false } = {}) {
   if (typeof sql !== 'function' || typeof sql.begin !== 'function') throw new TypeError('A @ydbjs/query client is required');
 
   async function ensureMaxWebhookSchema() {
+    if (schemaManagedExternally) return true;
     await sql`CREATE TABLE IF NOT EXISTS standby_max_webhook_events (
       event_digest Utf8,
       event_type Utf8,
@@ -60,6 +61,19 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
       received_at Utf8,
       PRIMARY KEY (event_digest)
     )`;
+  }
+
+  async function verifySchema() {
+    // Read-only startup checks: the production app identity needs SELECT/WRITE,
+    // not CREATE/DROP/ALTER privileges. The index probes also validate queue indexes.
+    await sql`SELECT request_id FROM standby_enquiries LIMIT 1`;
+    await sql`SELECT idempotency_digest FROM standby_idempotency LIMIT 1`;
+    await sql`SELECT event_digest FROM standby_max_webhook_events LIMIT 1`;
+    await sql`SELECT event_id FROM standby_operator_audit_events LIMIT 1`;
+    await sql`SELECT key_digest FROM standby_operator_auth_rate_limits LIMIT 1`;
+    await sql`SELECT request_id FROM standby_enquiries VIEW idx_due_queue WHERE status = 'queued' ORDER BY next_attempt_at LIMIT 1`;
+    await sql`SELECT request_id FROM standby_enquiries VIEW idx_expired_lease WHERE status = 'sending' ORDER BY lock_until LIMIT 1`;
+    return true;
   }
 
   async function recordMaxWebhookEvent(event) {
@@ -195,6 +209,7 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     return Object.freeze({ cutoff, limit: take });
   }
   async function ensureOperatorAuditSchema() {
+    if (schemaManagedExternally) return true;
     await sql`CREATE TABLE IF NOT EXISTS standby_operator_auth_rate_limits (
       key_digest Utf8 NOT NULL,
       window_start Utf8 NOT NULL,
@@ -294,5 +309,5 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     }));
   }
 
-  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, ensureOperatorAuditSchema, consumeOperatorAuthFailure, pruneOperatorAuthRateLimits, recordOperatorAuditEvent, listOperatorAuditEvents, pruneOperatorAuditEvents });
+  return Object.freeze({ ensureMaxWebhookSchema, ensureOperatorAuditSchema, verifySchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, ensureOperatorAuditSchema, consumeOperatorAuthFailure, pruneOperatorAuthRateLimits, recordOperatorAuditEvent, listOperatorAuditEvents, pruneOperatorAuditEvents });
 }
