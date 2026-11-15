@@ -45,6 +45,12 @@ function fakeSql() {
       fakeAudit.set(id,{event_id:id,occurred_at:occurredAt,actor_id:actorId,actor_role:role,action,target_type:targetType,target_id:targetId,outcome,metadata});
       return [];
     }
+    if (q.startsWith('DELETE FROM standby_operator_audit_events ON')) {
+      const [cutoff,limit]=values;
+      const rows=[...fakeAudit.values()].filter(row=>row.occurred_at<cutoff).sort((a,b)=>a.occurred_at.localeCompare(b.occurred_at)).slice(0,Number(limit));
+      for(const row of rows) fakeAudit.delete(row.event_id);
+      return [];
+    }
     if (q.startsWith('SELECT event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata')) {
       return [[...fakeAudit.values()].sort((a,b)=>b.occurred_at.localeCompare(a.occurred_at)).slice(0,Number(values[0]))];
     }
@@ -249,4 +255,17 @@ test('distributed auth limiter cleanup deletes only expired buckets in bounded b
   assert.equal(fake.rateLimits.has('c'.repeat(64)),false);
   assert.equal(fake.rateLimits.has('d'.repeat(64)),true);
   await assert.rejects(()=>store.pruneOperatorAuthRateLimits({}),/cutoff/);
+});
+
+
+test('operator audit retention removes only old events in bounded batches', async () => {
+  const fake=fakeSql(); const store=createYdbRequestStore({sql:fake.sql});
+  const base={actorId:'operator-a',actorRole:'operator',action:'inbox.read',targetType:'inbox',targetId:'all',outcome:'accepted'};
+  await store.recordOperatorAuditEvent({ ...base,eventId:'audit-event-old',occurredAt:'2026-10-01T00:00:00Z' });
+  await store.recordOperatorAuditEvent({ ...base,eventId:'audit-event-new',occurredAt:'2026-11-15T00:00:00Z' });
+  await store.pruneOperatorAuditEvents({before:'2026-11-01T00:00:00Z',limit:1});
+  assert.equal(fake.fakeAudit.has('audit-event-old'),false);
+  assert.equal(fake.fakeAudit.has('audit-event-new'),true);
+  await assert.rejects(()=>store.pruneOperatorAuditEvents({}),/cutoff/);
+  await assert.rejects(()=>store.pruneOperatorAuditEvents({before:'2026-11-01T00:00:00Z',limit:501}),/limit/);
 });
