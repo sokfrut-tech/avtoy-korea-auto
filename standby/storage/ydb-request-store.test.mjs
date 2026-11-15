@@ -31,6 +31,9 @@ function fakeSql() {
       fakeAudit.set(id,{event_id:id,occurred_at:occurredAt,actor_id:actorId,actor_role:role,action,target_type:targetType,target_id:targetId,outcome,metadata});
       return [];
     }
+    if (q.startsWith('SELECT event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata')) {
+      return [[...fakeAudit.values()].sort((a,b)=>b.occurred_at.localeCompare(a.occurred_at)).slice(0,Number(values[0]))];
+    }
     if (q.startsWith('SELECT request_id, expires_at FROM standby_idempotency')) {
       const row = idempotency.get(values[0]); return row ? [[{ ...row }]] : [];
     }
@@ -189,4 +192,14 @@ test('operator audit rejects PII and unapproved metadata fields', async () => {
   const base={eventId:'audit-event-0002',occurredAt:'2026-11-15T18:00:00Z',actorId:'operator-a',actorRole:'operator',action:'inbox.read',targetType:'inbox',targetId:'all',outcome:'accepted'};
   await assert.rejects(()=>store.recordOperatorAuditEvent({...base,metadata:{phone:'+79990000000'}}),/Unsupported/);
   await assert.rejects(()=>store.recordOperatorAuditEvent({...base,metadata:{reason:'phone:+79990000000'}}),/Unsafe/);
+});
+
+test('operator audit listing returns only stored audit fields in reverse chronological order', async () => {
+  const fake=fakeSql(); const store=createYdbRequestStore({sql:fake.sql});
+  await store.recordOperatorAuditEvent({eventId:'audit-event-001',occurredAt:'2026-11-15T18:00:00Z',actorId:'operator-a',actorRole:'operator',action:'inbox.read',targetType:'inbox',targetId:'all',outcome:'accepted',metadata:{count:2}});
+  const rows=await store.listOperatorAuditEvents({limit:10});
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].actorId,'operator-a');
+  assert.deepEqual(rows[0].metadata,{count:2});
+  assert.equal(Object.hasOwn(rows[0],'phone'),false);
 });
