@@ -720,3 +720,9 @@ test('failed operator authentication is audited without credentials and rate lim
   assert.ok(events.every(event=>event.action==='auth.denied' && event.actorId==='unauthenticated'));
   assert.equal(JSON.stringify(events).includes(bad),false);
 });
+
+test('legacy shared token is denied in development unless test mode is explicit', async t => {
+  const { base }=await fixture(t,{env:{NODE_ENV:'development',STANDBY_ADMIN_TOKEN:'legacy-secret'}});
+  const response=await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer legacy-secret'}});
+  assert.equal(response.status,401);
+});
