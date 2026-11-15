@@ -52,13 +52,13 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
   async function ensureMaxWebhookSchema() {
     if (schemaManagedExternally) return true;
     await sql`CREATE TABLE IF NOT EXISTS standby_max_webhook_events (
-      event_digest Utf8,
-      event_type Utf8,
-      event_timestamp Int64,
-      chat_id Utf8,
-      message_id Utf8,
-      sender_user_id Utf8,
-      received_at Utf8,
+      event_digest Utf8 NOT NULL,
+      event_type Utf8 NOT NULL,
+      event_timestamp Int64 NOT NULL,
+      chat_id Utf8 NOT NULL,
+      message_id Utf8 NOT NULL,
+      sender_user_id Utf8 NOT NULL,
+      received_at Utf8 NOT NULL,
       PRIMARY KEY (event_digest)
     )`;
   }
@@ -217,8 +217,8 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
       PRIMARY KEY (key_digest)
     )`;
     await sql`CREATE TABLE IF NOT EXISTS standby_operator_audit_events (
-      event_id Utf8 NOT NULL, occurred_at Utf8, actor_id Utf8, actor_role Utf8, action Utf8,
-      target_type Utf8, target_id Utf8, outcome Utf8, metadata Utf8,
+      event_id Utf8 NOT NULL, occurred_at Utf8 NOT NULL, actor_id Utf8 NOT NULL, actor_role Utf8 NOT NULL, action Utf8 NOT NULL,
+      target_type Utf8 NOT NULL, target_id Utf8 NOT NULL, outcome Utf8 NOT NULL, metadata Utf8 NOT NULL,
       PRIMARY KEY (event_id)
     )`;
   }
@@ -309,5 +309,5 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     }));
   }
 
-  return Object.freeze({ ensureMaxWebhookSchema, ensureOperatorAuditSchema, verifySchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, ensureOperatorAuditSchema, consumeOperatorAuthFailure, pruneOperatorAuthRateLimits, recordOperatorAuditEvent, listOperatorAuditEvents, pruneOperatorAuditEvents });
+  return Object.freeze({ ensureMaxWebhookSchema, ensureOperatorAuditSchema, verifySchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, consumeOperatorAuthFailure, pruneOperatorAuthRateLimits, recordOperatorAuditEvent, listOperatorAuditEvents, pruneOperatorAuditEvents });
 }
