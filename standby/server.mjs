@@ -42,6 +42,17 @@ function validateEnquiry(input) {
   return { value:{ name, contact, model, comment } };
 }
 
+export function assertDurableAdminRuntime({ operatorsConfigured = false, maxWebhookConfigured = false, requestStore = null } = {}) {
+  if (!operatorsConfigured && !maxWebhookConfigured) return true;
+  if (!requestStore || typeof requestStore.ensureMaxWebhookSchema !== 'function') {
+    throw new Error('Per-operator administration and MAX webhook require a durable YDB request store');
+  }
+  if (operatorsConfigured && typeof requestStore.ensureOperatorAuditSchema !== 'function') {
+    throw new Error('Per-operator administration requires durable YDB operator audit storage');
+  }
+  return true;
+}
+
 export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir = PUBLIC, env = process.env, fetchImpl = fetch, clock = () => Date.now(), inboxStore = null, requestStore = null, maxEventStore = requestStore, auditStore = requestStore, telegramTimeoutMs = 15_000, maxTimeoutMs = 10_000 } = {}) {
   const inboxFile = path.join(dataDir, 'inbox.json');
   const snapshotFile = path.join(dataDir, 'public-snapshot.json');
@@ -409,6 +420,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       inboxStore = createYdbInboxStore({ sql: query(driver) });
       await inboxStore.ensureSchema();
       process.stdout.write('YDB inbox storage enabled\n');
+    }
+    assertDurableAdminRuntime({
+      operatorsConfigured:Boolean(process.env.STANDBY_OPERATORS_JSON),
+      maxWebhookConfigured:Boolean(process.env.MAX_WEBHOOK_SECRET),
+      requestStore
+    });
+    if (process.env.STANDBY_OPERATORS_JSON) {
+      await requestStore.ensureOperatorAuditSchema();
+      process.stdout.write('YDB operator audit storage enabled\\n');
     }
     const app = createStandbyApp({ inboxStore, requestStore });
     server = http.createServer(app);
