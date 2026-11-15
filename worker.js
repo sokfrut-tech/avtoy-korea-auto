@@ -1,3 +1,4 @@
+import { mergeOrderedMediaItems, orderedMediaFromRecord } from "./media-order.js";
 
 async function beginModerationEdit(callback, env, type, id, answer) {
  const adminId = String((callback.from && callback.from.id) || "");
@@ -57,7 +58,11 @@ function removePhotosAt(item, numbers) {
  const photos = Array.isArray(item.photos) ? item.photos : [];
  const remaining = photos.filter((_, index) => !numbers.includes(index + 1));
  item.photos = remaining;
- item.fileId = remaining.length ? remaining[remaining.length - 1].file_id : null;
+ if (Array.isArray(item.mediaItems)) {
+  const keep = new Set(remaining.map(photo => String(photo.file_unique_id || photo.file_id || "")));
+  item.mediaItems = item.mediaItems.filter(media => media.type === "video" || keep.has(String(media.file_unique_id || media.file_id || "")));
+ }
+ item.fileId = remaining.length ? remaining[remaining.length - 1].file_id : (Array.isArray(item.videos) && item.videos.length ? item.videos[0].file_id : null);
  return item;
 }
 
@@ -227,7 +232,7 @@ async function showSiteList(chatId, env) {
 async function sendPendingCarCard(env, adminIds, car, id, lead) {
  const keyboard = { inline_keyboard: [[{ text: "✅ Опубликовать", callback_data: "carpub:" + id }, { text: "❌ Отклонить", callback_data: "carrej:" + id }], [{ text: "✏️ Редактировать описание", callback_data: "caredit:" + id }]] };
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, postPhotos(car), postVideos(car), car.caption || "");
+  await sendChannelMedia(env, adminId, postPhotos(car), postVideos(car), car.caption || "", car.mediaOrderKnown === true ? car.mediaItems : null);
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: lead + "\n\n" + (car.caption || "Описание отсутствует") + "\n\nИсточник: " + (car.sourceUrl || "не указан"), reply_markup: keyboard });
  }));
 }
@@ -527,7 +532,7 @@ async function sendReviewCardTo(env, adminIds, review, id, lead) {
   [{ text: "🙈 Скрыть имя", callback_data: `anon:${id}` }, { text: "✏️ Редактировать текст", callback_data: `edit:${id}` }]
  ] };
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, photos, videos, review.text ? String(review.text).slice(0, 1024) : "");
+  await sendChannelMedia(env, adminId, photos, videos, review.text ? String(review.text).slice(0, 1024) : "", review.mediaOrderKnown === true ? review.mediaItems : null);
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: (lead ? lead + "\n\n" : "") + formatReviewCard(review) + (photos.length + videos.length > 1 ? "\nФотографий: " + photos.length + (videos.length ? ", видео: " + videos.length : "") : ""), reply_markup: keyboard });
  }));
 }
@@ -959,6 +964,8 @@ async function handleReviewCallback(callback, env, adminIds) {
   name: review.anonymous ? "" : review.name,
   fileId: review.fileId,
   videos: Array.isArray(review.videos) ? review.videos : [],
+  mediaItems: Array.isArray(review.mediaItems) ? review.mediaItems : [],
+  mediaOrderKnown: review.mediaOrderKnown === true,
   anonymous: Boolean(review.anonymous),
   photos: Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []),
   publishedAt: new Date().toISOString()
@@ -1004,6 +1011,69 @@ function uniqueFileItems(list) {
  return out;
 }
 
+function orderedItemsFromPost(post) {
+ const sourceId = Number(post && (post.sourceMessageId || post.message_id));
+ const photos = postPhotos(post);
+ const videos = postVideos(post);
+ // A single Telegram message carries one media object. Multiple legacy objects
+ // have already lost their per-part message IDs, so do not invent a shared ID.
+ const sourceMessageId = photos.length + videos.length === 1 && Number.isSafeInteger(sourceId) && sourceId > 0 ? sourceId : null;
+ const photoItems = photos.map(item => ({ ...item, type: item.mime_type ? "document" : "photo", sourceMessageId }));
+ const videoItems = videos.map(item => ({ ...item, type: "video", sourceMessageId }));
+ return [...photoItems, ...videoItems];
+}
+
+function mergePostMediaOrder(post, incomingItems) {
+ const merged = mergeOrderedMediaItems(Array.isArray(post.mediaItems) ? post.mediaItems : [], incomingItems);
+ post.mediaItems = merged.mediaItems;
+ post.mediaOrderKnown = merged.mediaOrderKnown;
+ return post;
+}
+
+function publicCarMediaOrder(car, photos, videos) {
+ const ordered = orderedMediaFromRecord(car);
+ const identity = item => String(item.file_unique_id || item.file_id || "");
+ if (ordered.mediaOrderKnown) {
+  const output = [];
+  for (const item of ordered.mediaItems) {
+   const photoIndex = photos.findIndex(candidate => identity(candidate) === identity(item));
+   if (photoIndex >= 0) { output.push({ url: "/api/car-media/" + car.id + "/photo/" + photoIndex, type: "photo" }); continue; }
+   const videoIndex = videos.findIndex(candidate => identity(candidate) === identity(item));
+   if (videoIndex >= 0) output.push({ url: "/api/car-media/" + car.id + "/video/" + videoIndex, type: "video" });
+  }
+  return { mediaItems: output, mediaOrderKnown: output.length === ordered.mediaItems.length };
+ }
+ const mixedLegacy = photos.length > 0 && videos.length > 0;
+ if (mixedLegacy) return { mediaItems: [], mediaOrderKnown: false };
+ const mediaItems = [
+  ...photos.map((_, index) => ({ url: "/api/car-media/" + car.id + "/photo/" + index, type: "photo" })),
+  ...videos.map((_, index) => ({ url: "/api/car-media/" + car.id + "/video/" + index, type: "video" }))
+ ];
+ return { mediaItems, mediaOrderKnown: false };
+}
+
+function publicReviewMediaOrder(review, photos, videos) {
+ const ordered = orderedMediaFromRecord(review);
+ const identity = item => String(item.file_unique_id || item.file_id || "");
+ if (ordered.mediaOrderKnown) {
+  const output = [];
+  for (const item of ordered.mediaItems) {
+   const photoIndex = photos.findIndex(candidate => identity(candidate) === identity(item));
+   if (photoIndex >= 0) { output.push({ url: "/api/review-media/" + review.id + "/photo/" + photoIndex, type: "photo" }); continue; }
+   const videoIndex = videos.findIndex(candidate => identity(candidate) === identity(item));
+   if (videoIndex >= 0) output.push({ url: "/api/review-media/" + review.id + "/video/" + videoIndex, type: "video" });
+  }
+  return { mediaItems: output, mediaOrderKnown: output.length === ordered.mediaItems.length };
+ }
+ const mixedLegacy = photos.length > 0 && videos.length > 0;
+ if (mixedLegacy) return { mediaItems: [], mediaOrderKnown: false };
+ const mediaItems = [
+  ...photos.map((_, index) => ({ url: "/api/review-media/" + review.id + "/photo/" + index, type: "photo" })),
+  ...videos.map((_, index) => ({ url: "/api/review-media/" + review.id + "/video/" + index, type: "video" }))
+ ];
+ return { mediaItems, mediaOrderKnown: false };
+}
+
 function postPhotos(post) {
  const items = Array.isArray(post.photos) ? post.photos : (Array.isArray(post.photo) ? post.photo : []);
  const documentPhoto = imageDocumentItemFrom(post.document);
@@ -1033,8 +1103,19 @@ function largestPhotoOf(photo) {
 }
 
 // Отправка всех фото и видео записи администратору.
-async function sendChannelMedia(env, adminId, photos, videos, caption) {
- // Telegram принимает не больше 10 медиа в одной группе: отправляем все фото пачками.
+async function sendChannelMedia(env, adminId, photos, videos, caption, orderedItems = null) {
+ if (Array.isArray(orderedItems) && orderedItems.length && orderedItems.every(item => Number.isSafeInteger(Number(item.sourceMessageId)) && Number(item.sourceMessageId) > 0)) {
+  let first = true;
+  for (const item of orderedItems) {
+   const type = item.type === "video" ? "video" : (item.type === "document" || item.mime_type ? "document" : "photo");
+   const field = type;
+   const payload = {chat_id:adminId,[field]:item.file_id,...(first && caption ? {caption:String(caption).slice(0,1024)} : {})};
+   await callTelegram(env,type === "video" ? "sendVideo" : (type === "document" ? "sendDocument" : "sendPhoto"),payload);
+   first = false;
+  }
+  return;
+ }
+ // Legacy photo-only or video-only records keep their original per-type order.
  for (let offset = 0; offset < photos.length; offset += 10) {
   const chunk = photos.slice(offset, offset + 10);
   const documentItems = chunk.filter(photo => photo.mime_type);
@@ -1136,16 +1217,25 @@ async function handleCarPost(post, env, adminIds) {
   const saved = JSON.parse(existing);
   const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
   await Promise.all(adminIds.map(async adminId => {
-   await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "");
+   await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "", saved.mediaOrderKnown === true ? saved.mediaItems : null);
    await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная отправка: автомобиль всё ещё ожидает решения модератора.\n\n" + (saved.caption || "Описание отсутствует") + "\n\nИсточник: " + saved.sourceUrl,reply_markup:keyboard});
   }));
   return;
  }
- const car = {id,caption,fileId,photos,videos,mediaType:videos.length && !photos.length ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id),createdAt:new Date().toISOString(),sourceDate:created};
+ const hasSourceMediaItems = Array.isArray(post.mediaItems) && post.mediaItems.length > 0;
+ const sourceMedia = hasSourceMediaItems
+  ? mergeOrderedMediaItems([],post.mediaItems)
+  : mergeOrderedMediaItems([],orderedItemsFromPost(post));
+ if (hasSourceMediaItems) sourceMedia.mediaOrderKnown = post.mediaOrderKnown === true && sourceMedia.mediaOrderKnown;
+ const mediaItems = sourceMedia.mediaItems.filter(item => {
+  const identity = String(item.file_unique_id || item.file_id || "");
+  return [...photos,...videos].some(candidate => String(candidate.file_unique_id || candidate.file_id || "") === identity);
+ });
+ const car = {id,caption,fileId,photos,videos,mediaItems,mediaOrderKnown:sourceMedia.mediaOrderKnown && mediaItems.length === sourceMedia.mediaItems.length,mediaType:videos.length && !photos.length ? "video" : "photo",sourceUrl:"https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id),createdAt:new Date().toISOString(),sourceDate:created};
  await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + id},{text:"❌ Отклонить",callback_data:"carrej:" + id}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, photos, videos, caption);
+  await sendChannelMedia(env, adminId, photos, videos, caption, mediaItems.length && sourceMedia.mediaOrderKnown ? mediaItems : null);
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🚘 ОДИН АВТОМОБИЛЬ · " + (caption.split(String.fromCharCode(10)).find(line => line.trim()) || "Без названия").slice(0,90) + "\nФотографий: " + photos.length + (videos.length ? "\nВидео: " + videos.length : "") + "\n" + carPhotoQualityNote(photos) + "\n\n" + (caption || "Описание отсутствует") + "\n\nИсточник: " + car.sourceUrl,reply_markup:keyboard});
  }));
 }
@@ -1167,12 +1257,21 @@ async function handleImportedReview(post, env, adminIds) {
  const id = channelPostId(chat, number);
  if (await env.REVIEWS.get("approved:" + id)) return;
  const existingReview = await env.REVIEWS.get("pending:" + id);
+ const hasSourceMediaItems = Array.isArray(post.mediaItems) && post.mediaItems.length > 0;
+ const sourceMedia = hasSourceMediaItems
+  ? mergeOrderedMediaItems([],post.mediaItems)
+  : mergeOrderedMediaItems([],orderedItemsFromPost(post));
+ if (hasSourceMediaItems) sourceMedia.mediaOrderKnown = post.mediaOrderKnown === true && sourceMedia.mediaOrderKnown;
  const review = existingReview ? JSON.parse(existingReview) : {
-  id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,photos:photoItems,videos:videoItems,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + number : "Пересылка администратора")
+  id,kind:video ? "video" : "text",text,name:"Клиент",fileId:video || photo || null,photos:photoItems,videos:videoItems,mediaItems:sourceMedia.mediaItems,mediaOrderKnown:sourceMedia.mediaOrderKnown,hasPhoto:Boolean(photo),hasThanks:THANKS_PATTERN.test(text),anonymous:false,createdAt:new Date().toISOString(),sourceUrl:post.sourceUrl || (chat.username ? "https://t.me/" + chat.username + "/" + number : "Пересылка администратора")
  };
  if (existingReview) {
   review.photos = uniqueFileItems([...(Array.isArray(review.photos) ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : [])), ...photoItems]);
   review.videos = uniqueFileItems([...(Array.isArray(review.videos) ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : [])), ...videoItems]);
+  const hadCanonicalOrder = Array.isArray(review.mediaItems) && review.mediaItems.length > 0;
+  const mergedMedia = mergeOrderedMediaItems(review.mediaItems || [],sourceMedia.mediaItems);
+  review.mediaItems = mergedMedia.mediaItems;
+  review.mediaOrderKnown = hadCanonicalOrder && review.mediaOrderKnown === true && mergedMedia.mediaOrderKnown;
   if (!review.fileId) review.fileId = video || photo || null;
   review.hasPhoto = Boolean(review.photos.length || photo);
   if (!review.text && text) review.text = text;
@@ -1190,16 +1289,7 @@ async function handleImportedReview(post, env, adminIds) {
   if (!status.mediaSent) {
    const photosToSend = uniqueFileItems(review.photos && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []));
    const videosToSend = uniqueFileItems(review.videos && review.videos.length ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : []));
-   for (let offset=0; offset<photosToSend.length; offset+=10) {
-    const chunk = photosToSend.slice(offset,offset+10);
-    if (chunk.length > 1) {
-     const media = chunk.map((item,index)=>({type:"photo",media:item.file_id,...(offset===0 && index===0 && text ? {caption:text.slice(0,1024)} : {})}));
-     await callTelegram(env,"sendMediaGroup",{chat_id:adminId,media});
-    } else {
-     await callTelegram(env,"sendPhoto",{chat_id:adminId,photo:chunk[0].file_id,...(offset===0 && text ? {caption:text.slice(0,1024)} : {})});
-    }
-   }
-   for (const item of videosToSend) await callTelegram(env,"sendVideo",{chat_id:adminId,video:item.file_id});
+   await sendChannelMedia(env,adminId,photosToSend,videosToSend,text,review.mediaOrderKnown === true ? review.mediaItems : null);
    status.mediaSent = true;
    delivery.admins[String(adminId)] = status;
    await env.REVIEWS.put(deliveryKey,JSON.stringify(delivery),{expirationTtl:2592000});
@@ -1238,7 +1328,7 @@ async function resendChannelImportEntry(entry, id, env, adminIds) {
  const videos = postVideos(post);
  const caption = String(post.caption || post.text || "Без текста").slice(0,2500);
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, photos, videos, post.caption ? String(post.caption) : "");
+  await sendChannelMedia(env, adminId, photos, videos, post.caption ? String(post.caption) : "", post.mediaOrderKnown === true ? post.mediaItems : null);
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная пересылка из @avtoYkorea. Публикация ещё не опубликована; выберите действие.\n\n" + caption + "\n\nИсточник: https://t.me/" + (post.chat && post.chat.username || "avtoYkorea") + "/" + post.message_id,reply_markup:keyboard}); }));
 }
 
@@ -1246,14 +1336,20 @@ async function resendChannelImportEntry(entry, id, env, adminIds) {
 async function mergeChannelPartMedia(post, id, env) {
  const photos = [...largestPhotoOf(post.photo), ...(imageDocumentItemFrom(post.document) ? [imageDocumentItemFrom(post.document)] : [])];
  const videos = postVideos(post);
+ const incomingItems = [...photos.map(item => ({...item,type:item.mime_type ? "document" : "photo",sourceMessageId:Number(post.message_id)||null})), ...videos.map(item => ({...item,type:"video",sourceMessageId:Number(post.message_id)||null}))];
  if (!photos.length && !videos.length) return;
  const importKey = "import_pending:" + id;
  const importRaw = await env.REVIEWS.get(importKey);
  if (importRaw) {
   const entry = JSON.parse(importRaw);
   const saved = entry.post || entry;
+  const hadSavedMedia = (Array.isArray(saved.photo) && saved.photo.length) || (Array.isArray(saved.videos) && saved.videos.length);
+  const hadCanonicalOrder = Array.isArray(saved.mediaItems) && saved.mediaItems.length > 0;
   saved.photo = uniqueFileItems([...(Array.isArray(saved.photo) ? saved.photo : []), ...photos]);
   saved.videos = uniqueFileItems([...(Array.isArray(saved.videos) ? saved.videos : []), ...videos]);
+  const mergedOrder = mergeOrderedMediaItems(saved.mediaItems || [],incomingItems);
+  saved.mediaItems = mergedOrder.mediaItems;
+  saved.mediaOrderKnown = hadCanonicalOrder ? (saved.mediaOrderKnown === true && mergedOrder.mediaOrderKnown) : (!hadSavedMedia && mergedOrder.mediaOrderKnown);
   if (!saved.caption && post.caption) saved.caption = post.caption;
   entry.post = saved;
   entry.photo = saved.photo;
@@ -1265,8 +1361,13 @@ async function mergeChannelPartMedia(post, id, env) {
  const reviewRaw = await env.REVIEWS.get(reviewKey);
  if (reviewRaw) {
   const review = JSON.parse(reviewRaw);
+  const hadReviewMedia = (Array.isArray(review.photos) && review.photos.length) || (Array.isArray(review.videos) && review.videos.length) || Boolean(review.fileId);
+  const hadCanonicalOrder = Array.isArray(review.mediaItems) && review.mediaItems.length > 0;
   review.photos = uniqueFileItems([...(Array.isArray(review.photos) ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : [])), ...photos]);
   review.videos = uniqueFileItems([...(Array.isArray(review.videos) ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : [])), ...videos]);
+  const mergedOrder = mergeOrderedMediaItems(review.mediaItems || [],incomingItems);
+  review.mediaItems = mergedOrder.mediaItems;
+  review.mediaOrderKnown = hadCanonicalOrder ? (review.mediaOrderKnown === true && mergedOrder.mediaOrderKnown) : (!hadReviewMedia && mergedOrder.mediaOrderKnown);
   review.hasPhoto = Boolean(review.photos.length);
   if (!review.fileId) review.fileId = (review.photos[0] || review.videos[0] || {}).file_id || null;
   await env.REVIEWS.put(reviewKey, JSON.stringify(review));
@@ -1277,8 +1378,13 @@ async function mergeChannelPartMedia(post, id, env) {
  const carRaw = await env.REVIEWS.get(carKey);
  if (carRaw) {
   const car = JSON.parse(carRaw);
+  const hadCarMedia = (Array.isArray(car.photos) && car.photos.length) || (Array.isArray(car.videos) && car.videos.length) || Boolean(car.fileId);
+  const hadCanonicalOrder = Array.isArray(car.mediaItems) && car.mediaItems.length > 0;
   car.photos = uniqueFileItems([...(Array.isArray(car.photos) ? car.photos : []), ...photos]);
   car.videos = uniqueFileItems([...(Array.isArray(car.videos) ? car.videos : []), ...videos]);
+  const mergedOrder = mergeOrderedMediaItems(car.mediaItems || [],incomingItems);
+  car.mediaItems = mergedOrder.mediaItems;
+  car.mediaOrderKnown = hadCanonicalOrder ? (car.mediaOrderKnown === true && mergedOrder.mediaOrderKnown) : (!hadCarMedia && mergedOrder.mediaOrderKnown);
   if (!car.fileId) car.fileId = (car.photos[car.photos.length - 1] || car.videos[0] || {}).file_id || null;
   await env.REVIEWS.put(carKey, JSON.stringify(car));
  }
@@ -1329,7 +1435,7 @@ async function stageChannelPost(post, env, adminIds) {
   const saved = JSON.parse(pendingCarRaw);
   const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"carpub:" + carId},{text:"❌ Отклонить",callback_data:"carrej:" + carId}],[{text:"✏️ Редактировать описание",callback_data:"caredit:" + carId}]]};
   await Promise.all(adminIds.map(async adminId => {
-   await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "");
+   await sendChannelMedia(env, adminId, postPhotos(saved), postVideos(saved), saved.caption || "", saved.mediaOrderKnown === true ? saved.mediaItems : null);
    await callTelegram(env,"sendMessage",{chat_id:adminId,text:"🔁 Повторная пересылка: автомобиль всё ещё ожидает решения модератора.\n\n" + (saved.caption || "Описание отсутствует") + "\n\nИсточник: " + saved.sourceUrl,reply_markup:keyboard});
   }));
   return;
@@ -1341,11 +1447,12 @@ async function stageChannelPost(post, env, adminIds) {
  }
  const photos = [...largestPhotoOf(post.photo), ...(imageDocumentItemFrom(post.document) ? [imageDocumentItemFrom(post.document)] : [])];
  const videos = postVideos(post);
- const stored = {...post,chat,message_id:Number(number),albumId:post.media_group_id ? String(post.media_group_id) : "",photo:photos,videos};
+ const mediaSeed = mergeOrderedMediaItems([], [...photos.map(item=>({...item,type:item.mime_type ? "document" : "photo",sourceMessageId:Number(post.message_id)||null})), ...videos.map(item=>({...item,type:"video",sourceMessageId:Number(post.message_id)||null}))]);
+ const stored = {...post,chat,message_id:Number(number),albumId:post.media_group_id ? String(post.media_group_id) : "",photo:photos,videos,mediaItems:mediaSeed.mediaItems,mediaOrderKnown:mediaSeed.mediaOrderKnown};
  await env.REVIEWS.put("import_pending:" + id,JSON.stringify({...stored,post:stored}),{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
-  await sendChannelMedia(env, adminId, photos, videos, "");
+  await sendChannelMedia(env, adminId, photos, videos, "", stored.mediaOrderKnown === true ? stored.mediaItems : null);
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Новая публикация из @avtoYkorea. Выберите раздел для импорта.\n\n" + String(post.caption || post.text || "Без текста").slice(0,2500) + "\n\nСнимки одного альбома объединяются в одну карточку.\nДата оригинала: " + (post.sourceDate ? new Date(post.sourceDate*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow"}) : "не определена"),reply_markup:keyboard}); }));
 }
 
@@ -1357,6 +1464,7 @@ async function stageGroupMedia(msg, env, adminIds) {
  const documentPhoto = imageDocumentItemFrom(msg.document);
  if (documentPhoto) photos.push(documentPhoto);
  const videos = postVideos(msg);
+ const incomingItems = [...photos.map(item=>({...item,type:item.mime_type ? "document" : "photo",sourceMessageId:Number(msg.message_id)||null})), ...videos.map(item=>({...item,type:"video",sourceMessageId:Number(msg.message_id)||null}))];
  if (!photos.length && !videos.length) return false;
  const id = reviewIdFor(msg.chat.id, msg);
  if (await env.REVIEWS.get("pending:" + id) || await env.REVIEWS.get("approved:" + id)) return true;
@@ -1364,11 +1472,16 @@ async function stageGroupMedia(msg, env, adminIds) {
  let state = JSON.parse(await env.REVIEWS.get(key) || "null");
  if (!state || !state.post) {
   const albumNumber = msg.media_group_id ? String(msg.media_group_id).replace(/[^0-9]/g, "").slice(0, 40) : String(msg.message_id);
-  state = {type:"group_media",post:{...msg,message_id:albumNumber,photo:photos,videos,sourceType:"group"},notified:{}};
+  const ordered = mergeOrderedMediaItems([],incomingItems);
+  state = {type:"group_media",post:{...msg,message_id:albumNumber,photo:photos,videos,mediaItems:ordered.mediaItems,mediaOrderKnown:ordered.mediaOrderKnown,sourceType:"group"},notified:{}};
  } else {
   const saved = state.post;
   saved.photo = uniqueFileItems([...(Array.isArray(saved.photo) ? saved.photo : []), ...photos]);
   saved.videos = uniqueFileItems([...(Array.isArray(saved.videos) ? saved.videos : []), ...videos]);
+  const hadCanonicalOrder = Array.isArray(saved.mediaItems) && saved.mediaItems.length > 0;
+  const merged = mergeOrderedMediaItems(saved.mediaItems || [],incomingItems);
+  saved.mediaItems = merged.mediaItems;
+  saved.mediaOrderKnown = hadCanonicalOrder ? (saved.mediaOrderKnown === true && merged.mediaOrderKnown) : false;
   if (!saved.caption && msg.caption) saved.caption = msg.caption;
   state.post = saved;
  }
@@ -1379,7 +1492,9 @@ async function stageGroupMedia(msg, env, adminIds) {
   const adminKey = String(adminId);
   const status = state.notified[adminKey] || {mediaSentIds:[],cardSent:false};
   status.mediaSentIds = Array.isArray(status.mediaSentIds) ? status.mediaSentIds : [];
-  const mediaItems = [...postPhotos(state.post), ...postVideos(state.post)];
+  const mediaItems = state.post.mediaOrderKnown === true && Array.isArray(state.post.mediaItems)
+   ? state.post.mediaItems
+   : [...postPhotos(state.post), ...postVideos(state.post)];
   for (const item of mediaItems) {
    const identity = item.file_unique_id || item.file_id;
    if (status.mediaSentIds.includes(identity)) continue;
@@ -1999,7 +2114,7 @@ export default {
     let cursor;
     do {
      const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = catalogPhotoItems(car); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const mediaItems = [...photoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/photo/"+index,type:"photo"})), ...videoItems.map((_,index)=>({url:"/api/car-media/"+car.id+"/video/"+index,type:"video"}))]; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
+     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); const photoItems = catalogPhotoItems(car); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const ordered = publicCarMediaOrder(car,photoItems,videoItems); const mediaItems = ordered.mediaItems; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaOrderKnown:ordered.mediaOrderKnown,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
@@ -2036,26 +2151,32 @@ export default {
       if (!raw) continue;
       const r = JSON.parse(raw);
       const photos = uniqueFileItems(Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []));
-      const mediaItems = r.kind === "video" ? (r.fileId ? [`/api/review-media/${r.id}/0`] : []) : photos.map((_,index)=>`/api/review-media/${r.id}/${index}`);
+      const videos = uniqueFileItems(Array.isArray(r.videos) && r.videos.length ? r.videos : (r.kind === "video" && r.fileId ? [{file_id:r.fileId}] : []));
+      const ordered = publicReviewMediaOrder(r,photos,videos);
+      const mediaItems = ordered.mediaItems;
       const media = r.fileId ? `/api/review-media/${r.id}` : null;
-      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems});
+      reviews.push({id:r.id,kind:r.kind,text:cleanPublicationText(r.text),media,mediaItems,mediaOrderKnown:ordered.mediaOrderKnown});
      }
      cursor = page.list_complete ? null : page.cursor;
     } while (cursor);
    }
    return Response.json({ reviews }, { headers: { "cache-control": "no-store" } });
   }
-  const mediaMatch = url.pathname.match(/^\/api\/review-media\/(-?\d+_\d+)(?:\/(\d+))?$/);
+  const mediaMatch = url.pathname.match(/^\/api\/review-media\/(-?\d+_\d+)(?:\/(photo|video)\/(\d+)|\/(\d+))?$/);
   if (request.method === "GET" && mediaMatch) {
    // Файлы отдаются через Worker: токен бота в браузер не попадает.
    if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found", { status: 404 });
    const raw = await env.REVIEWS.get(`approved:${mediaMatch[1]}`);
    if (!raw) return new Response("Not found", { status: 404 });
    const review = JSON.parse(raw);
-   const index = Number(mediaMatch[2] || 0);
+   const mediaType = mediaMatch[2] || (review.kind === "video" ? "video" : "photo");
+   const index = Number(mediaMatch[3] || mediaMatch[4] || 0);
    const photos = uniqueFileItems(Array.isArray(review.photos) && review.photos.length ? review.photos : (review.fileId && review.kind !== "video" ? [{file_id:review.fileId}] : []));
-   const photoItem = photos[index];
-   const fileId = review.kind === "video" ? (index === 0 ? review.fileId : null) : (photoItem && photoItem.file_id);
+   const videos = uniqueFileItems(Array.isArray(review.videos) && review.videos.length ? review.videos : (review.kind === "video" && review.fileId ? [{file_id:review.fileId}] : []));
+   const photoItem = mediaType === "photo" ? photos[index] : null;
+   const videoItem = mediaType === "video" ? videos[index] : null;
+   const selectedItem = photoItem || videoItem;
+   const fileId = selectedItem && selectedItem.file_id;
    if (!fileId) return new Response("Not found", { status: 404 });
    const info = await callTelegram(env, "getFile", { file_id: fileId }).catch(() => null);
    const path = info && info.result && info.result.file_path;
@@ -2063,7 +2184,7 @@ export default {
    const upstream = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${path}`);
    if (!upstream.ok) return new Response("Bad Gateway", { status: 502 });
    const imageType = photoItem && photoItem.mime_type;
-   const contentType = review.kind === "video" ? "video/mp4" : (imageType || "image/jpeg");
+   const contentType = mediaType === "video" ? "video/mp4" : (imageType || "image/jpeg");
    return new Response(upstream.body, { headers: { "content-type": contentType, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
   }
   if(url.pathname==="/favicon.ico") return new Response(null,{status:204});
@@ -2307,7 +2428,7 @@ footer{border-top-color:#ffffff18}
 
 /* AVTOY KOREA review photo slider — one full-size image per card */
 .review-carousel .reviews>article{display:flex;flex-direction:column;align-items:stretch;gap:0}
-.review-gallery{position:relative;width:100%;max-width:100%;height:clamp(170px,22vw,250px);margin:0 0 4px;overflow:hidden;border-radius:14px;background:#080d14}
+.review-gallery{position:relative;width:100%;max-width:100%;height:clamp(170px,22vw,250px);margin:0 0 4px;overflow:hidden;border-radius:14px;background:#080d14}.review-gallery-stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
 .review-gallery-photo{display:flex;width:100%;height:100%;align-items:center;justify-content:center}
 .review-gallery-image{display:block;width:100%;height:100%;object-fit:contain;object-position:center}
 .review-gallery-arrow{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border:1px solid #ffffff55;border-radius:50%;background:#090d14c9;color:#fff;font-size:25px;line-height:1;display:grid;place-items:center;cursor:pointer;z-index:2}
@@ -2789,35 +2910,41 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
   list.textContent='';dots.textContent='';
   data.reviews.forEach(function(rv,index){
     var card=document.createElement('article');card.className='card';
-    var mediaItems=Array.isArray(rv.mediaItems)&&rv.mediaItems.length?rv.mediaItems:(rv.media?[rv.media]:[]);
-    if(rv.kind==='video'){
-      var label=document.createElement('div');label.className='review-video-label';label.textContent='Видео клиента';card.appendChild(label);
-      mediaItems.forEach(function(mediaUrl){var el=document.createElement('video');el.className='review-media';el.src=mediaUrl;el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео клиента');card.appendChild(el)});
-    }else if(mediaItems.length){
+    var mediaItems=(Array.isArray(rv.mediaItems)&&rv.mediaItems.length?rv.mediaItems:(rv.media?[rv.media]:[])).map(function(item){
+      if(typeof item==='string')return {url:item,type:rv.kind==='video'?'video':'photo'};
+      return {url:item.url||item.src||'',type:item.type||'photo'};
+    }).filter(function(item){return !!item.url;});
+    if(mediaItems.length){
+      var hasVideo=mediaItems.some(function(item){return item.type==='video';});
+      var hasPhoto=mediaItems.some(function(item){return item.type!=='video';});
+      if(hasVideo){var label=document.createElement('div');label.className='review-video-label';label.textContent=hasPhoto?'Фото и видео клиента':'Видео клиента';card.appendChild(label);}
       var gallery=document.createElement('div');gallery.className='review-gallery';
-      var photoLink=document.createElement('a');photoLink.className='review-gallery-photo';photoLink.target='_blank';photoLink.rel='noopener';
-      var photo=document.createElement('img');photo.className='review-gallery-image';photo.loading='eager';photo.decoding='async';photo.alt='Фотография автомобиля клиента';
-      photoLink.appendChild(photo);gallery.appendChild(photoLink);
-      var photoIndex=0;
-      function showReviewPhoto(nextIndex){
-        photoIndex=(nextIndex+mediaItems.length)%mediaItems.length;
-        photo.src=mediaItems[photoIndex];photoLink.href=mediaItems[photoIndex];
-        photo.alt='Фотография автомобиля клиента '+(photoIndex+1);
-        counter.textContent=(photoIndex+1)+' / '+mediaItems.length;
-        back.disabled=mediaItems.length<2;forward.disabled=mediaItems.length<2;
-        back.hidden=forward.hidden=mediaItems.length<2;
-        counter.hidden=mediaItems.length<2;
-      }
-      var back=document.createElement('button');back.type='button';back.className='review-gallery-arrow is-prev';back.textContent='‹';back.setAttribute('aria-label','Предыдущее фото');
-      var forward=document.createElement('button');forward.type='button';forward.className='review-gallery-arrow is-next';forward.textContent='›';forward.setAttribute('aria-label','Следующее фото');
+      var stage=document.createElement('div');stage.className='review-gallery-stage';gallery.appendChild(stage);
+      var mediaIndex=0;
+      var back=document.createElement('button');back.type='button';back.className='review-gallery-arrow is-prev';back.textContent='‹';back.setAttribute('aria-label','Предыдущее фото или видео');
+      var forward=document.createElement('button');forward.type='button';forward.className='review-gallery-arrow is-next';forward.textContent='›';forward.setAttribute('aria-label','Следующее фото или видео');
       var counter=document.createElement('span');counter.className='review-gallery-count';
-      back.addEventListener('click',function(){showReviewPhoto(photoIndex-1)});
-      forward.addEventListener('click',function(){showReviewPhoto(photoIndex+1)});
+      function showReviewMedia(nextIndex){
+        mediaIndex=(nextIndex+mediaItems.length)%mediaItems.length;
+        var item=mediaItems[mediaIndex];stage.textContent='';
+        if(item.type==='video'){
+          var video=document.createElement('video');video.className='review-media';video.src=item.url;video.controls=true;video.playsInline=true;video.preload='metadata';video.style.width='100%';video.style.height='100%';video.style.objectFit='contain';video.setAttribute('aria-label','Видео клиента');stage.appendChild(video);
+        }else{
+          var link=document.createElement('a');link.className='review-gallery-photo';link.href=item.url;link.target='_blank';link.rel='noopener';
+          var image=document.createElement('img');image.className='review-gallery-image';image.src=item.url;image.loading='eager';image.decoding='async';image.alt='Фотография автомобиля клиента '+(mediaIndex+1);
+          link.appendChild(image);stage.appendChild(link);
+        }
+        counter.textContent=(mediaIndex+1)+' / '+mediaItems.length;
+        back.disabled=mediaItems.length<2;forward.disabled=mediaItems.length<2;
+        back.hidden=forward.hidden=mediaItems.length<2;counter.hidden=mediaItems.length<2;
+      }
+      back.addEventListener('click',function(){showReviewMedia(mediaIndex-1)});
+      forward.addEventListener('click',function(){showReviewMedia(mediaIndex+1)});
       gallery.appendChild(back);gallery.appendChild(forward);gallery.appendChild(counter);
       var touchStart=0;
       gallery.addEventListener('touchstart',function(e){touchStart=e.changedTouches[0].clientX},{passive:true});
-      gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showReviewPhoto(photoIndex+(delta<0?1:-1))},{passive:true});
-      showReviewPhoto(0);card.appendChild(gallery);
+      gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showReviewMedia(mediaIndex+(delta<0?1:-1))},{passive:true});
+      showReviewMedia(0);card.appendChild(gallery);
     }
     // Отзывы на сайте показываем только как фото/видео: текст публикации не выводим.
     list.appendChild(card);
@@ -2959,7 +3086,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
     return /\\.(mp4|m4v|mov|webm|ogv|m3u8|mpd)$/.test(url);
    }
    var carItems=media.map(function(item){return {url:typeof item==='string'?item:(item.url||item.src||''),video:isVideoMedia(item)};}).filter(function(item){return !!item.url;});
-   carItems.sort(function(a,b){return Number(a.video)-Number(b.video);});
+
    var stage=document.createElement('div'); stage.className='car-gallery-stage';
    var failedMedia={}; function createCarMedia(item,index){var el=document.createElement(item.video?'video':'img');el.className='car-gallery-main';el.src=item.url;if(item.video){el.controls=true;el.playsInline=true;el.preload='metadata';el.setAttribute('aria-label','Видео автомобиля '+(index+1));}else{el.alt='Фотография автомобиля '+(index+1);el.loading='lazy';}el.addEventListener('error',function(){failedMedia[index]=true;var next=(index+1)%carItems.length,attempts=0;while(failedMedia[next]&&attempts<carItems.length){next=(next+1)%carItems.length;attempts++;}if(attempts>=carItems.length)gallery.hidden=true;else showCarPhoto(next);},{once:true});return el;}
    var current=createCarMedia(carItems[0],0);
