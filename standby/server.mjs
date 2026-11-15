@@ -298,6 +298,20 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
       res.writeHead(200,{ 'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer','x-frame-options':'DENY','content-security-policy':"default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'" }); return res.end(page);
     }
     if (req.method === 'GET' && url.pathname === '/ops') return sendFile(res,path.join(publicDir,'ops.html'));
+    if (req.method === 'GET' && url.pathname === '/ops/audit') {
+      const auth = authorizeOperator(req,'audit:read');
+      if (auth.error === 'unauthorized') return json(res,401,{ error:'Unauthorized' });
+      if (auth.error === 'forbidden') return json(res,403,{ error:'Forbidden' });
+      if (!auth.legacy) {
+        try { await auditOperatorAction(auth.actor,'audit.read','audit','recent'); }
+        catch { return json(res,503,{ error:'Operator audit storage is unavailable.' }); }
+      }
+      if (!auditStore || typeof auditStore.listOperatorAuditEvents !== 'function') return json(res,503,{ error:'Operator audit listing is unavailable.' });
+      try {
+        const events = await auditStore.listOperatorAuditEvents({ limit:100 });
+        return json(res,200,{ operator:auth.actor, events });
+      } catch { return json(res,503,{ error:'Operator audit listing is unavailable.' }); }
+    }
     if (req.method === 'GET' && url.pathname === '/ops/inbox') {
       const auth = authorizeOperator(req,'inbox:read');
       if (auth.error === 'unauthorized') return json(res,401,{ error:'Unauthorized' });
