@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { createStandbyApp } from '../server.mjs';
+import { assertDurableAdminRuntime, createStandbyApp } from '../server.mjs';
 
 async function fixture(t, options = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'avtoy-standby-'));
@@ -725,4 +725,15 @@ test('legacy shared token is denied in development unless test mode is explicit'
   const { base }=await fixture(t,{env:{NODE_ENV:'development',STANDBY_ADMIN_TOKEN:'legacy-secret'}});
   const response=await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer legacy-secret'}});
   assert.equal(response.status,401);
+});
+
+
+test('production admin and MAX webhook configuration require durable YDB capabilities at startup', () => {
+  assert.equal(assertDurableAdminRuntime(),true);
+  assert.throws(() => assertDurableAdminRuntime({ operatorsConfigured:true }), /durable YDB/);
+  assert.throws(() => assertDurableAdminRuntime({ maxWebhookConfigured:true }), /durable YDB/);
+  assert.throws(() => assertDurableAdminRuntime({ operatorsConfigured:true, requestStore:{ensureMaxWebhookSchema(){}} }), /audit storage/);
+  const store={ensureMaxWebhookSchema(){},ensureOperatorAuditSchema(){}};
+  assert.equal(assertDurableAdminRuntime({operatorsConfigured:true,requestStore:store}),true);
+  assert.equal(assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:store}),true);
 });
