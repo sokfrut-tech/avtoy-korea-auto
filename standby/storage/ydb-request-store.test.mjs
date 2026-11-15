@@ -31,7 +31,7 @@ function fakeSql() {
       const row=rateLimits.get(values[0]); return row ? [[{...row}]] : [];
     }
     if (q.startsWith('UPSERT INTO standby_operator_auth_rate_limits')) {
-      const [key_digest,window_start,failures]=values; rateLimits.set(key_digest,{key_digest,window_start,failures}); return [];
+      const [key_digest,window_start,failures=1]=values; rateLimits.set(key_digest,{key_digest,window_start,failures}); return [];
     }
     if (q.startsWith('DELETE FROM standby_operator_auth_rate_limits ON')) {
       const [cutoff,limit]=values;
