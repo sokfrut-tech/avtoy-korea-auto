@@ -335,7 +335,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
       const page = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${description}"><title>${title} — AVTOY KOREA</title></head><body style="margin:0;padding:24px;background:#090b10;color:#f5f7fb;font:16px/1.6 system-ui,sans-serif"><main style="max-width:960px;margin:auto"><p><a href="/" style="color:#ff8b7f">← В каталог AVTOY KOREA</a></p><h1>${title}</h1>${image}<p>${description}</p><p><a href="/#request" style="display:inline-block;padding:12px 18px;background:#e84b3c;border-radius:10px;color:white;text-decoration:none">Оставить заявку</a></p></main></body></html>`;
       res.writeHead(200,{ 'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer','x-frame-options':'DENY','content-security-policy':"default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'" }); return res.end(page);
     }
-    if (req.method === 'GET' && url.pathname === '/ops') return sendFile(res,path.join(publicDir,'ops.html'));
+    if (req.method === 'GET' && url.pathname === '/ops') return sendFile(res,path.join(publicDir,'ops.html'),{ cacheControl:'no-store, max-age=0' });
     if (req.method === 'GET' && url.pathname === '/ops/audit') {
       const auth = authorizeOperator(req,'audit:read');
       if (auth.error === 'unauthorized') return await recordAuthDenial(req,'audit') ? json(res,401,{ error:'Unauthorized' }) : json(res,429,{ error:'Too many failed attempts.' });
@@ -384,8 +384,8 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     }
     return json(res,404,{ error:'Not found' });
   }
-  async function sendFile(res,file) {
-    try { const data = await fs.readFile(file); res.writeHead(200,{ 'content-type':MIME[path.extname(file).toLowerCase()] || 'application/octet-stream','x-content-type-options':'nosniff','cache-control':'no-cache','referrer-policy':'no-referrer','x-frame-options':'DENY','content-security-policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" }); res.end(data); }
+  async function sendFile(res,file,{ cacheControl = 'no-cache' } = {}) {
+    try { const data = await fs.readFile(file); res.writeHead(200,{ 'content-type':MIME[path.extname(file).toLowerCase()] || 'application/octet-stream','x-content-type-options':'nosniff','cache-control':cacheControl,'referrer-policy':'no-referrer','cross-origin-resource-policy':'same-origin','permissions-policy':'camera=(), microphone=(), geolocation=()','x-frame-options':'DENY','content-security-policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" }); res.end(data); }
     catch { json(res,404,{ error:'Not found' }); }
   }
   const handler = async (req,res) => { try { await handle(req,res); } catch { if (!res.headersSent) json(res,500,{ error:'Внутренняя ошибка резервного сайта.' }); else res.destroy(); } };
