@@ -747,6 +747,7 @@ test('production admin and MAX webhook require complete durable YDB request, aud
   assert.throws(() => assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:base}), /durable enquiry persistence/);
   const store={
     ...base,
+    verifySchema(){},
     createEnquiry(){},getEnquiry(){},claimEnquiry(){},claimDueEnquiries(){},listPrivateEnquiries(){},completeDelivery(){},
     ensureOperatorAuditSchema(){},consumeOperatorAuthFailure(){},recordOperatorAuditEvent(){},listOperatorAuditEvents(){},
     recordMaxWebhookEvent(){}
