@@ -76,10 +76,21 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     const forwarded = env.TRUST_PROXY === 'true' ? req.headers['x-forwarded-for'] : '';
     const ip = String(forwarded || req.socket.remoteAddress || 'unknown').split(',')[0].trim().slice(0,128) || 'unknown';
     const now = clock();
-    const recent = (authFailures.get(ip) || []).filter(time => time > now - 10 * 60_000);
-    if (recent.length >= 10) return false;
-    recent.push(now); authFailures.set(ip,recent);
-    if (authFailures.size > 10_000) authFailures.delete(authFailures.keys().next().value);
+    const rateKey = createHash('sha256').update(ip).digest('hex');
+    if (auditStore && typeof auditStore.consumeOperatorAuthFailure === 'function') {
+      try {
+        const result = await auditStore.consumeOperatorAuthFailure({ keyDigest:rateKey, now, windowMs:10 * 60_000, maxFailures:10 });
+        if (!result.allowed) return false;
+      } catch {
+        // Fail closed if the shared rate-limit store is unavailable.
+        return false;
+      }
+    } else {
+      const recent = (authFailures.get(rateKey) || []).filter(time => time > now - 10 * 60_000);
+      if (recent.length >= 10) return false;
+      recent.push(now); authFailures.set(rateKey,recent);
+      if (authFailures.size > 10_000) authFailures.delete(authFailures.keys().next().value);
+    }
     if (auditStore && typeof auditStore.recordOperatorAuditEvent === 'function') {
       try {
         await auditStore.recordOperatorAuditEvent({ eventId:randomUUID(), occurredAt:new Date(now).toISOString(), actorId:actor?.id || 'unauthenticated', actorRole:actor?.role || 'viewer', action:actor ? 'auth.forbidden' : 'auth.denied', targetType:'ops', targetId:route, outcome:'denied', metadata:{ reason:actor ? 'insufficient_role' : 'invalid_credentials' } });
