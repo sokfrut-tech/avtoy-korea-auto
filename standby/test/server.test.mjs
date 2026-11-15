@@ -576,3 +576,12 @@ test('operator inbox API remains protected from unauthenticated requests', async
   assert.equal((await fetch(base+'/ops/inbox')).status,401);
   assert.equal((await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer admin-secret'}})).status,200);
 });
+
+
+test('operator panel keeps admin token in memory and provides phone contact actions', async () => {
+  const html=await readFile(new URL('../public/ops.html',import.meta.url),'utf8');
+  assert.match(html,/tel:/);
+  assert.match(html,/sms:/);
+  assert.match(html,/textContent/);
+  assert.doesNotMatch(html,/localStorage/);
+});
