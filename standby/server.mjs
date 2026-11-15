@@ -60,6 +60,22 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     if (legacyToken && safeEqual(req.headers.authorization?.replace(/^Bearer\s+/i,''), legacyToken)) return { actor:{ id:'legacy-local-admin', role:'owner' }, legacy:true };
     return { error:'unauthorized' };
   }
+  const authFailures = new Map();
+  async function recordAuthDenial(req, route, actor = null) {
+    const forwarded = env.TRUST_PROXY === 'true' ? req.headers['x-forwarded-for'] : '';
+    const ip = String(forwarded || req.socket.remoteAddress || 'unknown').split(',')[0].trim().slice(0,128) || 'unknown';
+    const now = clock();
+    const recent = (authFailures.get(ip) || []).filter(time => time > now - 10 * 60_000);
+    if (recent.length >= 10) return false;
+    recent.push(now); authFailures.set(ip,recent);
+    if (authFailures.size > 10_000) authFailures.delete(authFailures.keys().next().value);
+    if (auditStore && typeof auditStore.recordOperatorAuditEvent === 'function') {
+      try {
+        await auditStore.recordOperatorAuditEvent({ eventId:randomUUID(), occurredAt:new Date(now).toISOString(), actorId:actor?.id || 'unauthenticated', actorRole:actor?.role || 'viewer', action:actor ? 'auth.forbidden' : 'auth.denied', targetType:'ops', targetId:route, outcome:'denied', metadata:{ reason:actor ? 'insufficient_role' : 'invalid_credentials' } });
+      } catch { /* Denial remains a denial even if audit storage is unavailable. */ }
+    }
+    return true;
+  }
   async function auditOperatorAction(actor, action, targetType, targetId, metadata = {}) {
     if (!auditStore || typeof auditStore.recordOperatorAuditEvent !== 'function') throw new Error('Durable operator audit store is unavailable');
     await auditStore.recordOperatorAuditEvent({ eventId:randomUUID(), occurredAt:new Date(clock()).toISOString(), actorId:actor.id, actorRole:actor.role, action, targetType, targetId, outcome:'accepted', metadata });
@@ -300,8 +316,8 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     if (req.method === 'GET' && url.pathname === '/ops') return sendFile(res,path.join(publicDir,'ops.html'));
     if (req.method === 'GET' && url.pathname === '/ops/audit') {
       const auth = authorizeOperator(req,'audit:read');
-      if (auth.error === 'unauthorized') return json(res,401,{ error:'Unauthorized' });
-      if (auth.error === 'forbidden') return json(res,403,{ error:'Forbidden' });
+      if (auth.error === 'unauthorized') return await recordAuthDenial(req,'audit') ? json(res,401,{ error:'Unauthorized' }) : json(res,429,{ error:'Too many failed attempts.' });
+      if (auth.error === 'forbidden') { await recordAuthDenial(req,'audit',auth.actor); return json(res,403,{ error:'Forbidden' }); }
       if (!auth.legacy) {
         try { await auditOperatorAction(auth.actor,'audit.read','audit','recent'); }
         catch { return json(res,503,{ error:'Operator audit storage is unavailable.' }); }
@@ -314,8 +330,8 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     }
     if (req.method === 'GET' && url.pathname === '/ops/inbox') {
       const auth = authorizeOperator(req,'inbox:read');
-      if (auth.error === 'unauthorized') return json(res,401,{ error:'Unauthorized' });
-      if (auth.error === 'forbidden') return json(res,403,{ error:'Forbidden' });
+      if (auth.error === 'unauthorized') return await recordAuthDenial(req,'inbox') ? json(res,401,{ error:'Unauthorized' }) : json(res,429,{ error:'Too many failed attempts.' });
+      if (auth.error === 'forbidden') { await recordAuthDenial(req,'inbox',auth.actor); return json(res,403,{ error:'Forbidden' }); }
       if (!auth.legacy) {
         try { await auditOperatorAction(auth.actor,'inbox.read','inbox','all'); }
         catch { return json(res,503,{ error:'Operator audit storage is unavailable.' }); }
@@ -329,8 +345,8 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     }
     if (req.method === 'POST' && url.pathname === '/ops/retry') {
       const auth = authorizeOperator(req,'notifications:retry');
-      if (auth.error === 'unauthorized') return json(res,401,{ error:'Unauthorized' });
-      if (auth.error === 'forbidden') return json(res,403,{ error:'Forbidden' });
+      if (auth.error === 'unauthorized') return await recordAuthDenial(req,'retry') ? json(res,401,{ error:'Unauthorized' }) : json(res,429,{ error:'Too many failed attempts.' });
+      if (auth.error === 'forbidden') { await recordAuthDenial(req,'retry',auth.actor); return json(res,403,{ error:'Forbidden' }); }
       if (!auth.legacy) {
         try { await auditOperatorAction(auth.actor,'notifications.retry','queue','due'); }
         catch { return json(res,503,{ error:'Operator audit storage is unavailable.' }); }
