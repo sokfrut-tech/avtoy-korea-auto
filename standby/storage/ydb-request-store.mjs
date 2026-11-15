@@ -49,6 +49,33 @@ function digestKey(key) {
 export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory = randomUUID } = {}) {
   if (typeof sql !== 'function' || typeof sql.begin !== 'function') throw new TypeError('A @ydbjs/query client is required');
 
+  async function ensureMaxWebhookSchema() {
+    await sql`CREATE TABLE IF NOT EXISTS standby_max_webhook_events (
+      event_digest Utf8,
+      event_type Utf8,
+      event_timestamp Int64,
+      chat_id Utf8,
+      message_id Utf8,
+      sender_user_id Utf8,
+      received_at Utf8,
+      PRIMARY KEY (event_digest)
+    )`;
+  }
+
+  async function recordMaxWebhookEvent(event) {
+    if (!event || !/^[a-f0-9]{64}$/.test(String(event.digest || ''))) throw new TypeError('A SHA-256 event digest is required');
+    if (!['message_created','message_callback'].includes(event.eventType)) throw new TypeError('Unsupported MAX event type');
+    const receivedAt = new Date(clock()).toISOString();
+    return sql.begin({ isolation:'serializableReadWrite', idempotent:true }, async tx => {
+      const existing = firstRow(await tx`SELECT event_digest FROM standby_max_webhook_events WHERE event_digest = ${event.digest}`);
+      if (existing) return { duplicate:true };
+      await tx`INSERT INTO standby_max_webhook_events
+        (event_digest, event_type, event_timestamp, chat_id, message_id, sender_user_id, received_at)
+        VALUES (${event.digest}, ${event.eventType}, ${event.eventTimestamp}, ${String(event.chatId)}, ${String(event.messageId || '')}, ${String(event.senderUserId || '')}, ${receivedAt})`;
+      return { duplicate:false };
+    });
+  }
+
   async function createEnquiry(enquiry, idempotencyKey = null) {
     const requestId = idFactory();
     const now = clock();
@@ -147,5 +174,5 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     });
   }
 
-  return Object.freeze({ createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery });
+  return Object.freeze({ ensureMaxWebhookSchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery });
 }
