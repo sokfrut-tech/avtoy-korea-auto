@@ -269,3 +269,24 @@ test('operator audit retention removes only old events in bounded batches', asyn
   await assert.rejects(()=>store.pruneOperatorAuditEvents({}),/cutoff/);
   await assert.rejects(()=>store.pruneOperatorAuditEvents({before:'2026-11-01T00:00:00Z',limit:501}),/limit/);
 });
+
+
+test('externally managed YDB schema skips all DDL and exposes read-only verification', async () => {
+  const fake=fakeSql();
+  const store=createYdbRequestStore({sql:fake.sql,schemaManagedExternally:true});
+  assert.equal(await store.ensureMaxWebhookSchema(),true);
+  assert.equal(await store.ensureOperatorAuditSchema(),true);
+  assert.equal(await store.verifySchema(),true);
+  assert.equal(fake.calls.some(call=>/^CREATE TABLE/.test(call.query)),false);
+  assert.equal(fake.calls.some(call=>/^SELECT/.test(call.query)),true);
+  assert.equal(fake.calls.some(call=>/^CREATE TABLE/.test(call.query)),false);
+});
+
+test('YDB schema verification checks queue indexes as well as required tables', async () => {
+  const fake=fakeSql();
+  const store=createYdbRequestStore({sql:fake.sql,schemaManagedExternally:true});
+  await store.verifySchema();
+  const queries=fake.calls.map(call=>call.query);
+  assert.ok(queries.some(q=>q.includes('VIEW idx_due_queue')));
+  assert.ok(queries.some(q=>q.includes('VIEW idx_expired_lease')));
+});
