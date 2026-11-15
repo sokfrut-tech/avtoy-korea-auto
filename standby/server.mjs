@@ -119,6 +119,8 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
   }
   async function receiveMaxWebhook(req, res) {
     if (!/^[A-Za-z0-9_-]{5,256}$/.test(String(env.MAX_WEBHOOK_SECRET || '')) || ! /^-?\d{1,20}$/.test(String(env.MAX_OPERATOR_CHAT_ID || ''))) return json(res,503,{ ok:false,error:'MAX webhook is not configured.' });
+    const allowedOperatorIds = new Set(String(env.MAX_OPERATOR_USER_IDS || '').split(/[\s,]+/).filter(id => /^-?\d{1,20}$/.test(id)));
+    if (!allowedOperatorIds.size) return json(res,503,{ ok:false,error:'MAX operator allowlist is not configured.' });
     if (!safeEqual(req.headers['x-max-bot-api-secret'],env.MAX_WEBHOOK_SECRET)) return json(res,401,{ ok:false,error:'Unauthorized' });
     if (!maxEventStore || typeof maxEventStore.recordMaxWebhookEvent !== 'function') return json(res,503,{ ok:false,error:'Durable MAX event storage is unavailable.' });
     let update;
@@ -132,9 +134,11 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     const chatType = recipient.chat_type || (update?.chat_id != null ? 'chat' : '');
     if (!['message_created','message_callback'].includes(type) || !Number.isSafeInteger(timestamp) || timestamp <= 0) return json(res,400,{ ok:false,error:'Unsupported or malformed MAX update.' });
     if (String(chatId ?? '') !== String(env.MAX_OPERATOR_CHAT_ID) || chatType !== 'chat') return json(res,403,{ ok:false,error:'Event is outside the configured operator group.' });
-    if (message?.sender?.is_bot === true) return json(res,200,{ ok:true,ignored:true });
+    if (type === 'message_created' && message?.sender?.is_bot === true) return json(res,200,{ ok:true,ignored:true });
     const messageId = cleanText(message?.body?.mid || message?.mid || '',160);
-    const senderId = cleanText(message?.sender?.user_id || update?.callback?.user?.user_id || '',80);
+    const senderValue = type === 'message_callback' ? update?.callback?.user?.user_id : message?.sender?.user_id;
+    const senderId = cleanText(senderValue ?? '',80);
+    if (!senderId || !allowedOperatorIds.has(senderId)) return json(res,403,{ ok:false,error:'Sender is not an authorized operator.' });
     const digest = createHash('sha256').update(JSON.stringify(update)).digest('hex');
     try {
       const result = await maxEventStore.recordMaxWebhookEvent({ digest,eventType:type,eventTimestamp:timestamp,chatId:String(chatId),messageId:messageId || null,senderUserId:senderId || null });
