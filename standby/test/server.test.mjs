@@ -608,3 +608,42 @@ test('MAX callback authorizes the clicking operator, not the bot message sender'
   assert.equal(response.status,200);
   assert.equal(stored[0].senderUserId,'12345');
 });
+
+test('per-operator auth enforces roles and records durable audit before inbox access', async t => {
+  const token='A'.repeat(43);
+  const { digestOperatorToken } = await import('../security/operator-auth.mjs');
+  const audit=[];
+  const requestStore={async listPrivateEnquiries(){return [{id:'r1',name:'A',contact:'+7',model:'Kia',comment:'',createdAt:'2026-11-15',status:'queued',attempts:0,lastError:null}]}};
+  const auditStore={async recordOperatorAuditEvent(event){audit.push(event)}};
+  const { base }=await fixture(t,{
+    env:{STANDBY_OPERATORS_JSON:JSON.stringify([{id:'op-1',tokenHash:digestOperatorToken(token),role:'operator',enabled:true}])},
+    requestStore,auditStore
+  });
+  const inbox=await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer '+token}});
+  assert.equal(inbox.status,200);
+  assert.equal((await inbox.json()).operator.id,'op-1');
+  const retry=await fetch(base+'/ops/retry',{method:'POST',headers:{authorization:'Bearer '+token}});
+  assert.equal(retry.status,403);
+  assert.equal(audit.length,1);
+  assert.equal(audit[0].action,'inbox.read');
+});
+
+test('per-operator sensitive actions fail closed when durable audit is unavailable', async t => {
+  const token='B'.repeat(43);
+  const { digestOperatorToken } = await import('../security/operator-auth.mjs');
+  let retryCalls=0;
+  const requestStore={async claimDueEnquiries(){retryCalls++;return []}};
+  const { base }=await fixture(t,{
+    env:{STANDBY_OPERATORS_JSON:JSON.stringify([{id:'supervisor-1',tokenHash:digestOperatorToken(token),role:'supervisor',enabled:true}])},
+    requestStore,auditStore:{async recordOperatorAuditEvent(){throw new Error('YDB unavailable')}}
+  });
+  const response=await fetch(base+'/ops/retry',{method:'POST',headers:{authorization:'Bearer '+token}});
+  assert.equal(response.status,503);
+  assert.equal(retryCalls,0);
+});
+
+test('production does not accept the legacy shared admin token', async t => {
+  const { base }=await fixture(t,{env:{NODE_ENV:'production',STANDBY_ADMIN_TOKEN:'legacy-secret'}});
+  const response=await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer legacy-secret'}});
+  assert.equal(response.status,401);
+});
