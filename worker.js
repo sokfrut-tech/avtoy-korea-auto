@@ -1049,7 +1049,7 @@ function publicCarMediaOrder(car, photos, videos) {
   ...photos.map((_, index) => ({ url: "/api/car-media/" + car.id + "/photo/" + index, type: "photo" })),
   ...videos.map((_, index) => ({ url: "/api/car-media/" + car.id + "/video/" + index, type: "video" }))
  ];
- return { mediaItems, mediaOrderKnown: true };
+ return { mediaItems, mediaOrderKnown: false };
 }
 
 function publicReviewMediaOrder(review, photos, videos) {
@@ -1071,7 +1071,7 @@ function publicReviewMediaOrder(review, photos, videos) {
   ...photos.map((_, index) => ({ url: "/api/review-media/" + review.id + "/photo/" + index, type: "photo" })),
   ...videos.map((_, index) => ({ url: "/api/review-media/" + review.id + "/video/" + index, type: "video" }))
  ];
- return { mediaItems, mediaOrderKnown: true };
+ return { mediaItems, mediaOrderKnown: false };
 }
 
 function postPhotos(post) {
