@@ -688,3 +688,13 @@ test('only supervisor and owner can read the audit endpoint', async t => {
   assert.equal(data.events[0].eventId,'e1');
   assert.equal(audit.at(-1).action,'audit.read');
 });
+
+test('operator panel exposes audit only through role-aware controls', async () => {
+  const html=await readFile(new URL('../public/ops.html',import.meta.url),'utf8');
+  assert.match(html,/\/ops\/audit/);
+  assert.match(html,/audit:read/);
+  assert.match(html,/notifications:retry/);
+  assert.match(html,/operatorInfo/);
+  assert.doesNotMatch(html,/localStorage|sessionStorage/);
+  assert.match(html,/textContent/);
+});
