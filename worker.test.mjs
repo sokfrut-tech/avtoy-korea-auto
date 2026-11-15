@@ -1751,6 +1751,34 @@ test("admin deletes chosen photos from a car before publishing, after confirmati
   });
 });
 
+test("deleting a photo preserves the relative order of the remaining mixed photo/video album", async () => {
+  const kv = memoryKV();
+  const car = {
+    ...seedCar([
+      { file_id: "A", file_unique_id: "UA" },
+      { file_id: "C", file_unique_id: "UC" }
+    ]),
+    videos: [{ file_id: "V", file_unique_id: "UV" }],
+    mediaItems: [
+      { file_id: "A", file_unique_id: "UA", type: "photo", sourceMessageId: 10 },
+      { file_id: "V", file_unique_id: "UV", type: "video", sourceMessageId: 11 },
+      { file_id: "C", file_unique_id: "UC", type: "photo", sourceMessageId: 12 }
+    ],
+    mediaOrderKnown: true
+  };
+  await kv.put("car_pending:" + CAR_ID, JSON.stringify(car));
+  await withTelegramMock(async () => {
+    await worker.fetch(webhookUpdate(callback(ADMIN, "caredit:" + CAR_ID)), reviewEnv(kv));
+    await worker.fetch(photoReply("УДАЛИТЬ ФОТО 1"), reviewEnv(kv));
+    await worker.fetch(webhookUpdate(callback(ADMIN, "mphoto:yes")), reviewEnv(kv));
+    const saved = JSON.parse(await kv.get("car_pending:" + CAR_ID));
+    assert.deepEqual(saved.photos.map(item => item.file_id), ["C"]);
+    assert.deepEqual(saved.mediaItems.map(item => item.file_id), ["V", "C"]);
+    assert.deepEqual(saved.mediaItems.map(item => item.type), ["video", "photo"]);
+    assert.equal(saved.mediaOrderKnown, true);
+  });
+});
+
 test("photo removal can be cancelled, and wrong numbers are refused", async () => {
   const kv = memoryKV();
   await kv.put("car_pending:" + CAR_ID, JSON.stringify(seedCar([{ file_id: "A" }, { file_id: "B" }])));
