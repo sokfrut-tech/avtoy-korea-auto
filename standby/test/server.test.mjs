@@ -558,3 +558,21 @@ test('MAX webhook rejects malformed, oversized and unsupported updates', async t
   assert.equal((await fetch(base+'/api/max/webhook',{method:'POST',headers,body:' '.repeat(65000)})).status,413);
   assert.equal(writes,0);
 });
+
+
+test('operator panel is served locally and does not embed an admin token', async t => {
+  const {base,dir}=await fixture(t);
+  await writeFile(path.join(dir,'public','ops.html'),'<!doctype html><title>AVTOY operator panel</title><script>let token = ""; fetch("/ops/inbox")</script>');
+  const response=await fetch(base+'/ops');
+  assert.equal(response.status,200);
+  assert.match(response.headers.get('content-security-policy'),/connect-src 'self'/);
+  const html=await response.text();
+  assert.match(html,/AVTOY operator panel/);
+  assert.doesNotMatch(html,/STANDBY_ADMIN_TOKEN/);
+});
+
+test('operator inbox API remains protected from unauthenticated requests', async t => {
+  const {base}=await fixture(t,{env:{STANDBY_ADMIN_TOKEN:'admin-secret'}});
+  assert.equal((await fetch(base+'/ops/inbox')).status,401);
+  assert.equal((await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer admin-secret'}})).status,200);
+});
