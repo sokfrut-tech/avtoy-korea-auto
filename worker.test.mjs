@@ -1288,7 +1288,10 @@ test("channel album imported as one review keeps every photo through publication
   assert.deepEqual(approved.photos.map(p=>p.file_id),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"]);
   const response=await worker.fetch(new Request("https://worker.test/api/reviews"),reviewEnv(kv));
   const body=await response.json();
-  assert.deepEqual(body.reviews[0].mediaItems,["/api/review-media/-100555_440/0","/api/review-media/-100555_440/1"]);
+  assert.deepEqual(body.reviews[0].mediaItems,[
+   {url:"/api/review-media/-100555_440/photo/0",type:"photo"},
+   {url:"/api/review-media/-100555_440/photo/1",type:"photo"}
+  ]);
  });
 });
 
