@@ -44,7 +44,7 @@ function validateEnquiry(input) {
 
 export function assertDurableAdminRuntime({ operatorsConfigured = false, maxWebhookConfigured = false, requestStore = null } = {}) {
   if (!operatorsConfigured && !maxWebhookConfigured) return true;
-  if (!requestStore || typeof requestStore.ensureMaxWebhookSchema !== 'function') {
+  if (!requestStore || typeof requestStore.ensureMaxWebhookSchema !== 'function' || typeof requestStore.verifySchema !== 'function') {
     throw new Error('Per-operator administration and MAX webhook require a durable YDB request store');
   }
   const enquiryCapabilities = ['createEnquiry','getEnquiry','claimEnquiry','claimDueEnquiries','listPrivateEnquiries','completeDelivery'];
@@ -424,13 +424,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       throw new Error('INBOX_STORE=v2 requires YDB_CONNECTION_STRING; refusing local inbox fallback');
     }
     if (process.env.YDB_CONNECTION_STRING && process.env.INBOX_STORE === 'v2') {
+      const schemaManagedExternally = process.env.YDB_SCHEMA_MANAGED_EXTERNALLY === 'true';
+      if (process.env.NODE_ENV === 'production' && !schemaManagedExternally) {
+        throw new Error('Production YDB requires YDB_SCHEMA_MANAGED_EXTERNALLY=true; apply the reviewed schema migration with a separate privileged identity first');
+      }
       const [{ Driver }, { query }, { MetadataCredentialsProvider }, { createYdbRequestStore }] = await Promise.all([
         import('@ydbjs/core'), import('@ydbjs/query'), import('@ydbjs/auth/metadata'), import('./storage/ydb-request-store.mjs')
       ]);
       driver = new Driver(process.env.YDB_CONNECTION_STRING, { credentialsProvider:new MetadataCredentialsProvider() });
       await driver.ready();
-      requestStore = createYdbRequestStore({ sql:query(driver) });
-      await requestStore.ensureMaxWebhookSchema();
+      requestStore = createYdbRequestStore({ sql:query(driver), schemaManagedExternally });
+      if (schemaManagedExternally) await requestStore.verifySchema();
+      else await requestStore.ensureMaxWebhookSchema();
       process.stdout.write('YDB request-oriented inbox v2 enabled\\n');
     } else if (process.env.YDB_CONNECTION_STRING) {
       const [{ Driver }, { query }, { MetadataCredentialsProvider }, { createYdbInboxStore }] = await Promise.all([
