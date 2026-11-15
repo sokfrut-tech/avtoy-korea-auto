@@ -669,3 +669,22 @@ test('legacy shared token is denied when NODE_ENV is missing, not only in produc
   const response=await fetch(base+'/ops/inbox',{headers:{authorization:'Bearer legacy-secret'}});
   assert.equal(response.status,401);
 });
+
+test('only supervisor and owner can read the audit endpoint', async t => {
+  const token='D'.repeat(43);
+  const { digestOperatorToken } = await import('../security/operator-auth.mjs');
+  const audit=[];
+  const auditStore={
+    async recordOperatorAuditEvent(event){audit.push(event)},
+    async listOperatorAuditEvents(){return [{eventId:'e1',action:'inbox.read',actorId:'operator-a'}]}
+  };
+  const { base }=await fixture(t,{
+    env:{STANDBY_OPERATORS_JSON:JSON.stringify([{id:'supervisor-a',tokenHash:digestOperatorToken(token),role:'supervisor',enabled:true}])},
+    auditStore
+  });
+  const response=await fetch(base+'/ops/audit',{headers:{authorization:'Bearer '+token}});
+  assert.equal(response.status,200);
+  const data=await response.json();
+  assert.equal(data.events[0].eventId,'e1');
+  assert.equal(audit.at(-1).action,'audit.read');
+});
