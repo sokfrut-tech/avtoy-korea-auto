@@ -277,9 +277,8 @@ test('externally managed YDB schema skips all DDL and exposes read-only verifica
   assert.equal(await store.ensureMaxWebhookSchema(),true);
   assert.equal(await store.ensureOperatorAuditSchema(),true);
   assert.equal(await store.verifySchema(),true);
-  assert.equal(fake.calls.some(call=>/^CREATE TABLE/.test(call.query)),false);
-  assert.equal(fake.calls.some(call=>/^SELECT/.test(call.query)),true);
-  assert.equal(fake.calls.some(call=>/^CREATE TABLE/.test(call.query)),false);
+  assert.equal(fake.calls.some(call=>/^CREATE TABLE/.test(call)),false);
+  assert.equal(fake.calls.some(call=>/^SELECT/.test(call)),true);
 });
 
 test('YDB schema verification checks queue indexes as well as required tables', async () => {
