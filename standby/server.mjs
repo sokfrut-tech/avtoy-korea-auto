@@ -276,6 +276,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
       const page = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${description}"><title>${title} — AVTOY KOREA</title></head><body style="margin:0;padding:24px;background:#090b10;color:#f5f7fb;font:16px/1.6 system-ui,sans-serif"><main style="max-width:960px;margin:auto"><p><a href="/" style="color:#ff8b7f">← В каталог AVTOY KOREA</a></p><h1>${title}</h1>${image}<p>${description}</p><p><a href="/#request" style="display:inline-block;padding:12px 18px;background:#e84b3c;border-radius:10px;color:white;text-decoration:none">Оставить заявку</a></p></main></body></html>`;
       res.writeHead(200,{ 'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer','x-frame-options':'DENY','content-security-policy':"default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'" }); return res.end(page);
     }
+    if (req.method === 'GET' && url.pathname === '/ops') return sendFile(res,path.join(publicDir,'ops.html'));
     if (req.method === 'GET' && url.pathname === '/ops/inbox') {
       if (!env.STANDBY_ADMIN_TOKEN || !safeEqual(req.headers.authorization?.replace(/^Bearer\s+/i,''),env.STANDBY_ADMIN_TOKEN)) return json(res,401,{ error:'Unauthorized' });
       if (requestStore) {
