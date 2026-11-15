@@ -925,7 +925,7 @@ test("channel album imports one vehicle with all photos", async () => {
     assert.equal(cars.keys.length, 1);
     const car = JSON.parse(await kv.get(cars.keys[0].name));
     assert.deepEqual(car.photos.map(p => p.file_id), ["PHOTO_1","PHOTO_2"]);
-    assert.equal(calls.filter(c => c.method === "sendMediaGroup").length, 2);
+    assert.deepEqual(calls.filter(c => c.method === "sendPhoto" && String(c.payload.chat_id) === "111111111").map(c => c.payload.photo), ["PHOTO_1", "PHOTO_2"], "known source order is delivered sequentially");
   });
 });
 
@@ -1282,7 +1282,7 @@ test("channel album imported as one review keeps every photo through publication
   await worker.fetch(webhookUpdate(callback(111111111,"imp:review:-100555_440")),reviewEnv(kv));
   const pending=JSON.parse(await kv.get("pending:-100555_440"));
   assert.deepEqual(pending.photos.map(p=>p.file_id),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"]);
-  assert.ok(calls.some(c=>c.method==="sendMediaGroup"&&String(c.payload.chat_id)==="111111111"&&c.payload.media.map(m=>m.media).join(",")==="ALBUM_PHOTO_1,ALBUM_PHOTO_2"));
+  assert.deepEqual(calls.filter(c=>c.method==="sendPhoto"&&String(c.payload.chat_id)==="111111111").map(c=>c.payload.photo),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"],"known source order is delivered sequentially");
   await worker.fetch(webhookUpdate(callback(111111111,"pub:-100555_440")),reviewEnv(kv));
   const approved=JSON.parse(await kv.get("approved:-100555_440"));
   assert.deepEqual(approved.photos.map(p=>p.file_id),["ALBUM_PHOTO_1","ALBUM_PHOTO_2"]);
@@ -1292,7 +1292,7 @@ test("channel album imported as one review keeps every photo through publication
    {url:"/api/review-media/-100555_440/photo/0",type:"photo"},
    {url:"/api/review-media/-100555_440/photo/1",type:"photo"}
   ]);
-  assert.equal(body.reviews[0].mediaOrderKnown,false,"legacy photo arrays do not have Telegram source IDs proving their order");
+  assert.equal(body.reviews[0].mediaOrderKnown,true,"channel source message IDs prove the album order");
  });
 });
 
@@ -1632,7 +1632,7 @@ test("every photo of a large channel post reaches the admin, in media groups of 
     const sent = calls.filter(c => c.method === "sendMediaGroup" && String(c.payload.chat_id) === "111111111").flatMap(c => c.payload.media.map(m => m.media));
     const singles = calls.filter(c => c.method === "sendPhoto" && String(c.payload.chat_id) === "111111111").map(c => c.payload.photo);
     assert.equal(new Set([...sent, ...singles]).size, 14, "all 14 photos reach the admin");
-    assert.equal(calls.filter(c => c.method === "sendMediaGroup" && String(c.payload.chat_id) === "111111111").length, 2, "14 photos go out as two media groups (10 + 4)");
+    assert.deepEqual(singles, Array.from({length:14}, (_,i)=>"BIG"+i), "all known-order photos are delivered individually in source order");
   });
 });
 
@@ -2275,6 +2275,8 @@ test("car catalogue exposes mixed photo and video media with separate playback U
     caption: "Kia Sorento 2022",
     photos: [{ file_id: "PHOTO1", file_unique_id: "PHOTO1_U" }],
     videos: [{ file_id: "VIDEO1", file_unique_id: "VIDEO1_U" }],
+    mediaItems: [{file_id:"PHOTO1",file_unique_id:"PHOTO1_U",type:"photo",sourceMessageId:777},{file_id:"VIDEO1",file_unique_id:"VIDEO1_U",type:"video",sourceMessageId:778}],
+    mediaOrderKnown: true,
     mediaType: "photo",
     publishedAt: "2026-11-02T10:00:00Z"
   }));
@@ -2303,6 +2305,8 @@ test("published car catalogue hides known low-resolution photos but keeps sharp 
    {file_id:"UNKNOWN_SIZE",file_unique_id:"UNKNOWN_SIZE_U"}
   ],
   videos:[{file_id:"WALKAROUND",file_unique_id:"WALKAROUND_U"}],
+  mediaItems:[{file_id:"BLURRY_640",file_unique_id:"BLURRY_640_U",type:"photo",sourceMessageId:778},{file_id:"SHARP_1600",file_unique_id:"SHARP_1600_U",type:"photo",sourceMessageId:779},{file_id:"UNKNOWN_SIZE",file_unique_id:"UNKNOWN_SIZE_U",type:"photo",sourceMessageId:780},{file_id:"WALKAROUND",file_unique_id:"WALKAROUND_U",type:"video",sourceMessageId:781}],
+  mediaOrderKnown:true,
   publishedAt:"2026-11-11T10:00:00Z"
  }));
  const response=await worker.fetch(new Request("https://worker.test/api/cars"),reviewEnv(kv));
@@ -2637,7 +2641,7 @@ test("vehicle media detects video per item, prioritizes photos and skips broken 
   assert.match(html, /function isVideoMedia\(item\)/);
   assert.match(html, /item\.mimeType\|\|item\.mime_type/);
   assert.match(html, /mp4\|m4v\|mov\|webm\|ogv\|m3u8\|mpd/);
-  assert.match(html, /carItems\.sort\(function\(a,b\)\{return Number\(a\.video\)-Number\(b\.video\);\}\)/);
+  assert.ok(!html.includes("carItems.sort("), "gallery must preserve the API source order instead of moving videos after photos");
   assert.match(html, /failedMedia\[index\]=true/);
   assert.match(html, /if\(attempts>=carItems\.length\)gallery\.hidden=true/);
   assert.match(html, /carItems\.length<2/);
