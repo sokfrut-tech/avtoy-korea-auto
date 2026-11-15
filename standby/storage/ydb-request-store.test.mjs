@@ -7,6 +7,7 @@ function fakeSql() {
   const idempotency = new Map();
   const calls = [];
   const maxEvents = new Map();
+  const fakeAudit = new Map();
   async function execute(strings, ...values) {
     const q = strings.join(' ? ').replace(/\\s+/g, ' ').trim();
     calls.push(q);
@@ -22,6 +23,12 @@ function fakeSql() {
       const [cutoff, limit] = values;
       const expired = [...maxEvents.values()].filter(row => row.received_at < cutoff).sort((a,b) => a.received_at.localeCompare(b.received_at)).slice(0, Number(limit));
       for (const row of expired) maxEvents.delete(row.event_digest);
+      return [];
+    }
+    if (q.startsWith('CREATE TABLE IF NOT EXISTS standby_operator_audit_events')) return [];
+    if (q.startsWith('INSERT INTO standby_operator_audit_events')) {
+      const [id, occurredAt, actorId, role, action, targetType, targetId, outcome, metadata] = values;
+      fakeAudit.set(id,{event_id:id,occurred_at:occurredAt,actor_id:actorId,actor_role:role,action,target_type:targetType,target_id:targetId,outcome,metadata});
       return [];
     }
     if (q.startsWith('SELECT request_id, expires_at FROM standby_idempotency')) {
@@ -62,7 +69,7 @@ function fakeSql() {
     return [];
   }
   execute.begin = async (_options, callback) => callback(execute);
-  return { sql:execute, enquiries, idempotency, maxEvents, calls };
+  return { sql:execute, enquiries, idempotency, maxEvents, fakeAudit, calls };
 }
 
 test('creates one request per row and stores only a digest for idempotency', async () => {
@@ -165,4 +172,21 @@ test('MAX webhook retention rejects missing cutoff and unsafe batch limits', asy
   await assert.rejects(() => store.pruneMaxWebhookEvents({}), /cutoff/);
   await assert.rejects(() => store.pruneMaxWebhookEvents({ before:'2026-11-15T00:00:00Z', limit:0 }), /limit/);
   await assert.rejects(() => store.pruneMaxWebhookEvents({ before:'2026-11-15T00:00:00Z', limit:501 }), /limit/);
+});
+
+test('operator audit persists allowlisted events without customer PII', async () => {
+  const fake=fakeSql(); const store=createYdbRequestStore({sql:fake.sql,clock:()=>1_800_000_000_000});
+  const event={eventId:'audit-event-0001',occurredAt:'2026-11-15T18:00:00.000Z',actorId:'operator-a',actorRole:'operator',action:'inbox.read',targetType:'inbox',targetId:'all',outcome:'accepted',metadata:{count:3}};
+  assert.deepEqual(await store.recordOperatorAuditEvent(event),{eventId:event.eventId,recorded:true});
+  const row=fake.fakeAudit.get(event.eventId);
+  assert.equal(row.actor_id,'operator-a');
+  assert.equal(row.metadata,'{"count":3}');
+  assert.equal(JSON.stringify(row).includes('phone'),false);
+});
+
+test('operator audit rejects PII and unapproved metadata fields', async () => {
+  const store=createYdbRequestStore({sql:fakeSql().sql});
+  const base={eventId:'audit-event-0002',occurredAt:'2026-11-15T18:00:00Z',actorId:'operator-a',actorRole:'operator',action:'inbox.read',targetType:'inbox',targetId:'all',outcome:'accepted'};
+  await assert.rejects(()=>store.recordOperatorAuditEvent({...base,metadata:{phone:'+79990000000'}}),/Unsupported/);
+  await assert.rejects(()=>store.recordOperatorAuditEvent({...base,metadata:{reason:'phone:+79990000000'}}),/Unsafe/);
 });
