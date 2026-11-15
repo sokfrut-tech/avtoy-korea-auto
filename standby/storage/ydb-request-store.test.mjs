@@ -56,7 +56,7 @@ function fakeSql() {
     return [];
   }
   execute.begin = async (_options, callback) => callback(execute);
-  return { sql:execute, enquiries, idempotency, calls };
+  return { sql:execute, enquiries, idempotency, maxEvents, calls };
 }
 
 test('creates one request per row and stores only a digest for idempotency', async () => {
