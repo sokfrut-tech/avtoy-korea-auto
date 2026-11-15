@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createMaxAdapter } from './channels/max-adapter.mjs';
 
@@ -41,7 +41,7 @@ function validateEnquiry(input) {
   return { value:{ name, contact, model, comment } };
 }
 
-export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir = PUBLIC, env = process.env, fetchImpl = fetch, clock = () => Date.now(), inboxStore = null, requestStore = null, telegramTimeoutMs = 15_000, maxTimeoutMs = 10_000 } = {}) {
+export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir = PUBLIC, env = process.env, fetchImpl = fetch, clock = () => Date.now(), inboxStore = null, requestStore = null, maxEventStore = requestStore, telegramTimeoutMs = 15_000, maxTimeoutMs = 10_000 } = {}) {
   const inboxFile = path.join(dataDir, 'inbox.json');
   const snapshotFile = path.join(dataDir, 'public-snapshot.json');
   let writeChain = Promise.resolve();
@@ -116,6 +116,32 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
       deliveredAdminIds,
       reason:configured ? 'notification_delivery_failed' : 'notification_channels_not_configured'
     };
+  }
+  async function receiveMaxWebhook(req, res) {
+    if (!/^[A-Za-z0-9_-]{5,256}$/.test(String(env.MAX_WEBHOOK_SECRET || '')) || !/^\\d+$/.test(String(env.MAX_OPERATOR_CHAT_ID || ''))) return json(res,503,{ ok:false,error:'MAX webhook is not configured.' });
+    if (!safeEqual(req.headers['x-max-bot-api-secret'],env.MAX_WEBHOOK_SECRET)) return json(res,401,{ ok:false,error:'Unauthorized' });
+    if (!maxEventStore || typeof maxEventStore.recordMaxWebhookEvent !== 'function') return json(res,503,{ ok:false,error:'Durable MAX event storage is unavailable.' });
+    let update;
+    try { update = await readJson(req,64_000); }
+    catch (error) { return json(res,error.status || 400,{ ok:false,error:error.status === 413 ? 'Webhook payload too large.' : 'Invalid JSON.' }); }
+    const type = cleanText(update?.update_type,64);
+    const timestamp = Number(update?.timestamp);
+    const message = update?.message;
+    const recipient = message?.recipient || update?.callback?.message?.recipient || {};
+    const chatId = update?.chat_id ?? recipient.chat_id;
+    const chatType = recipient.chat_type || (update?.chat_id != null ? 'chat' : '');
+    if (!['message_created','message_callback'].includes(type) || !Number.isSafeInteger(timestamp) || timestamp <= 0) return json(res,400,{ ok:false,error:'Unsupported or malformed MAX update.' });
+    if (String(chatId ?? '') !== String(env.MAX_OPERATOR_CHAT_ID) || chatType !== 'chat') return json(res,403,{ ok:false,error:'Event is outside the configured operator group.' });
+    if (message?.sender?.is_bot === true) return json(res,200,{ ok:true,ignored:true });
+    const messageId = cleanText(message?.body?.mid || message?.mid || '',160);
+    const senderId = cleanText(message?.sender?.user_id || update?.callback?.user?.user_id || '',80);
+    const digest = createHash('sha256').update(JSON.stringify(update)).digest('hex');
+    try {
+      const result = await maxEventStore.recordMaxWebhookEvent({ digest,eventType:type,eventTimestamp:timestamp,chatId:String(chatId),messageId:messageId || null,senderUserId:senderId || null });
+      return json(res,200,{ ok:true,duplicate:Boolean(result?.duplicate) });
+    } catch {
+      return json(res,503,{ ok:false,error:'Could not persist MAX event.' });
+    }
   }
   async function submitEnquiry(req, res) {
     const forwarded = env.TRUST_PROXY === 'true' ? req.headers['x-forwarded-for'] : '';
@@ -231,6 +257,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
       catch { return json(res,500,{ error:'Отзывы временно недоступны.' }); }
     }
     if (req.method === 'POST' && url.pathname === '/api/request') return submitEnquiry(req,res);
+    if (req.method === 'POST' && url.pathname === '/api/max/webhook') return receiveMaxWebhook(req,res);
     if (req.method === 'GET' && url.pathname === '/robots.txt') {
       res.writeHead(200,{ 'content-type':'text/plain; charset=utf-8' }); return res.end('User-agent: *\nAllow: /\nDisallow: /ops/\nSitemap: /sitemap.xml\n');
     }
@@ -305,6 +332,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       driver = new Driver(process.env.YDB_CONNECTION_STRING, { credentialsProvider:new MetadataCredentialsProvider() });
       await driver.ready();
       requestStore = createYdbRequestStore({ sql:query(driver) });
+      await requestStore.ensureMaxWebhookSchema();
       process.stdout.write('YDB request-oriented inbox v2 enabled\\n');
     } else if (process.env.YDB_CONNECTION_STRING) {
       const [{ Driver }, { query }, { MetadataCredentialsProvider }, { createYdbInboxStore }] = await Promise.all([
