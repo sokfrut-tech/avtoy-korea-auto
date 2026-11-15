@@ -1,0 +1,72 @@
+export const MAX_API_BASE = 'https://platform-api2.max.ru';
+const MAX_TEXT_LENGTH = 4000;
+
+function safeId(value) {
+  const id = String(value ?? '').trim();
+  return /^\d{1,24}$/.test(id) ? id : null;
+}
+
+function notificationText(item) {
+  const shortId = String(item?.id ?? '').slice(0, 8);
+  if (!/^[a-zA-Z0-9_-]{4,8}$/.test(shortId)) throw new TypeError('A valid request id is required');
+  const model = String(item?.model ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+  const lines = [`Новая заявка AVTOY KOREA №${shortId}`];
+  if (model) lines.push(`Автомобиль: ${model}`);
+  lines.push('Откройте защищённую операторскую панель для просмотра контактов и ответа.');
+  const text = lines.join('\n');
+  if (text.length > MAX_TEXT_LENGTH) throw new RangeError('MAX message exceeds the documented text limit');
+  return text;
+}
+
+/**
+ * MAX sender for the single configured internal operator group.
+ * It intentionally never accepts a destination from the request payload.
+ */
+export function createMaxAdapter({
+  token,
+  operatorChatId,
+  fetchImpl = fetch,
+  timeoutMs = 10_000
+} = {}) {
+  const chatId = safeId(operatorChatId);
+  const accessToken = String(token ?? '').trim();
+
+  return Object.freeze({
+    configured: Boolean(accessToken && chatId),
+    async sendOperatorNotification(item) {
+      if (!accessToken) return { ok: false, retryable: false, reason: 'max_not_configured' };
+      if (!chatId) return { ok: false, retryable: false, reason: 'max_operator_chat_not_configured' };
+
+      let text;
+      try {
+        text = notificationText(item);
+      } catch (error) {
+        return { ok: false, retryable: false, reason: error instanceof RangeError ? 'max_payload_invalid' : 'max_request_invalid' };
+      }
+
+      try {
+        const response = await fetchImpl(`${MAX_API_BASE}/messages?chat_id=${chatId}`, {
+          method: 'POST',
+          headers: {
+            Authorization: accessToken,
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({ text, notify: true }),
+          signal: AbortSignal.timeout(timeoutMs)
+        });
+        const body = await response.json().catch(() => ({}));
+        const apiRejected = body?.success === false;
+        if (response.ok && !apiRejected) return { ok: true, retryable: false, receiptId: `max:${chatId}` };
+
+        const status = Number(response.status || 0);
+        return {
+          ok: false,
+          retryable: status === 408 || status === 425 || status === 429 || status >= 500,
+          reason: status === 429 ? 'max_rate_limited' : status >= 500 ? 'max_server_error' : 'max_request_rejected'
+        };
+      } catch {
+        return { ok: false, retryable: true, reason: 'max_network_error' };
+      }
+    }
+  });
+}
