@@ -292,3 +292,12 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Latest source changes include commits `1603b7bc8d92417c6c2380a16fc096a63ef86611`, `6b6e65ee6cd2c6da10b499dc39881c30c8c112a2`, `7f37527dc3c37724e46ed4c81db73b7ef77caef4`, `0bd89c6397c6233fa9ebd429286e26b2ac66f86a`, `b2f8b61c05d65b20ec7a2dcbcd1cbd85f9e09d0c`, and sanitizer escaping correction `48ea8670c748262c4d22f5ddf0358e3bc0fcb3bf`.
 - Verification: tests are authored but not executed. The GitHub Actions runner blocker remains; do not mark CI green or merge. No YDB migration, live MAX bot/group test, Worker deploy, webhook change, or customer traffic was performed.
 - Next: inspect current source/diff for rate-limit queue correctness, inspect newest Actions run for actual runner assignment, then continue review of duplicate-send/crash recovery and YDB migration compatibility. Keep PR #81 draft and production untouched.
+
+
+## Focused local test result — 2026-11-16
+
+- Exact PR adapter source and adapter test file were copied into an isolated temporary directory under Node v22.16.0.
+- `node --check max-adapter.mjs`: passed.
+- `node --test max-adapter.test.mjs`: 8/8 passed, 0 failed. Coverage includes fixed operator destination/privacy, configuration rejection, status classification, network errors, invalid request IDs, control-character sanitization, concurrent mixed-path pacing at 550 ms, and numeric Retry-After.
+- This is focused adapter evidence only; server dispatcher test, YDB storage tests, full standby suite, hosted security scans, live MAX test bot/group and YDB migration remain unverified. Hosted jobs still show runner_id=0 and no steps.
+- No production or live customer system changed. Keep PR #81 draft.
