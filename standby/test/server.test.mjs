@@ -873,3 +873,17 @@ test('MAX outbox dispatcher schedules retry for rate-limited API responses', asy
   assert.equal(failures[0].retryable,true);
   assert.equal(failures[0].errorCode,'max_rate_limited');
 });
+
+
+test('MAX status reply allowlists state values even if stored status is corrupted', async t => {
+  const stored=[];
+  const id='abcd1234-1234-4234-8234-123456789abc';
+  const requestStore={async getEnquiry(){return {id,status:'+7 999 123-45-67',contact:'private'};}};
+  const maxEventStore={async recordMaxWebhookEvent(event){stored.push(event);return {duplicate:false};}};
+  const {base}=await fixture(t,{requestStore,maxEventStore,env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'}});
+  const update={update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'status-002',text:'!status '+id}}};
+  const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify(update)});
+  assert.equal(response.status,200);
+  assert.match(stored[0].reply.text,/неизвестно/);
+  assert.doesNotMatch(stored[0].reply.text,/999 123|private/);
+});
