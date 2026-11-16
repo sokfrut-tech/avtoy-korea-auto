@@ -255,7 +255,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
           command = 'help';
           responseText = 'Команды AVTOY KOREA: !help — помощь; !status <UUID> — статус заявки. Персональные данные через MAX-группу не передаются.';
         } else {
-          const match = /^!status\\s+([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(text);
+          const match = /^!status\s+([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(text);
           if (match) {
             command = 'status';
             const enquiry = await requestStore.getEnquiry(match[1]);
