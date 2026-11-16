@@ -105,6 +105,7 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     const receivedAt = new Date(clock()).toISOString();
     const reply = event.reply || null;
     if (reply) {
+      if (!reply.auditEvent || !/^[A-Za-z0-9_-]{8,80}$/.test(String(reply.auditEvent.eventId || '')) || !/^[A-Za-z0-9._:-]{1,100}$/.test(String(reply.auditEvent.targetId || ''))) throw new TypeError('A safe MAX command audit event is required');
       if (!['help','status','invalid'].includes(reply.commandKind)) throw new TypeError('Unsupported MAX command kind');
       if (!/^[0-9]{1,20}$/.test(String(reply.actorId || ''))) throw new TypeError('Invalid MAX command actor');
       if (typeof reply.text !== 'string' || !reply.text.trim() || reply.text.length > 4000) throw new TypeError('Invalid MAX command reply text');
