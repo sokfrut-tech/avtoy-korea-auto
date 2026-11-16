@@ -97,3 +97,12 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 - This is a source/test change only; hosted runner remains unavailable, so the new server regression test has not executed.
 
 - Follow-up test-fixture review caught and corrected a declaration-order mistake in the new strict-chat-type regression test: `writes`, request headers and the baseline payload are now initialized before use. Commit: `3cf8d86cea9a9df566048acb612a5d4d3ff44010`. The corrected server test remains unexecuted because the hosted runner still fails before steps.
+
+
+## Follow-up test correction and retention review (2026-11-16)
+
+- Corrected the MAX webhook metadata test: it now sends an ordinary non-command message and asserts the current response contract (`command: ignored`, `queuedReply: false`) instead of sending malformed `!status 12345678` and expecting the obsolete minimal response. Commit: `bce4a70c89f219a443d30a45e5972838484b5572`.
+- Updated `docs/CONTINUATION.md` with the change and verification boundary.
+- Fresh exact-head validation run: `43933216572`, head `38aba1051a7c251fa108294002e102cd86b03d6c`. Attempt 1 failed before steps; retry attempt 2 also failed before runner allocation (job `133531207668`, empty steps; previous attempt job likewise had no steps). No tests executed. The focused adapter result 8/8 remains the only executable test evidence.
+- Static retention finding: `recordMaxWebhookEvent` uses the webhook receipt as its primary deduplication fence and the reply outbox primary key as a second fence while that row exists. `pruneMaxWebhookEvents` and `pruneMaxCommandReplies` can eventually remove both records for the same digest (the outbox pruner removes old `sent` rows). A very old replay after both records are pruned can therefore be accepted again. This is a finite deduplication horizon, not permanent replay protection. Before enabling automated pruning, align the two retention periods and decide whether to retain compact deduplication tombstones for a longer, explicitly defined replay horizon.
+- No YDB migration, live MAX test, merge, or production deployment performed.
