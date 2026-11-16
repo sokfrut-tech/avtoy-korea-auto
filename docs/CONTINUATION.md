@@ -326,3 +326,13 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - A source inspection of the new strict MAX group-type regression test found that its first draft referenced `writes` and `headers` before declaration. Corrected by moving all fixture state and headers to the start of the test block.
 - Commit: `3cf8d86cea9a9df566048acb612a5d4d3ff44010`.
 - This is a test-source correction only; it has not run because hosted runner allocation continues to fail before any step.
+
+
+## 2026-11-16 — MAX outbox review continuation
+- Active branch: `feature/max-command-reply-outbox-implementation-2026-11-16`.
+- PR #81 remains open and draft; no merge, production deploy, YDB migration, live MAX webhook change, or customer traffic test was performed.
+- Reviewed exact prior head `a37540c4fdde4392496a1fd7f59614bd88442c7e`. Found a mismatch in `standby/test/server.test.mjs`: the metadata-only webhook test sent malformed `!status 12345678`, which is intentionally classified as an invalid command and queues a reply, but expected the old minimal response object.
+- Fixed the test to send an ordinary non-command message and assert the current response contract: `ok=true`, `duplicate=false`, `command='ignored'`, `queuedReply=false`. This keeps the test focused on metadata persistence without inadvertently testing invalid-command behavior.
+- Change commit: `bce4a70c89f219a443d30a45e5972838484b5572`; changed file: `standby/test/server.test.mjs`.
+- Verification: source/test change was inspected before commit. No local full suite was run in this turn. Previous GitHub Actions attempts failed before any steps ran (empty steps and missing logs/BlobNotFound); the new commit must receive a fresh workflow run before any test-pass claim.
+- Next: inspect fresh Actions results for this exact commit; then continue review of MAX callback schema/authentication, YDB DDL/index compatibility, outbox retention/deduplication horizon, and live test-bot validation. Keep PR #81 draft until full tests, security review, and target-YDB migration validation pass.
