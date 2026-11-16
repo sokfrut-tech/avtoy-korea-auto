@@ -55,3 +55,16 @@ test('MAX rejects malformed request IDs without calling the API', async () => {
   assert.equal(result.reason, 'max_request_invalid');
   assert.equal(calls, 0);
 });
+
+
+test('MAX operator replies sanitize control characters and use only the configured group', async () => {
+  let request;
+  const adapter = createMaxAdapter({
+    token: 't', operatorChatId: '987654321',
+    fetchImpl: async (url, options) => { request = { url, options }; return new Response('{}', { status: 200 }); }
+  });
+  const result = await adapter.sendOperatorMessage('Статус\u0001 заявки\u007f готов');
+  assert.equal(result.ok, true);
+  assert.equal(request.url, MAX_API_BASE + '/messages?chat_id=987654321');
+  assert.equal(JSON.parse(request.options.body).text, 'Статус  заявки  готов');
+});
