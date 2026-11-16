@@ -77,10 +77,10 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
       lease_token Utf8 NOT NULL,
       attempts Uint32 NOT NULL,
       last_error Utf8 NOT NULL,
+      INDEX idx_max_reply_due GLOBAL SYNC ON (status, next_attempt_at),
+      INDEX idx_max_reply_lease GLOBAL SYNC ON (status, lock_until),
       PRIMARY KEY (event_digest)
     )`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_max_reply_due ON standby_max_command_replies (status, next_attempt_at) GLOBAL SYNC`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_max_reply_lease ON standby_max_command_replies (status, lock_until) GLOBAL SYNC`;
   }
 
   async function verifySchema() {
