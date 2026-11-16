@@ -64,7 +64,7 @@ export function createMaxAdapter({
 
   async function sendText(text) {
     if (!accessToken || !chatId) return { ok:false, retryable:false, reason:'max_not_configured' };
-    const safeText = String(text ?? '').replace(/[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]/g, ' ').trim();
+    const safeText = String(text ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ').trim();
     if (!safeText || safeText.length > MAX_TEXT_LENGTH) return { ok:false, retryable:false, reason:'max_message_invalid' };
     return queueSend(async () => {
       try {
