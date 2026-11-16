@@ -351,3 +351,12 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Confirmed corrected webhook test now exercises a non-command message and checks the current response contract and metadata persistence.
 - Additional static finding: `pruneMaxCommandReplies()` and `pruneMaxWebhookEvents()` are exported from the YDB store but have no callers in `standby/server.mjs`. Startup schedules only delivery retries every 15 seconds. Therefore bounded retention is not automatically executed by this runtime and rows can accumulate indefinitely absent an external/manual caller. Comment added to PR #81. Resolve by adding a controlled retention job with explicit retention period/batch cap, or document that retention is manual and remove claims of automatic pruning. Do not prune queued/dead rows; align receipt and outbox retention to avoid reopening replay deduplication.
 - No full local test suite, live YDB, MAX test bot, migration, merge, or production deploy has been performed.
+
+
+## 2026-11-16 — exact-head runner and retention policy handoff
+- Exact PR #81 head checked: `fff0ce32c32d259c817dc03c5ee891ced2de0515`.
+- Dedicated validation run `43940568229` and Factory Security Baseline run `43940568369` both failed with empty job step lists. Job-log retrieval returned `BlobNotFound`; no validation, CodeQL or secret-scan commands are evidenced as having executed. Do not call this a code failure or a passing check.
+- Retention functions `pruneMaxCommandReplies()` and `pruneMaxWebhookEvents()` are exported/callable but have no runtime callers. The server's 15-second timer only retries notification delivery and MAX outbox replies. Retention is manual-only at present.
+- No retention period or replay horizon was approved. No automatic cleanup was added: choosing a period without owner approval risks deleting audit/replay evidence. Before automation, align receipt/outbox retention and consider durable deduplication tombstones. Never prune queued/dead command replies.
+- PR #81 stays draft; no merge, YDB migration, webhook activation, production deployment or customer traffic test. Focused local MAX adapter verification remains 8/8 only; full standby suite, server tests, YDB tests, security scans, callback live test and target-DB migration remain unverified.
+- Next: unblock a real runner or authorized local execution for the complete workflow command; independently inspect callback payload contract and add explicit tests for callback shape/authorization, then validate YDB migration in a non-production database.
