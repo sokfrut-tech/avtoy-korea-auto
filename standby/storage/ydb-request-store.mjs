@@ -142,7 +142,14 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     const expired = await sql`SELECT event_digest FROM standby_max_command_replies VIEW idx_max_reply_lease
       WHERE status = 'sending' AND lock_until <= ${nowIso}
       ORDER BY lock_until LIMIT ${take}`;
-    const ids = [...new Set([...(due?.[0] || []).map(row=>row.event_digest), ...(expired?.[0] || []).map(row=>row.event_digest)])].slice(0,take);
+    const dueIds = (due?.[0] || []).map(row=>row.event_digest);
+    const expiredIds = (expired?.[0] || []).map(row=>row.event_digest);
+    const ordered = [];
+    for (let i=0; ordered.length<take && (i<dueIds.length || i<expiredIds.length); i+=1) {
+      if (i<dueIds.length) ordered.push(dueIds[i]);
+      if (ordered.length<take && i<expiredIds.length) ordered.push(expiredIds[i]);
+    }
+    const ids = [...new Set(ordered)].slice(0,take);
     const claimed = [];
     for (const eventDigest of ids) {
       const leaseToken = idFactory();
@@ -178,6 +185,7 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     if (!/^[a-f0-9]{64}$/.test(String(eventDigest || '')) || !leaseToken) throw new TypeError('eventDigest and leaseToken are required');
     if (!/^[a-z][a-z0-9_]{2,48}$/.test(String(errorCode))) throw new TypeError('Invalid normalized MAX error code');
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 20) throw new TypeError('maxAttempts must be between 1 and 20');
+    if (!Number.isFinite(retryBaseMs) || retryBaseMs < 100 || retryBaseMs > 60 * 60_000 || !Number.isFinite(retryMaxMs) || retryMaxMs < retryBaseMs || retryMaxMs > 24 * 60 * 60_000) throw new TypeError('Retry delays are outside the allowed bounds');
     const nowIso = iso(now);
     return sql.begin({ isolation:'serializableReadWrite', idempotent:true }, async tx => {
       const row = firstRow(await tx`SELECT status, lease_token, attempts FROM standby_max_command_replies WHERE event_digest = ${eventDigest}`);
