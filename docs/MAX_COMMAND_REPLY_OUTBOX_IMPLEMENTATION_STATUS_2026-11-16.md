@@ -22,9 +22,9 @@ Implemented in source:
 
 ## Verification status
 
-GitHub Actions created runs for PR #81, but the observed jobs finished with failure before assigning a runner: job payloads show runner_id=0, empty runner name and steps=[]. The workflow log download was unavailable (BlobNotFound). Therefore these runs do NOT establish that tests executed or failed in the code. Do not report the suite as passed.
-
-No local test runner was available in this tool session. Tests are authored, not verified.
+- The YDB index declarations were checked against the official YDB YQL syntax and moved inside CREATE TABLE as GLOBAL SYNC INDEX definitions. References: https://ydb.tech/docs/en/yql/reference/syntax/create_table/secondary_index and https://ydb.tech/docs/en/yql/reference/syntax/create_table/.
+- GitHub Actions created runs for PR #81, but the observed jobs finished before assigning a runner: job payloads show runner_id=0, empty runner name and steps=[]. The workflow log download was unavailable (BlobNotFound). These runs do NOT establish that tests executed or failed in the code. Do not report the suite as passed.
+- Tests are authored but remain unverified. A local Node runner is available in the working environment, but the private repository source could not be mounted into that runner through the available GitHub connector path in this session.
 
 ## Remaining blockers
 
