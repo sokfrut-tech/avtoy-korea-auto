@@ -343,3 +343,11 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Fresh run `43933216572` on head `38aba1051a7c251fa108294002e102cd86b03d6c` failed before execution. Manual retry attempt 2 also failed before runner allocation; job `133531207668` has no steps. No full-suite test result exists.
 - Static review found the deduplication horizon is finite: receipt row and sent outbox row both act as replay fences, but if both are pruned for the same event digest, a sufficiently old replay can enqueue again. Before enabling pruning, align retention windows and decide whether compact deduplication tombstones are required. This is documented in `docs/MAX_COMMAND_REPLY_OUTBOX_IMPLEMENTATION_STATUS_2026-11-16.md`.
 - Current next step: secure a functioning authorized runner, run the full standby suite, then validate the YDB migration and MAX API with a dedicated test bot/group. No merge or production change.
+
+
+## 2026-11-16 — retention scheduler finding
+- Exact source head reviewed: `38aba1051a7c251fa108294002e102cd86b03d6c`.
+- Fresh Actions: MAX validation run `43933216572` and Factory Security Baseline run `43933216532` both concluded failure. Every returned job had an empty step list; no test or security command is evidenced as having run.
+- Confirmed corrected webhook test now exercises a non-command message and checks the current response contract and metadata persistence.
+- Additional static finding: `pruneMaxCommandReplies()` and `pruneMaxWebhookEvents()` are exported from the YDB store but have no callers in `standby/server.mjs`. Startup schedules only delivery retries every 15 seconds. Therefore bounded retention is not automatically executed by this runtime and rows can accumulate indefinitely absent an external/manual caller. Comment added to PR #81. Resolve by adding a controlled retention job with explicit retention period/batch cap, or document that retention is manual and remove claims of automatic pruning. Do not prune queued/dead rows; align receipt and outbox retention to avoid reopening replay deduplication.
+- No full local test suite, live YDB, MAX test bot, migration, merge, or production deploy has been performed.
