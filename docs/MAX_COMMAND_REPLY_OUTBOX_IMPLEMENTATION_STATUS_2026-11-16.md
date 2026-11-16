@@ -88,3 +88,10 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 - Current branch head at the time of this note: `e7e008160bd48947556ef611cc3ee79488591a68`.
 
 - After the focused local adapter run, the dedicated hosted workflow for final head `3327871eb8fc5a7f18e047a36fcfb14778c843eb` again failed before runner allocation: run `43929159173`, job `133516625508`, `runner_id=0`, `steps=[]`. The local 8/8 adapter result is the only new executable evidence; dispatcher/YDB/full-suite/security jobs remain unverified.
+
+## MAX webhook group-type fail-closed check (2026-11-16)
+
+- Official MAX Update/Recipient schema defines `message.recipient.chat_type` with explicit values `chat`, `channel`, and `dialog`; group events should carry `chat_type: chat`. Source: https://dev.max.ru/docs-api/objects/Update/.
+- Removed a permissive fallback that treated a top-level `update.chat_id` as proof of group type when `message.recipient.chat_type` was absent. The webhook now requires the explicit recipient chat type to equal `chat`, in addition to the configured chat ID and operator allowlist.
+- Added a regression test: a payload with the configured top-level chat_id but no recipient.chat_type is rejected with HTTP 403 and is not persisted.
+- This is a source/test change only; hosted runner remains unavailable, so the new server regression test has not executed.
