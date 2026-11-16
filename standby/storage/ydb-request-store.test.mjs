@@ -304,6 +304,6 @@ test('runtime schema helper definitions use NOT NULL columns consistently with r
   assert.match(ddl,/event_id Utf8 NOT NULL/);
   assert.match(ddl,/metadata Utf8 NOT NULL/);
   assert.match(ddl,/event_digest Utf8 NOT NULL/);
-  assert.ok(fake.calls.some(q=>q.startsWith('CREATE INDEX IF NOT EXISTS idx_max_reply_due')));
-  assert.ok(fake.calls.some(q=>q.startsWith('CREATE INDEX IF NOT EXISTS idx_max_reply_lease')));
+  assert.match(ddl,/INDEX idx_max_reply_due GLOBAL SYNC ON/);
+  assert.match(ddl,/INDEX idx_max_reply_lease GLOBAL SYNC ON/);
 });
