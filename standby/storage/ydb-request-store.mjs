@@ -116,6 +116,12 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
           (event_digest, command_kind, actor_id, reply_text, status, created_at, next_attempt_at, lock_until, lease_token, attempts, last_error)
           VALUES (${event.digest}, ${reply.commandKind}, ${String(reply.actorId)}, ${reply.text.trim()}, 'queued', ${receivedAt}, ${receivedAt}, '', '', 0, '')`;
       }
+      if (reply?.auditEvent) {
+        const audit = reply.auditEvent;
+        await tx`INSERT INTO standby_operator_audit_events
+          (event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata)
+          VALUES (${String(audit.eventId)}, ${receivedAt}, ${String(reply.actorId)}, 'operator', ${'max.command.' + reply.commandKind}, 'request', ${String(audit.targetId || 'group')}, 'accepted', ${JSON.stringify({ reason:'max_group_command' })})`;
+      }
       return { duplicate:false, queuedReply:Boolean(reply) };
     });
   }
