@@ -277,3 +277,18 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Source-level work is committed on the feature branch. Exact-head CI, runtime Telegram round-trip, real photo fidelity, and phone visual verification are pending. Do not merge or deploy without explicit owner approval.
 - Remaining media-quality investigation: trace actual published car image URL/rendition end-to-end; distinguish Telegram-compressed photo uploads from source images that were already blurry; implement duplicate suppression at the vehicle-post scope without deleting intentional repeated images across different vehicles; verify site renders full media and not an accidental thumbnail URL.
 - Next action: open PR and run full Worker/Cloudflare/Factory checks; inspect actual code/test results before any merge.
+
+
+## MAX operator outbox follow-up — 2026-11-16
+
+- Active branch: `feature/max-command-reply-outbox-implementation-2026-11-16` (PR #81, draft).
+- Current changes in this continuation slice:
+  - `standby/channels/max-adapter.mjs`: all outbound messages share a serialized per-chat queue with a 550 ms minimum interval; this enforces the official MAX limit of at most two messages/second in one group with a safety margin. Added parsing of numeric/HTTP-date `Retry-After` on 429 responses.
+  - `standby/server.mjs`: the durable reply outbox uses the API-provided retry delay, bounded to 5 seconds–15 minutes.
+  - `standby/channels/max-adapter.test.mjs`: concurrent mixed send paths and Retry-After regression tests.
+  - `standby/test/server.test.mjs`: verifies a 12-second Retry-After becomes the persisted retry base.
+  - `docs/MAX_COMMAND_REPLY_OUTBOX_IMPLEMENTATION_STATUS_2026-11-16.md`: detailed status and official API rate-limit source.
+- Official contract checked: https://dev.max.ru/docs-api/methods/POST/messages — maximum two messages/second per dialog/group/channel; queue or delay sends.
+- Latest source changes include commits `1603b7bc8d92417c6c2380a16fc096a63ef86611`, `6b6e65ee6cd2c6da10b499dc39881c30c8c112a2`, `7f37527dc3c37724e46ed4c81db73b7ef77caef4`, `0bd89c6397c6233fa9ebd429286e26b2ac66f86a`, `b2f8b61c05d65b20ec7a2dcbcd1cbd85f9e09d0c`, and sanitizer escaping correction `48ea8670c748262c4d22f5ddf0358e3bc0fcb3bf`.
+- Verification: tests are authored but not executed. The GitHub Actions runner blocker remains; do not mark CI green or merge. No YDB migration, live MAX bot/group test, Worker deploy, webhook change, or customer traffic was performed.
+- Next: inspect current source/diff for rate-limit queue correctness, inspect newest Actions run for actual runner assignment, then continue review of duplicate-send/crash recovery and YDB migration compatibility. Keep PR #81 draft and production untouched.
