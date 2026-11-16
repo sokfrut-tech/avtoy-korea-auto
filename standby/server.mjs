@@ -69,6 +69,9 @@ export function assertDurableAdminRuntime({ operatorsConfigured = false, maxWebh
   if (maxWebhookConfigured && typeof requestStore.recordMaxWebhookEvent !== 'function') {
     throw new Error('MAX webhook requires durable idempotent webhook receipt storage');
   }
+  if (maxWebhookConfigured && typeof requestStore.recordOperatorAuditEvent !== 'function') {
+    throw new Error('MAX operator commands require durable operator audit storage');
+  }
   if (operatorsConfigured) {
     const operatorCapabilities = ['ensureOperatorAuditSchema','consumeOperatorAuthFailure','recordOperatorAuditEvent','listOperatorAuditEvents','listPrivateEnquiries'];
     const missingOperatorCapabilities = operatorCapabilities.filter(name => typeof requestStore[name] !== 'function');
@@ -223,7 +226,39 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     const digest = createHash('sha256').update(JSON.stringify(update)).digest('hex');
     try {
       const result = await maxEventStore.recordMaxWebhookEvent({ digest,eventType:type,eventTimestamp:timestamp,chatId:String(chatId),messageId:messageId || null,senderUserId:senderId || null });
-      return json(res,200,{ ok:true,duplicate:Boolean(result?.duplicate) });
+      if (result?.duplicate) return json(res,200,{ ok:true,duplicate:true });
+      let command = null;
+      let responseText = null;
+      if (type === 'message_created') {
+        const text = cleanText(message?.body?.text || '', 500);
+        if (/^!help$/i.test(text)) {
+          command = 'help';
+          responseText = 'Команды AVTOY KOREA: !help — помощь; !status <UUID> — статус заявки. Персональные данные через MAX-группу не передаются.';
+        } else {
+          const match = /^!status\s+([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(text);
+          if (match) {
+            command = 'status';
+            const enquiry = await requestStore.getEnquiry(match[1]);
+            responseText = enquiry
+              ? `Заявка ${String(enquiry.id).slice(0,8)}: ${cleanText(enquiry.status,24) || 'неизвестно'}. Контактные данные доступны только в защищённой панели.`
+              : 'Заявка не найдена. Проверьте UUID.';
+          } else if (text.startsWith('!')) {
+            command = 'invalid';
+            responseText = 'Неизвестная команда. Отправьте !help.';
+          }
+        }
+      }
+      if (command && responseText) {
+        try {
+          if (typeof auditStore?.recordOperatorAuditEvent !== 'function') throw new Error('Audit store unavailable');
+          await auditOperatorAction({ id:senderId, role:'operator' }, `max.command.${command}`, 'request', command === 'status' ? String(messageId || 'status') : 'group', { reason:'max_group_command' });
+          const sent = await maxAdapter.sendOperatorMessage(responseText);
+          if (!sent.ok) return json(res,503,{ ok:false,error:'Could not send MAX command response.' });
+        } catch {
+          return json(res,503,{ ok:false,error:'MAX command could not be processed safely.' });
+        }
+      }
+      return json(res,200,{ ok:true,duplicate:false,command:command || 'ignored' });
     } catch {
       return json(res,503,{ ok:false,error:'Could not persist MAX event.' });
     }
