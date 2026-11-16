@@ -31,8 +31,30 @@ export function createMaxAdapter({
   const chatId = safeId(operatorChatId);
   const accessToken = String(token ?? '').trim();
 
+  async function sendText(text) {
+    if (!accessToken || !chatId) return { ok:false, retryable:false, reason:'max_not_configured' };
+    const safeText = String(text ?? '').replace(/[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]/g, ' ').trim();
+    if (!safeText || safeText.length > MAX_TEXT_LENGTH) return { ok:false, retryable:false, reason:'max_message_invalid' };
+    try {
+      const response = await fetchImpl(`${MAX_API_BASE}/messages?chat_id=${chatId}`, {
+        method:'POST',
+        headers:{ Authorization:accessToken, 'content-type':'application/json' },
+        body:JSON.stringify({ text:safeText, notify:true }),
+        signal:AbortSignal.timeout(timeoutMs)
+      });
+      const body = await response.json().catch(() => ({}));
+      const rejected = body?.success === false;
+      if (response.ok && !rejected) return { ok:true, retryable:false, receiptId:`max:${chatId}` };
+      const status = Number(response.status || 0);
+      return { ok:false, retryable:status === 408 || status === 425 || status === 429 || status >= 500, reason:status === 429 ? 'max_rate_limited' : status >= 500 ? 'max_server_error' : 'max_request_rejected' };
+    } catch {
+      return { ok:false, retryable:true, reason:'max_network_error' };
+    }
+  }
+
   return Object.freeze({
     configured: Boolean(accessToken && chatId),
+    async sendOperatorMessage(text) { return sendText(text); },
     async sendOperatorNotification(item) {
       if (!accessToken) return { ok: false, retryable: false, reason: 'max_not_configured' };
       if (!chatId) return { ok: false, retryable: false, reason: 'max_operator_chat_not_configured' };
