@@ -831,7 +831,7 @@ test('MAX !status command returns only enquiry state and never customer contact 
   assert.equal(stored[0].reply.commandKind,'status');
   assert.match(stored[0].reply.text,/Заявка abcd1234: queued/);
   assert.doesNotMatch(stored[0].reply.text,/Секретное имя|999 123|Sportage/);
-  assert.equal(stored[0].reply.auditEvent.targetId,'status-001');
+  assert.equal(stored[0].reply.auditEvent.targetId,id);
 });
 
 
