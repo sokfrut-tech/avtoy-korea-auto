@@ -319,3 +319,10 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Added server regression coverage for a payload that supplies only the top-level chat_id and omits recipient.chat_type; expected result is HTTP 403 with no persistence.
 - Source commit: `b59f74da8528c8979f87520e22566ddbdd6f6e6c`; test commit: `e09abad6437c7656f44972da4f07041f1e6f4e77`.
 - Test not yet executed: GitHub hosted runner allocation is still failing; local focused adapter tests do not cover this server change.
+
+
+## Test-fixture review correction — 2026-11-16
+
+- A source inspection of the new strict MAX group-type regression test found that its first draft referenced `writes` and `headers` before declaration. Corrected by moving all fixture state and headers to the start of the test block.
+- Commit: `3cf8d86cea9a9df566048acb612a5d4d3ff44010`.
+- This is a test-source correction only; it has not run because hosted runner allocation continues to fail before any step.
