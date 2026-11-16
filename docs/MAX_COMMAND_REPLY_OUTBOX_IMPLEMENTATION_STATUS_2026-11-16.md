@@ -77,3 +77,12 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 - Therefore the outbox can guarantee idempotent webhook enqueue and lease-fenced state transitions, but cannot claim exactly-once external delivery. A crash after MAX accepted a message but before YDB stores `sent` can still result in a duplicate on retry. This remains explicitly at-least-once until MAX documents an idempotent send key or a safe reconciliation strategy is implemented.
 - Latest dedicated validation run `43928918187` and security run `43928918716` both failed before runner allocation. Jobs `133515772767` (Secret scanning), `133515773104` (CodeQL), and the dedicated `validate` job all have `runner_id=0`, empty `steps=[]`; no commands ran. This is not evidence of source/test failure and is not a pass.
 - Current branch head at this documentation update: `e7e008160bd48947556ef611cc3ee79488591a68`.
+
+## Focused local adapter verification (2026-11-16)
+
+- Because hosted GitHub Actions still fails before runner allocation, copied the exact current PR versions of `standby/channels/max-adapter.mjs` and `standby/channels/max-adapter.test.mjs` into an isolated temporary Node 22.16.0 directory and ran:
+  - `node --check max-adapter.mjs` — passed.
+  - `node --test max-adapter.test.mjs` — 8 tests passed, 0 failed.
+- This directly verifies the MAX adapter module and its full adapter test file, including fixed-group delivery, privacy, sanitization, concurrent rate limiting and Retry-After parsing. It does NOT execute `standby/server.mjs`, YDB storage tests, the full standby suite, GitHub security scans, a live MAX API call, or a database migration.
+- The isolated temporary directory is only a verification copy; no repository files outside the GitHub feature branch or production systems were changed.
+- Current branch head at the time of this note: `e7e008160bd48947556ef611cc3ee79488591a68`.
