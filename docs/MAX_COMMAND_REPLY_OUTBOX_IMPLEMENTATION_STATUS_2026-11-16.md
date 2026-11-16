@@ -56,3 +56,6 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 - Added a regression test that exercises `sendOperatorMessage`, asserts the configured operator chat is the only destination, and checks sanitization of control characters.
 - Commits: `97449ca9a9d21f129ddeff0fbd33a246b5c80553` (fix), `4f56a0e2405670f74799d3eee2435fd6c5873e94` (test).
 - Workflow for the latest head is queued as run `43928262889`; prior attempts still show runner startup failures. The new test has not yet executed; do not treat the source fix as validated until an actual test log is available.
+
+- Cross-checked the MAX sender against the current official MAX API reference: the documented host is `platform-api2.max.ru`; `POST /messages` accepts `chat_id` as a query parameter, uses `Authorization: <access_token>`, and supports message text up to 4000 characters. This confirms the adapter's host, endpoint, destination parameter and auth header; it does not replace a live bot/group integration test. Source: https://dev.max.ru/docs-api/methods/POST/messages
+- Latest validation run after the sanitizer test and status-doc update (`43928324080`) again completed as failure with no job steps and no logs. No test code ran.
