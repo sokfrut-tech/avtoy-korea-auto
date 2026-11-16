@@ -526,7 +526,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       maxWebhookConfigured:Boolean(process.env.MAX_WEBHOOK_SECRET),
       requestStore
     });
-    if (process.env.STANDBY_OPERATORS_JSON) {
+    if (process.env.STANDBY_OPERATORS_JSON || process.env.MAX_WEBHOOK_SECRET) {
       await requestStore.ensureOperatorAuditSchema();
       process.stdout.write('YDB operator audit storage enabled\\n');
     }
