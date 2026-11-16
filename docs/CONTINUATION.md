@@ -336,3 +336,10 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Change commit: `bce4a70c89f219a443d30a45e5972838484b5572`; changed file: `standby/test/server.test.mjs`.
 - Verification: source/test change was inspected before commit. No local full suite was run in this turn. Previous GitHub Actions attempts failed before any steps ran (empty steps and missing logs/BlobNotFound); the new commit must receive a fresh workflow run before any test-pass claim.
 - Next: inspect fresh Actions results for this exact commit; then continue review of MAX callback schema/authentication, YDB DDL/index compatibility, outbox retention/deduplication horizon, and live test-bot validation. Keep PR #81 draft until full tests, security review, and target-YDB migration validation pass.
+
+
+## 2026-11-16 — exact-head validation retry and replay-retention review
+- MAX webhook metadata test corrected in commit `bce4a70c89f219a443d30a45e5972838484b5572`: now sends a non-command message and asserts `command='ignored'` and `queuedReply=false`; the test no longer accidentally queues an invalid-command reply.
+- Fresh run `43933216572` on head `38aba1051a7c251fa108294002e102cd86b03d6c` failed before execution. Manual retry attempt 2 also failed before runner allocation; job `133531207668` has no steps. No full-suite test result exists.
+- Static review found the deduplication horizon is finite: receipt row and sent outbox row both act as replay fences, but if both are pruned for the same event digest, a sufficiently old replay can enqueue again. Before enabling pruning, align retention windows and decide whether compact deduplication tombstones are required. This is documented in `docs/MAX_COMMAND_REPLY_OUTBOX_IMPLEMENTATION_STATUS_2026-11-16.md`.
+- Current next step: secure a functioning authorized runner, run the full standby suite, then validate the YDB migration and MAX API with a dedicated test bot/group. No merge or production change.
