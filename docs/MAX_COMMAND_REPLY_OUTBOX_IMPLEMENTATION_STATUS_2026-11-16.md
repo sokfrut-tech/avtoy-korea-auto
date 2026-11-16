@@ -86,3 +86,5 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 - This directly verifies the MAX adapter module and its full adapter test file, including fixed-group delivery, privacy, sanitization, concurrent rate limiting and Retry-After parsing. It does NOT execute `standby/server.mjs`, YDB storage tests, the full standby suite, GitHub security scans, a live MAX API call, or a database migration.
 - The isolated temporary directory is only a verification copy; no repository files outside the GitHub feature branch or production systems were changed.
 - Current branch head at the time of this note: `e7e008160bd48947556ef611cc3ee79488591a68`.
+
+- After the focused local adapter run, the dedicated hosted workflow for final head `3327871eb8fc5a7f18e047a36fcfb14778c843eb` again failed before runner allocation: run `43929159173`, job `133516625508`, `runner_id=0`, `steps=[]`. The local 8/8 adapter result is the only new executable evidence; dispatcher/YDB/full-suite/security jobs remain unverified.
