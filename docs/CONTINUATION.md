@@ -301,3 +301,12 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - `node --test max-adapter.test.mjs`: 8/8 passed, 0 failed. Coverage includes fixed operator destination/privacy, configuration rejection, status classification, network errors, invalid request IDs, control-character sanitization, concurrent mixed-path pacing at 550 ms, and numeric Retry-After.
 - This is focused adapter evidence only; server dispatcher test, YDB storage tests, full standby suite, hosted security scans, live MAX test bot/group and YDB migration remain unverified. Hosted jobs still show runner_id=0 and no steps.
 - No production or live customer system changed. Keep PR #81 draft.
+
+
+## Latest CI status after local adapter verification — 2026-11-16
+
+- Latest tested source head: `3327871eb8fc5a7f18e047a36fcfb14778c843eb`.
+- Focused local adapter checks passed: `node --check` and `node --test` (8/8) in an isolated Node v22.16.0 temporary directory using the exact PR adapter module and test file.
+- Latest dedicated GitHub Actions run `43929159173`, job `133516625508`, again failed before runner allocation (`runner_id=0`, no runner name, `steps=[]`). No hosted validation commands executed.
+- MAX API docs contain no documented idempotency-key parameter for `POST /messages`; delivery guarantee remains at-least-once with a possible duplicate after remote acceptance and before YDB completion.
+- No server dispatcher/YDB/full suite, security scan, live MAX test, schema migration, production deploy, webhook or customer traffic has been verified or changed. PR #81 remains draft.
