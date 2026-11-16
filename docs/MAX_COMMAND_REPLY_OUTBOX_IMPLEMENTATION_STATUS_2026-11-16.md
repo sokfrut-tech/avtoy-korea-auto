@@ -95,3 +95,5 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 - Removed a permissive fallback that treated a top-level `update.chat_id` as proof of group type when `message.recipient.chat_type` was absent. The webhook now requires the explicit recipient chat type to equal `chat`, in addition to the configured chat ID and operator allowlist.
 - Added a regression test: a payload with the configured top-level chat_id but no recipient.chat_type is rejected with HTTP 403 and is not persisted.
 - This is a source/test change only; hosted runner remains unavailable, so the new server regression test has not executed.
+
+- Follow-up test-fixture review caught and corrected a declaration-order mistake in the new strict-chat-type regression test: `writes`, request headers and the baseline payload are now initialized before use. Commit: `3cf8d86cea9a9df566048acb612a5d4d3ff44010`. The corrected server test remains unexecuted because the hosted runner still fails before steps.
