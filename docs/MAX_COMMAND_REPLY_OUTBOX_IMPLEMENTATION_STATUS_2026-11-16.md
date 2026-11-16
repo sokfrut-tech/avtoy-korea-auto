@@ -38,3 +38,11 @@ Implemented in source:
 ## Safety boundary
 
 PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contract. No production Worker, YDB database, webhook, DNS, secrets, Telegram traffic or MAX customer traffic was changed. No client reply workflow is implemented. Do not merge or deploy until all blockers above are closed and explicit production approval is obtained.
+
+
+## Follow-up review (2026-11-16 18:18 UTC)
+
+- Corrected operator audit target classification: `!help` / invalid group commands are recorded with target_type=`group`; `!status` is recorded with target_type=`request` and the request UUID.
+- Updated the outbox storage test fake to preserve all audit columns and added assertions for both group- and request-scoped audit targets.
+- Latest source head after these review fixes: `20af5950f7350f416eeba2bc4ec1ca6b1114f8b6`.
+- Validation rerun `43927408005` again terminated before a runner step was recorded; steps are empty. This remains infrastructure/runner unavailability, not a test result.
