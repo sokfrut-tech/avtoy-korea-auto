@@ -70,3 +70,10 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 - Changes are authored but not yet executed by a functioning test runner. GitHub Actions has repeatedly failed before runner startup; do not report these tests as passing.
 
 - Latest head after the rate-limit implementation and handoff update: `0cde0def50b9a14f79504374db839bf56323f1fe`. Latest dedicated validation run `43928818934` failed before runner allocation: job `133515422755` has `runner_id=0`, empty runner name and `steps=[]`; no test process started. Related secret-scanning and CodeQL jobs in run `43928817062` also failed before steps. This is still a hosted-runner/infrastructure blocker, not a test failure or a pass.
+
+## Idempotency boundary and latest runner evidence (2026-11-16)
+
+- Reviewed the current MAX `POST /messages` contract and general API error documentation. The documented request schema exposes no idempotency-key parameter; a successful response returns a created message object. The documented HTTP error set includes 429 for rate limiting. Sources: https://dev.max.ru/docs-api/methods/POST/messages and https://dev.max.ru/docs-api.
+- Therefore the outbox can guarantee idempotent webhook enqueue and lease-fenced state transitions, but cannot claim exactly-once external delivery. A crash after MAX accepted a message but before YDB stores `sent` can still result in a duplicate on retry. This remains explicitly at-least-once until MAX documents an idempotent send key or a safe reconciliation strategy is implemented.
+- Latest dedicated validation run `43928918187` and security run `43928918716` both failed before runner allocation. Jobs `133515772767` (Secret scanning), `133515773104` (CodeQL), and the dedicated `validate` job all have `runner_id=0`, empty `steps=[]`; no commands ran. This is not evidence of source/test failure and is not a pass.
+- Current branch head at this documentation update: `e7e008160bd48947556ef611cc3ee79488591a68`.
