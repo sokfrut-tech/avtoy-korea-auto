@@ -310,3 +310,12 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Latest dedicated GitHub Actions run `43929159173`, job `133516625508`, again failed before runner allocation (`runner_id=0`, no runner name, `steps=[]`). No hosted validation commands executed.
 - MAX API docs contain no documented idempotency-key parameter for `POST /messages`; delivery guarantee remains at-least-once with a possible duplicate after remote acceptance and before YDB completion.
 - No server dispatcher/YDB/full suite, security scan, live MAX test, schema migration, production deploy, webhook or customer traffic has been verified or changed. PR #81 remains draft.
+
+
+## MAX webhook payload validation hardening — 2026-11-16
+
+- Confirmed official MAX Update schema defines `message.recipient.chat_type` as `chat`, `channel`, or `dialog` (https://dev.max.ru/docs-api/objects/Update/).
+- Removed fallback that inferred group type from a top-level chat_id when recipient.chat_type was missing. The webhook now fails closed unless the explicit recipient type is `chat` and the recipient chat ID matches the configured operator group.
+- Added server regression coverage for a payload that supplies only the top-level chat_id and omits recipient.chat_type; expected result is HTTP 403 with no persistence.
+- Source commit: `b59f74da8528c8979f87520e22566ddbdd6f6e6c`; test commit: `e09abad6437c7656f44972da4f07041f1e6f4e77`.
+- Test not yet executed: GitHub hosted runner allocation is still failing; local focused adapter tests do not cover this server change.
