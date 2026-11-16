@@ -131,7 +131,7 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
         const audit = reply.auditEvent;
         await tx`INSERT INTO standby_operator_audit_events
           (event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata)
-          VALUES (${String(audit.eventId)}, ${receivedAt}, ${String(reply.actorId)}, 'operator', ${'max.command.' + reply.commandKind}, 'request', ${String(audit.targetId || 'group')}, 'accepted', ${JSON.stringify({ reason:'max_group_command' })})`;
+          VALUES (${String(audit.eventId)}, ${receivedAt}, ${String(reply.actorId)}, 'operator', ${'max.command.' + reply.commandKind}, ${reply.commandKind === 'status' ? 'request' : 'group'}, ${String(audit.targetId || 'group')}, 'accepted', ${JSON.stringify({ reason:'max_group_command' })})`;
       }
       return { duplicate:false, queuedReply:Boolean(reply) };
     });
