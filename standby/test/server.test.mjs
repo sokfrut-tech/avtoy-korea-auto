@@ -542,14 +542,14 @@ test('MAX webhook rejects events outside the configured operator group', async t
 });
 
 test('MAX webhook does not acknowledge without durable storage or when persistence fails', async t => {
+  let writes=0;
+  const headers={'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'};
+  const payload={update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'m1'}}};
   const missingType=await fixture(t,{env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},maxEventStore:{async recordMaxWebhookEvent(){writes++;}}});
   const forgedFallback=await fetch(missingType.base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify({update_type:'message_created',timestamp:1794740000000,chat_id:987654321,message:{sender:{user_id:12345},body:{mid:'missing-type'}}})});
   assert.equal(forgedFallback.status,403);
   assert.equal(writes,0);
-  
 
-  const payload={update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'m1'}}};
-  const headers={'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'};
   const noStore=await fixture(t,{env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'}});
   assert.equal((await fetch(noStore.base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify(payload)})).status,503);
   const failed=await fixture(t,{env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},maxEventStore:{async recordMaxWebhookEvent(){throw new Error('db down');}}});
