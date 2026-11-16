@@ -113,6 +113,12 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     return sql.begin({ isolation:'serializableReadWrite', idempotent:true }, async tx => {
       const existing = firstRow(await tx`SELECT event_digest FROM standby_max_webhook_events WHERE event_digest = ${event.digest}`);
       if (existing) return { duplicate:true };
+      // Receipt retention may expire before the outbox row is pruned. Keep the
+      // outbox primary key as a second idempotency fence for late webhook replay.
+      if (reply) {
+        const priorReply = firstRow(await tx`SELECT event_digest FROM standby_max_command_replies WHERE event_digest = ${event.digest}`);
+        if (priorReply) return { duplicate:true };
+      }
       await tx`INSERT INTO standby_max_webhook_events
         (event_digest, event_type, event_timestamp, chat_id, message_id, sender_user_id, received_at)
         VALUES (${event.digest}, ${event.eventType}, ${event.eventTimestamp}, ${String(event.chatId)}, ${String(event.messageId || '')}, ${String(event.senderUserId || '')}, ${receivedAt})`;
