@@ -104,3 +104,24 @@ test('outbox rejects unsafe reply data and invalid lease/retry inputs',async()=>
   await assert.rejects(()=>store.claimDueMaxCommandReplies({limit:0}),/limit/);
   await assert.rejects(()=>store.failMaxCommandReply({eventDigest:'c'.repeat(64),leaseToken:'x',errorCode:'unsafe error'}),/error code/);
 });
+
+
+test('outbox retention prunes only sent replies and preserves queued and dead-letter rows',async()=>{
+  const fake=fakeSql(); let id=0;
+  const now=1800000000000;
+  const store=createYdbRequestStore({sql:fake.sql,clock:()=>now,idFactory:()=> 'lease-'+(++id)});
+  await store.recordMaxWebhookEvent(event('a'.repeat(64)));
+  const [deadClaim]=await store.claimDueMaxCommandReplies({now});
+  await store.failMaxCommandReply({eventDigest:deadClaim.eventDigest,leaseToken:deadClaim.leaseToken,retryable:false,errorCode:'max_request_rejected',now});
+  await store.recordMaxWebhookEvent(event('b'.repeat(64)));
+  await store.recordMaxWebhookEvent(event('c'.repeat(64)));
+  const claims=await store.claimDueMaxCommandReplies({now});
+  const sentClaim=claims.find(item=>item.eventDigest==='c'.repeat(64));
+  await store.completeMaxCommandReply({eventDigest:sentClaim.eventDigest,leaseToken:sentClaim.leaseToken,now});
+  await store.pruneMaxCommandReplies({before:new Date(now+1000).toISOString(),limit:10});
+  assert.equal(fake.replies.has('a'.repeat(64)),true);
+  assert.equal(fake.replies.get('a'.repeat(64)).status,'dead');
+  assert.equal(fake.replies.has('b'.repeat(64)),true);
+  assert.equal(fake.replies.get('b'.repeat(64)).status,'queued');
+  assert.equal(fake.replies.has('c'.repeat(64)),false);
+});
