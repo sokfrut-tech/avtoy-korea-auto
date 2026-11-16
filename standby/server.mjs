@@ -206,7 +206,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
   }
   async function retryMaxCommandReplies() {
     if (!requestStore || typeof requestStore.claimDueMaxCommandReplies !== 'function') return [];
-    const claims = await requestStore.claimDueMaxCommandReplies({ now:clock(), limit:20, leaseMs:60_000 });
+    const claims = await requestStore.claimDueMaxCommandReplies({ now:clock(), limit:5, leaseMs:120_000 });
     const results = [];
     for (const claim of claims) {
       let outcome;
