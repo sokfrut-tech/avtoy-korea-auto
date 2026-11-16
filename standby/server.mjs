@@ -261,8 +261,9 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
             command = 'status';
             auditTargetId = match[1];
             const enquiry = await requestStore.getEnquiry(match[1]);
+            const safeStatus = ['queued','sending','delivered'].includes(String(enquiry?.status || '')) ? enquiry.status : 'неизвестно';
             responseText = enquiry
-              ? `Заявка ${String(enquiry.id).slice(0,8)}: ${cleanText(enquiry.status,24) || 'неизвестно'}. Контактные данные доступны только в защищённой панели.`
+              ? `Заявка ${match[1].slice(0,8)}: ${safeStatus}. Контактные данные доступны только в защищённой панели.`
               : 'Заявка не найдена. Проверьте UUID.';
           } else if (text.startsWith('!')) {
             command = 'invalid';
