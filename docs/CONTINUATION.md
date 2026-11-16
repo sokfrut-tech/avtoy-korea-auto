@@ -375,3 +375,10 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - MAX validation run `43941164250` was created for that exact head and immediately concluded `failure`; job `133558712447` returned an empty step list (`steps=[]`). No test commands ran. This repeats the runner-allocation failure; do not classify as a code regression or passing test.
 - Commit `09fc97c06d21e6bcdcdb9cebd71dacbc5c0371ab` added two callback fail-closed tests: null original message/recipient context, and channel recipient despite an allowlisted operator. Documentation commits record the official MAX Update schema and manual-only retention decision.
 - PR #81 remains open and draft. No merge, YDB migration, live MAX webhook, production deploy or customer traffic.
+
+
+## Follow-up source review — manual retention wording (2026-11-16)
+- Static review of `standby/storage/ydb-request-store.mjs` confirmed the migration DDL and runtime `ensureMaxCommandReplySchema()` declare the same outbox columns, primary key and two GLOBAL SYNC indexes. This is source-level comparison only; no YDB parser/target database executed the DDL.
+- Corrected the `pruneMaxWebhookEvents()` source comment to say this is a manual bounded maintenance operation and has no runtime scheduler. Commit: `cd603a58d7316d5cbd4e247f7ac2e58331bf8c54`.
+- Rechecked callback tests against the existing test fixture and handler: fixture accepts `maxEventStore`; callback uses top-level `message.recipient`; missing message and `chat_type: channel` are rejected before persistence. Existing valid callback test still covers allowlisting the clicking operator rather than the bot message sender. These are source inspections only, not executed tests.
+- No live YDB/MAX test, migration, merge or deployment. Hosted validation continues to fail before any steps are recorded.
