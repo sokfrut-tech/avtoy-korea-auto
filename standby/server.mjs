@@ -532,7 +532,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     const app = createStandbyApp({ inboxStore, requestStore });
     server = http.createServer(app);
-    retryTimer = setInterval(() => { app.retryDue().catch(error => process.stderr.write('Retry cycle failed: ' + error.message + '\n')); }, 30_000);
+    retryTimer = setInterval(() => {
+      app.retryDue().catch(error => process.stderr.write('Retry cycle failed: ' + error.message + '\n'));
+      app.retryMaxCommandReplies().catch(error => process.stderr.write('MAX reply retry cycle failed: ' + error.message + '\n'));
+    }, 15_000);
     retryTimer.unref();
     server.listen(port,'0.0.0.0',()=>process.stdout.write('AVTOY KOREA standby listening on ' + port + '\n'));
     process.once('SIGINT', () => shutdown().finally(() => process.exit(0)));
