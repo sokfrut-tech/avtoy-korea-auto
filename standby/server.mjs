@@ -249,6 +249,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     try {
       let command = null;
       let responseText = null;
+      let auditTargetId = 'group';
       if (type === 'message_created') {
         const text = cleanText(message?.body?.text || '', 500);
         if (/^!help$/i.test(text)) {
@@ -258,6 +259,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
           const match = /^!status\s+([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(text);
           if (match) {
             command = 'status';
+            auditTargetId = match[1];
             const enquiry = await requestStore.getEnquiry(match[1]);
             responseText = enquiry
               ? `Заявка ${String(enquiry.id).slice(0,8)}: ${cleanText(enquiry.status,24) || 'неизвестно'}. Контактные данные доступны только в защищённой панели.`
@@ -272,7 +274,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
         commandKind:command,
         actorId:senderId,
         text:responseText,
-        auditEvent:{ eventId:randomUUID(), targetId:command === 'status' ? String(messageId || 'status') : 'group' }
+        auditEvent:{ eventId:randomUUID(), targetId:auditTargetId }
       } : null;
       const result = await maxEventStore.recordMaxWebhookEvent({
         digest,eventType:type,eventTimestamp:timestamp,chatId:String(chatId),messageId:messageId || null,senderUserId:senderId || null,reply
