@@ -46,3 +46,6 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 - Updated the outbox storage test fake to preserve all audit columns and added assertions for both group- and request-scoped audit targets.
 - Latest source head after these review fixes: `20af5950f7350f416eeba2bc4ec1ca6b1114f8b6`.
 - Validation rerun `43927408005` again terminated before a runner step was recorded; steps are empty. This remains infrastructure/runner unavailability, not a test result.
+
+- Manually re-ran the failed validation job (job `133510416845`) using GitHub's job re-run action. Attempt 2 produced job `133512291578`, which again completed as failure with no step list and no downloadable logs (`BlobNotFound` on log retrieval). This confirms retrying the same hosted job does not restore a runner; no test process started.
+- Reviewed the workflow definition: it uses standard `ubuntu-latest`, Node 22, syntax checks, then the full standby test glob. No workflow-level custom runner labels or external services are configured.
