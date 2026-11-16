@@ -319,9 +319,10 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
   }
 
   /**
-   * Delete at most 500 old MAX webhook receipts per call. The cutoff is an
-   * explicit ISO timestamp supplied by the retention scheduler; no implicit
-   * clock or unbounded table-wide DELETE is used.
+   * Manual, bounded maintenance operation: delete at most 500 old MAX webhook
+   * receipts per call. No runtime scheduler invokes this function. The cutoff
+   * must be explicitly supplied by an authorized maintenance caller; there is
+   * no implicit clock or unbounded table-wide DELETE.
    */
   async function pruneMaxWebhookEvents({ before, limit = 500 } = {}) {
     const cutoffDate = new Date(before);
