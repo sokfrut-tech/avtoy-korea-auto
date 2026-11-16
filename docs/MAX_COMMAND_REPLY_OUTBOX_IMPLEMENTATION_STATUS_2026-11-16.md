@@ -117,3 +117,11 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 - Decision for this PR: leave runtime behavior unchanged; explicitly document retention as manual-only and remove any implication that it runs automatically. This avoids silently deleting audit/deduplication evidence without an approved policy.
 - MAX callback payload review remains static: current test uses `callback.user.user_id` and `message.recipient.chat_id/chat_type`; no live test-bot webhook exchange has been performed. Keep callback acceptance behind the configured webhook secret, fixed group check and operator allowlist.
 - PR #81 remains draft. No migration, merge, production deployment, webhook registration or customer traffic was changed.
+
+
+## MAX callback schema regression coverage (2026-11-16)
+
+- Rechecked the current official MAX Update schema. For `message_callback`, the actor is `callback.user.user_id`; the original `message` is nullable and, when present, contains the recipient (`chat_id`, `chat_type`). The callback event is delivered through Webhook. Source: https://dev.max.ru/docs-api/objects/Update/.
+- Added two server regression tests in commit `09fc97c06d21e6bcdcdb9cebd71dacbc5c0371ab`: (1) callback with `message: null` / no recipient context must return 403 and persist nothing; (2) allowlisted operator callback addressed to `chat_type: channel` must return 403 and persist nothing. This supplements the existing valid callback test and strict group-type checks.
+- The tests are authored but not executed. A commit-associated workflow run was not yet visible when checked. Do not report these tests as passing until a runner executes the full standby test command.
+- PR #81 remains open/draft. No live webhook or MAX group was contacted.
