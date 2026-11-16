@@ -742,7 +742,7 @@ test('production admin and MAX webhook require complete durable YDB request, aud
   assert.equal(assertDurableAdminRuntime(),true);
   assert.throws(() => assertDurableAdminRuntime({ operatorsConfigured:true }), /durable YDB/);
   assert.throws(() => assertDurableAdminRuntime({ maxWebhookConfigured:true }), /durable YDB/);
-  const base={ensureMaxWebhookSchema(){},verifySchema(){}};
+  const base={ensureMaxWebhookSchema(){},ensureMaxCommandReplySchema(){},verifySchema(){}};
   assert.throws(() => assertDurableAdminRuntime({operatorsConfigured:true,requestStore:base}), /durable enquiry persistence/);
   assert.throws(() => assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:base}), /durable enquiry persistence/);
   const store={
@@ -750,10 +750,12 @@ test('production admin and MAX webhook require complete durable YDB request, aud
     verifySchema(){},
     createEnquiry(){},getEnquiry(){},claimEnquiry(){},claimDueEnquiries(){},listPrivateEnquiries(){},completeDelivery(){},
     ensureOperatorAuditSchema(){},consumeOperatorAuthFailure(){},recordOperatorAuditEvent(){},listOperatorAuditEvents(){},
-    recordMaxWebhookEvent(){}
+    recordMaxWebhookEvent(){},claimDueMaxCommandReplies(){},completeMaxCommandReply(){},failMaxCommandReply(){}
   };
   assert.equal(assertDurableAdminRuntime({operatorsConfigured:true,requestStore:store}),true);
   assert.equal(assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:store}),true);
+  const noOutbox={...store,claimDueMaxCommandReplies:undefined};
+  assert.throws(()=>assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:noOutbox}),/durable retryable command reply outbox/);
   const noMaxReceipts={...store,recordMaxWebhookEvent:undefined};
   assert.throws(()=>assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:noMaxReceipts}),/idempotent webhook receipt storage/);
   const noAudit={...store,recordOperatorAuditEvent:undefined};
