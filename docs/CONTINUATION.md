@@ -368,3 +368,10 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Added two server regression tests in commit `09fc97c06d21e6bcdcdb9cebd71dacbc5c0371ab`: (1) callback with `message: null` / no recipient context must return 403 and persist nothing; (2) allowlisted operator callback addressed to `chat_type: channel` must return 403 and persist nothing. This supplements the existing valid callback test and strict group-type checks.
 - The tests are authored but not executed. A commit-associated workflow run was not yet visible when checked. Do not report these tests as passing until a runner executes the full standby test command.
 - PR #81 remains open/draft. No live webhook or MAX group was contacted.
+
+
+## Latest exact-head Actions result — 2026-11-16 19:37 UTC
+- Current PR #81 head: `9d43396e0e18c0a68ac62f6354ca68158e010249`.
+- MAX validation run `43941164250` was created for that exact head and immediately concluded `failure`; job `133558712447` returned an empty step list (`steps=[]`). No test commands ran. This repeats the runner-allocation failure; do not classify as a code regression or passing test.
+- Commit `09fc97c06d21e6bcdcdb9cebd71dacbc5c0371ab` added two callback fail-closed tests: null original message/recipient context, and channel recipient despite an allowlisted operator. Documentation commits record the official MAX Update schema and manual-only retention decision.
+- PR #81 remains open and draft. No merge, YDB migration, live MAX webhook, production deploy or customer traffic.
