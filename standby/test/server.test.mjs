@@ -833,3 +833,43 @@ test('MAX !status command returns only enquiry state and never customer contact 
   assert.doesNotMatch(stored[0].reply.text,/Секретное имя|999 123|Sportage/);
   assert.equal(stored[0].reply.auditEvent.targetId,'status-001');
 });
+
+
+test('MAX outbox dispatcher sends a leased reply and completes it with the same fencing token', async t => {
+  const completed=[];
+  const sent=[];
+  const requestStore={
+    async claimDueMaxCommandReplies(){return [{eventDigest:'d'.repeat(64),commandKind:'help',actorId:'12345',text:'Безопасный ответ',leaseToken:'lease-1'}];},
+    async completeMaxCommandReply(input){completed.push(input);return {status:'sent'};},
+    async failMaxCommandReply(){assert.fail('successful MAX send must not be failed');}
+  };
+  const {app}=await fixture(t,{
+    requestStore,
+    env:{MAX_OPERATOR_CHAT_ID:'987654321',MAX_BOT_TOKEN:'max-token'},
+    fetchImpl:async(url,options)=>{sent.push({url:String(url),body:JSON.parse(options.body)});return new Response(JSON.stringify({success:true}),{status:200});}
+  });
+  const result=await app.retryMaxCommandReplies();
+  assert.equal(result[0].status,'sent');
+  assert.equal(sent.length,1);
+  assert.equal(sent[0].url,'https://platform-api2.max.ru/messages?chat_id=987654321');
+  assert.equal(sent[0].body.text,'Безопасный ответ');
+  assert.equal(completed[0].leaseToken,'lease-1');
+});
+
+test('MAX outbox dispatcher schedules retry for rate-limited API responses', async t => {
+  const failures=[];
+  const requestStore={
+    async claimDueMaxCommandReplies(){return [{eventDigest:'e'.repeat(64),text:'safe',leaseToken:'lease-2'}];},
+    async completeMaxCommandReply(){assert.fail('429 must not complete delivery');},
+    async failMaxCommandReply(input){failures.push(input);return {status:'queued'};}
+  };
+  const {app}=await fixture(t,{
+    requestStore,
+    env:{MAX_OPERATOR_CHAT_ID:'987654321',MAX_BOT_TOKEN:'max-token'},
+    fetchImpl:async()=>new Response(JSON.stringify({success:false}),{status:429})
+  });
+  const result=await app.retryMaxCommandReplies();
+  assert.equal(result[0].status,'queued');
+  assert.equal(failures[0].retryable,true);
+  assert.equal(failures[0].errorCode,'max_rate_limited');
+});
