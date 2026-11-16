@@ -75,6 +75,14 @@ test('MAX webhook receipt, command reply and audit are atomically idempotent',as
   assert.equal(fake.audit.size,1);
 });
 
+test('MAX status command audit is scoped to the request, not the group',async()=>{
+  const fake=fakeSql(),store=createYdbRequestStore({sql:fake.sql,clock:()=>1800000000000});
+  const requestId='abcd1234-1234-4234-8234-123456789abc';
+  await store.recordMaxWebhookEvent(event('b'.repeat(64),{commandKind:'status',auditEvent:{eventId:'audit-status-0001',targetId:requestId}}));
+  assert.equal(fake.audit.get('audit-status-0001').target_type,'request');
+  assert.equal(fake.audit.get('audit-status-0001').target_id,requestId);
+});
+
 test('outbox leases fence stale workers and successful delivery completes once',async()=>{
   const fake=fakeSql(); let id=0;
   const store=createYdbRequestStore({sql:fake.sql,clock:()=>1800000000000,idFactory:()=> 'lease-'+(++id)});
