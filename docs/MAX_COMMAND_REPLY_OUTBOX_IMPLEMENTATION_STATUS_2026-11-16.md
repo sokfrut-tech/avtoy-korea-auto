@@ -49,3 +49,10 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 
 - Manually re-ran the failed validation job (job `133510416845`) using GitHub's job re-run action. Attempt 2 produced job `133512291578`, which again completed as failure with no step list and no downloadable logs (`BlobNotFound` on log retrieval). This confirms retrying the same hosted job does not restore a runner; no test process started.
 - Reviewed the workflow definition: it uses standard `ubuntu-latest`, Node 22, syntax checks, then the full standby test glob. No workflow-level custom runner labels or external services are configured.
+
+## Additional MAX adapter review (2026-11-16 18:23 UTC)
+
+- Found a real source defect in the durable reply sender: its control-character sanitizer used an over-escaped regular-expression character class. Replaced it with the intended Unicode control ranges so ordinary reply text is preserved and control characters are replaced with spaces.
+- Added a regression test that exercises `sendOperatorMessage`, asserts the configured operator chat is the only destination, and checks sanitization of control characters.
+- Commits: `97449ca9a9d21f129ddeff0fbd33a246b5c80553` (fix), `4f56a0e2405670f74799d3eee2435fd6c5873e94` (test).
+- Workflow for the latest head is queued as run `43928262889`; prior attempts still show runner startup failures. The new test has not yet executed; do not treat the source fix as validated until an actual test log is available.
