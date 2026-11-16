@@ -796,47 +796,38 @@ test('production Russian standby cannot start with local JSON or a partial YDB r
 
 test('MAX !help command replies only to the configured operator group and audits the action', async t => {
   const stored=[];
-  const audited=[];
-  const outbound=[];
   const maxEventStore={async recordMaxWebhookEvent(event){stored.push(event);return {duplicate:false};}};
-  const auditStore={async recordOperatorAuditEvent(event){audited.push(event);}};
   const {base}=await fixture(t,{
-    maxEventStore,auditStore,
+    maxEventStore,
     env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345',MAX_BOT_TOKEN:'max-token'}
-    ,fetchImpl:async(url,options)=>{outbound.push({url:String(url),body:JSON.parse(options.body)});return new Response(JSON.stringify({success:true}),{status:200});}
   });
   const update={update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'help-001',text:'!help'}}};
   const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify(update)});
   assert.equal(response.status,200);
   assert.equal((await response.json()).command,'help');
   assert.equal(stored.length,1);
-  assert.equal(audited.length,1);
-  assert.equal(audited[0].action,'max.command.help');
-  assert.deepEqual(audited[0].metadata,{reason:'max_group_command'});
-  assert.equal(outbound.length,1);
-  assert.equal(outbound[0].url,'https://platform-api2.max.ru/messages?chat_id=987654321');
-  assert.match(outbound[0].body.text,/!status/);
-  assert.doesNotMatch(outbound[0].body.text,/телефон|контакт клиента/i);
+  assert.equal(stored[0].reply.commandKind,'help');
+  assert.equal(stored[0].reply.actorId,'12345');
+  assert.match(stored[0].reply.text,/!status/);
+  assert.deepEqual(stored[0].reply.auditEvent,{eventId:stored[0].reply.auditEvent.eventId,targetId:'group'});
+  assert.equal(Object.hasOwn(stored[0].reply,'chatId'),false);
 });
 
 test('MAX !status command returns only enquiry state and never customer contact details', async t => {
-  const audited=[];
-  const outbound=[];
+  const stored=[];
   const id='abcd1234-1234-4234-8234-123456789abc';
   const requestStore={async getEnquiry(value){assert.equal(value,id);return {id,status:'queued',name:'Секретное имя',contact:'+7 999 123-45-67',model:'Kia Sportage'};}};
-  const maxEventStore={async recordMaxWebhookEvent(){return {duplicate:false};}};
-  const auditStore={async recordOperatorAuditEvent(event){audited.push(event);}};
+  const maxEventStore={async recordMaxWebhookEvent(event){stored.push(event);return {duplicate:false};}};
   const {base}=await fixture(t,{
-    requestStore,maxEventStore,auditStore,
-    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345',MAX_BOT_TOKEN:'max-token'},
-    fetchImpl:async(url,options)=>{outbound.push(JSON.parse(options.body).text);return new Response(JSON.stringify({success:true}),{status:200});}
+    requestStore,maxEventStore,
+    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345',MAX_BOT_TOKEN:'max-token'}
   });
   const update={update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'status-001',text:'!status '+id}}};
   const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify(update)});
   assert.equal(response.status,200);
   assert.equal((await response.json()).command,'status');
-  assert.equal(audited[0].action,'max.command.status');
-  assert.deepEqual(audited[0].metadata,{reason:'max_group_command'});
-  assert.match(outbound[0],/Заявка abcd1234: queued/);
-  assert.doesNotMatch(outbound[0],/Секретное имя|999 123|Sportage/);
+  assert.equal(stored[0].reply.commandKind,'status');
+  assert.match(stored[0].reply.text,/Заявка abcd1234: queued/);
+  assert.doesNotMatch(stored[0].reply.text,/Секретное имя|999 123|Sportage/);
+  assert.equal(stored[0].reply.auditEvent.targetId,'status-001');
 });
