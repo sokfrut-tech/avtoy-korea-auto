@@ -899,3 +899,34 @@ test('MAX status reply allowlists state values even if stored status is corrupte
   assert.match(stored[0].reply.text,/неизвестно/);
   assert.doesNotMatch(stored[0].reply.text,/999 123|private/);
 });
+
+
+test('MAX callback fails closed when the original message and recipient context are absent', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{
+    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},
+    maxEventStore:{async recordMaxWebhookEvent(){writes++;}}
+  });
+  const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify({
+    update_type:'message_callback',timestamp:1794740000000,
+    callback:{user:{user_id:12345},callback_id:'cb-no-message',payload:'safe'},
+    message:null
+  })});
+  assert.equal(response.status,403);
+  assert.equal(writes,0);
+});
+
+test('MAX callback rejects a channel recipient even when the clicking operator is allowlisted', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{
+    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},
+    maxEventStore:{async recordMaxWebhookEvent(){writes++;}}
+  });
+  const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify({
+    update_type:'message_callback',timestamp:1794740000000,
+    callback:{user:{user_id:12345},callback_id:'cb-channel',payload:'safe'},
+    message:{sender:{user_id:55555,is_bot:true},recipient:{chat_id:987654321,chat_type:'channel'},body:{mid:'channel-message'}}
+  })});
+  assert.equal(response.status,403);
+  assert.equal(writes,0);
+});
