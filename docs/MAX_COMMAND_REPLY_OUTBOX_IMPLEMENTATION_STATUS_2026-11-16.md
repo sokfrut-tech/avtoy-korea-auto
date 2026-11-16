@@ -68,3 +68,5 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 - `standby/server.mjs` passes the server-provided delay into the durable outbox retry schedule, with a 5-second minimum and 15-minute maximum delay. Normal exponential retry remains bounded.
 - Added adapter tests for concurrent mixed-path sends and Retry-After parsing, and dispatcher test asserting a 12-second Retry-After is persisted as the retry base.
 - Changes are authored but not yet executed by a functioning test runner. GitHub Actions has repeatedly failed before runner startup; do not report these tests as passing.
+
+- Latest head after the rate-limit implementation and handoff update: `0cde0def50b9a14f79504374db839bf56323f1fe`. Latest dedicated validation run `43928818934` failed before runner allocation: job `133515422755` has `runner_id=0`, empty runner name and `steps=[]`; no test process started. Related secret-scanning and CodeQL jobs in run `43928817062` also failed before steps. This is still a hosted-runner/infrastructure blocker, not a test failure or a pass.
