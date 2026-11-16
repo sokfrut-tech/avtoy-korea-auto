@@ -79,6 +79,8 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
       last_error Utf8 NOT NULL,
       PRIMARY KEY (event_digest)
     )`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_max_reply_due ON standby_max_command_replies (status, next_attempt_at) GLOBAL SYNC`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_max_reply_lease ON standby_max_command_replies (status, lock_until) GLOBAL SYNC`;
   }
 
   async function verifySchema() {
@@ -88,6 +90,8 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     await sql`SELECT idempotency_digest FROM standby_idempotency LIMIT 1`;
     await sql`SELECT event_digest FROM standby_max_webhook_events LIMIT 1`;
     await sql`SELECT event_digest FROM standby_max_command_replies LIMIT 1`;
+    await sql`SELECT event_digest FROM standby_max_command_replies VIEW idx_max_reply_due WHERE status = 'queued' ORDER BY next_attempt_at LIMIT 1`;
+    await sql`SELECT event_digest FROM standby_max_command_replies VIEW idx_max_reply_lease WHERE status = 'sending' ORDER BY lock_until LIMIT 1`;
     await sql`SELECT event_id FROM standby_operator_audit_events LIMIT 1`;
     await sql`SELECT key_digest FROM standby_operator_auth_rate_limits LIMIT 1`;
     await sql`SELECT request_id FROM standby_enquiries VIEW idx_due_queue WHERE status = 'queued' ORDER BY next_attempt_at LIMIT 1`;
@@ -131,10 +135,10 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     if (take > 100) throw new TypeError('limit must not exceed 100');
     if (!Number.isFinite(leaseMs) || leaseMs < 1000 || leaseMs > 15 * 60_000) throw new TypeError('leaseMs must be between 1 second and 15 minutes');
     const nowIso = iso(now);
-    const due = await sql`SELECT event_digest FROM standby_max_command_replies
+    const due = await sql`SELECT event_digest FROM standby_max_command_replies VIEW idx_max_reply_due
       WHERE status = 'queued' AND next_attempt_at <= ${nowIso}
       ORDER BY next_attempt_at LIMIT ${take}`;
-    const expired = await sql`SELECT event_digest FROM standby_max_command_replies
+    const expired = await sql`SELECT event_digest FROM standby_max_command_replies VIEW idx_max_reply_lease
       WHERE status = 'sending' AND lock_until <= ${nowIso}
       ORDER BY lock_until LIMIT ${take}`;
     const ids = [...new Set([...(due?.[0] || []).map(row=>row.event_digest), ...(expired?.[0] || []).map(row=>row.event_digest)])].slice(0,take);
