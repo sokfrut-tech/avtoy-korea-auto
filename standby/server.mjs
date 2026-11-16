@@ -251,7 +251,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
       if (command && responseText) {
         try {
           if (typeof auditStore?.recordOperatorAuditEvent !== 'function') throw new Error('Audit store unavailable');
-          await auditOperatorAction({ id:senderId, role:'operator' }, `max.command.${command}`, 'request', command === 'status' ? String(messageId || 'status') : 'group', { chatId:String(chatId) });
+          await auditOperatorAction({ id:senderId, role:'operator' }, `max.command.${command}`, 'request', command === 'status' ? String(messageId || 'status') : 'group', { reason:'max_group_command' });
           const sent = await maxAdapter.sendOperatorMessage(responseText);
           if (!sent.ok) return json(res,503,{ ok:false,error:'Could not send MAX command response.' });
         } catch {
