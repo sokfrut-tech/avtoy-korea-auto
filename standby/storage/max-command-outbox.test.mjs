@@ -22,6 +22,9 @@ function fakeSql() {
       const [id,occurred,actor,action,target,metadata]=values;
       audit.set(id,{event_id:id,occurred_at:occurred,actor_id:actor,action,target_id:target,metadata}); return [];
     }
+    if (query.startsWith('SELECT event_digest FROM standby_max_command_replies WHERE event_digest =')) {
+      const row=replies.get(values[0]); return row ? [[{event_digest:row.event_digest}]] : [];
+    }
     if (query.startsWith('SELECT event_digest FROM standby_max_command_replies')) {
       const [now]=values;
       const rows=[...replies.values()].filter(row=>query.includes("status = 'queued'") ? row.status==='queued'&&row.next_attempt_at<=now : row.status==='sending'&&row.lock_until!==''&&row.lock_until<=now).map(row=>({event_digest:row.event_digest}));
@@ -64,6 +67,10 @@ test('MAX webhook receipt, command reply and audit are atomically idempotent',as
   assert.equal(fake.replies.get('a'.repeat(64)).reply_text,'Help without private data');
   assert.equal(fake.audit.get('audit-event-0001').action,'max.command.help');
   assert.equal(JSON.stringify(fake.replies.get('a'.repeat(64))).includes('phone'),false);
+  fake.receipts.delete('a'.repeat(64)); // simulate webhook-receipt retention
+  assert.deepEqual(await store.recordMaxWebhookEvent(event()),{duplicate:true});
+  assert.equal(fake.replies.size,1);
+  assert.equal(fake.audit.size,1);
 });
 
 test('outbox leases fence stale workers and successful delivery completes once',async()=>{
