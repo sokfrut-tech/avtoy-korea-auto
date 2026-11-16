@@ -63,12 +63,31 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     )`;
   }
 
+  async function ensureMaxCommandReplySchema() {
+    if (schemaManagedExternally) return true;
+    await sql`CREATE TABLE IF NOT EXISTS standby_max_command_replies (
+      event_digest Utf8 NOT NULL,
+      command_kind Utf8 NOT NULL,
+      actor_id Utf8 NOT NULL,
+      reply_text Utf8 NOT NULL,
+      status Utf8 NOT NULL,
+      created_at Utf8 NOT NULL,
+      next_attempt_at Utf8 NOT NULL,
+      lock_until Utf8 NOT NULL,
+      lease_token Utf8 NOT NULL,
+      attempts Uint32 NOT NULL,
+      last_error Utf8 NOT NULL,
+      PRIMARY KEY (event_digest)
+    )`;
+  }
+
   async function verifySchema() {
     // Read-only startup checks: the production app identity needs SELECT/WRITE,
     // not CREATE/DROP/ALTER privileges. The index probes also validate queue indexes.
     await sql`SELECT request_id FROM standby_enquiries LIMIT 1`;
     await sql`SELECT idempotency_digest FROM standby_idempotency LIMIT 1`;
     await sql`SELECT event_digest FROM standby_max_webhook_events LIMIT 1`;
+    await sql`SELECT event_digest FROM standby_max_command_replies LIMIT 1`;
     await sql`SELECT event_id FROM standby_operator_audit_events LIMIT 1`;
     await sql`SELECT key_digest FROM standby_operator_auth_rate_limits LIMIT 1`;
     await sql`SELECT request_id FROM standby_enquiries VIEW idx_due_queue WHERE status = 'queued' ORDER BY next_attempt_at LIMIT 1`;
@@ -80,14 +99,100 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     if (!event || !/^[a-f0-9]{64}$/.test(String(event.digest || ''))) throw new TypeError('A SHA-256 event digest is required');
     if (!['message_created','message_callback'].includes(event.eventType)) throw new TypeError('Unsupported MAX event type');
     const receivedAt = new Date(clock()).toISOString();
+    const reply = event.reply || null;
+    if (reply) {
+      if (!['help','status','invalid'].includes(reply.commandKind)) throw new TypeError('Unsupported MAX command kind');
+      if (!/^[0-9]{1,20}$/.test(String(reply.actorId || ''))) throw new TypeError('Invalid MAX command actor');
+      if (typeof reply.text !== 'string' || !reply.text.trim() || reply.text.length > 4000) throw new TypeError('Invalid MAX command reply text');
+    }
     return sql.begin({ isolation:'serializableReadWrite', idempotent:true }, async tx => {
       const existing = firstRow(await tx`SELECT event_digest FROM standby_max_webhook_events WHERE event_digest = ${event.digest}`);
       if (existing) return { duplicate:true };
       await tx`INSERT INTO standby_max_webhook_events
         (event_digest, event_type, event_timestamp, chat_id, message_id, sender_user_id, received_at)
         VALUES (${event.digest}, ${event.eventType}, ${event.eventTimestamp}, ${String(event.chatId)}, ${String(event.messageId || '')}, ${String(event.senderUserId || '')}, ${receivedAt})`;
-      return { duplicate:false };
+      if (reply) {
+        await tx`INSERT INTO standby_max_command_replies
+          (event_digest, command_kind, actor_id, reply_text, status, created_at, next_attempt_at, lock_until, lease_token, attempts, last_error)
+          VALUES (${event.digest}, ${reply.commandKind}, ${String(reply.actorId)}, ${reply.text.trim()}, 'queued', ${receivedAt}, ${receivedAt}, '', '', 0, '')`;
+      }
+      return { duplicate:false, queuedReply:Boolean(reply) };
     });
+  }
+
+  async function claimDueMaxCommandReplies({ now = clock(), limit = 20, leaseMs = 60_000 } = {}) {
+    const take = boundedLimit(limit);
+    if (take > 100) throw new TypeError('limit must not exceed 100');
+    if (!Number.isFinite(leaseMs) || leaseMs < 1000 || leaseMs > 15 * 60_000) throw new TypeError('leaseMs must be between 1 second and 15 minutes');
+    const nowIso = iso(now);
+    const due = await sql`SELECT event_digest FROM standby_max_command_replies
+      WHERE status = 'queued' AND next_attempt_at <= ${nowIso}
+      ORDER BY next_attempt_at LIMIT ${take}`;
+    const expired = await sql`SELECT event_digest FROM standby_max_command_replies
+      WHERE status = 'sending' AND lock_until <= ${nowIso}
+      ORDER BY lock_until LIMIT ${take}`;
+    const ids = [...new Set([...(due?.[0] || []).map(row=>row.event_digest), ...(expired?.[0] || []).map(row=>row.event_digest)])].slice(0,take);
+    const claimed = [];
+    for (const eventDigest of ids) {
+      const leaseToken = idFactory();
+      const leaseUntil = new Date(Number(new Date(nowIso)) + leaseMs).toISOString();
+      const row = await sql.begin({ isolation:'serializableReadWrite', idempotent:true }, async tx => {
+        const current = firstRow(await tx`SELECT * FROM standby_max_command_replies WHERE event_digest = ${eventDigest}`);
+        if (!current) return null;
+        const eligible = (current.status === 'queued' && current.next_attempt_at <= nowIso) ||
+          (current.status === 'sending' && current.lock_until !== '' && current.lock_until <= nowIso);
+        if (!eligible) return null;
+        await tx`UPDATE standby_max_command_replies SET status = 'sending', lock_until = ${leaseUntil}, lease_token = ${leaseToken}
+          WHERE event_digest = ${eventDigest}`;
+        return { eventDigest, commandKind:current.command_kind, actorId:current.actor_id, text:current.reply_text, attempts:Number(current.attempts || 0), leaseToken, lockUntil:leaseUntil };
+      });
+      if (row) claimed.push(row);
+    }
+    return claimed;
+  }
+
+  async function completeMaxCommandReply({ eventDigest, leaseToken, now = clock() } = {}) {
+    if (!/^[a-f0-9]{64}$/.test(String(eventDigest || '')) || !leaseToken) throw new TypeError('eventDigest and leaseToken are required');
+    const completedAt = iso(now);
+    return sql.begin({ isolation:'serializableReadWrite', idempotent:true }, async tx => {
+      const row = firstRow(await tx`SELECT status, lease_token FROM standby_max_command_replies WHERE event_digest = ${eventDigest}`);
+      if (!row || row.status !== 'sending' || row.lease_token !== leaseToken) return null;
+      await tx`UPDATE standby_max_command_replies SET status = 'sent', next_attempt_at = ${completedAt}, lock_until = '', lease_token = '', last_error = ''
+        WHERE event_digest = ${eventDigest}`;
+      return { eventDigest, status:'sent' };
+    });
+  }
+
+  async function failMaxCommandReply({ eventDigest, leaseToken, retryable = true, errorCode = 'max_network_error', now = clock(), retryBaseMs = 5000, retryMaxMs = 15 * 60_000, maxAttempts = 8 } = {}) {
+    if (!/^[a-f0-9]{64}$/.test(String(eventDigest || '')) || !leaseToken) throw new TypeError('eventDigest and leaseToken are required');
+    if (!/^[a-z][a-z0-9_]{2,48}$/.test(String(errorCode))) throw new TypeError('Invalid normalized MAX error code');
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 20) throw new TypeError('maxAttempts must be between 1 and 20');
+    const nowIso = iso(now);
+    return sql.begin({ isolation:'serializableReadWrite', idempotent:true }, async tx => {
+      const row = firstRow(await tx`SELECT status, lease_token, attempts FROM standby_max_command_replies WHERE event_digest = ${eventDigest}`);
+      if (!row || row.status !== 'sending' || row.lease_token !== leaseToken) return null;
+      const attempts = Number(row.attempts || 0) + 1;
+      const dead = !retryable || attempts >= maxAttempts;
+      const delay = Math.min(retryBaseMs * (2 ** Math.min(attempts - 1, 8)), retryMaxMs);
+      const next = dead ? nowIso : new Date(Number(new Date(nowIso)) + delay).toISOString();
+      await tx`UPDATE standby_max_command_replies SET status = ${dead ? 'dead' : 'queued'}, attempts = ${attempts},
+        next_attempt_at = ${next}, lock_until = '', lease_token = '', last_error = ${errorCode}
+        WHERE event_digest = ${eventDigest}`;
+      return { eventDigest, status:dead ? 'dead' : 'queued', attempts, nextAttemptAt:next, lastError:errorCode };
+    });
+  }
+
+  async function pruneMaxCommandReplies({ before, limit = 200 } = {}) {
+    const cutoffDate = new Date(before);
+    if (!before || !Number.isFinite(cutoffDate.getTime())) throw new TypeError('A valid MAX reply retention cutoff is required');
+    const cutoff = cutoffDate.toISOString();
+    if (!Number.isInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 500) throw new TypeError('limit must be between 1 and 500');
+    const take = Number(limit);
+    await sql`DELETE FROM standby_max_command_replies ON
+      SELECT event_digest FROM standby_max_command_replies
+      WHERE status = 'sent' AND created_at < ${cutoff}
+      ORDER BY created_at LIMIT ${take}`;
+    return { cutoff, limit:take };
   }
 
   async function createEnquiry(enquiry, idempotencyKey = null) {
@@ -309,5 +414,5 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     }));
   }
 
-  return Object.freeze({ ensureMaxWebhookSchema, ensureOperatorAuditSchema, verifySchema, recordMaxWebhookEvent, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, consumeOperatorAuthFailure, pruneOperatorAuthRateLimits, recordOperatorAuditEvent, listOperatorAuditEvents, pruneOperatorAuditEvents });
+  return Object.freeze({ ensureMaxWebhookSchema, ensureMaxCommandReplySchema, ensureOperatorAuditSchema, verifySchema, recordMaxWebhookEvent, claimDueMaxCommandReplies, completeMaxCommandReply, failMaxCommandReply, pruneMaxCommandReplies, createEnquiry, getEnquiry, claimEnquiry, claimDueEnquiries, listPrivateEnquiries, completeDelivery, pruneMaxWebhookEvents, consumeOperatorAuthFailure, pruneOperatorAuthRateLimits, recordOperatorAuditEvent, listOperatorAuditEvents, pruneOperatorAuditEvents });
 }
