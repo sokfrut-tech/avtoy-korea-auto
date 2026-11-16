@@ -382,3 +382,11 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Corrected the `pruneMaxWebhookEvents()` source comment to say this is a manual bounded maintenance operation and has no runtime scheduler. Commit: `cd603a58d7316d5cbd4e247f7ac2e58331bf8c54`.
 - Rechecked callback tests against the existing test fixture and handler: fixture accepts `maxEventStore`; callback uses top-level `message.recipient`; missing message and `chat_type: channel` are rejected before persistence. Existing valid callback test still covers allowlisting the clicking operator rather than the bot message sender. These are source inspections only, not executed tests.
 - No live YDB/MAX test, migration, merge or deployment. Hosted validation continues to fail before any steps are recorded.
+
+
+## CI retry and runner escalation — 2026-11-16
+- Retried failed validation job `133558712447` for PR #81 head `054514c5b4ea92a6c12c92863cb91ecc08e9cab9`; retry returned success as an API action, but the resulting runs `43941386340` (MAX validation) and `43941386200` (Factory Security Baseline) both completed with failure before any steps.
+- Jobs `133559498141`, `133559498341`, `133559499012` each returned `steps=[]`; log retrieval returned `BlobNotFound`. No Node syntax checks, Node tests, CodeQL, or secret scan ran.
+- Inspected `.github/workflows/max-command-outbox-validation.yml`: it uses `ubuntu-latest`, checkout v4, setup-node v4 / Node 22, then `node --check` and `node --test` over standby tests. Workflow definition itself looks structurally straightforward; hosted execution is the blocker.
+- Added PR #81 comment ID `6927078272` asking repository/org owner to check Actions hosted runner availability, quota/billing/usage limits, and service status. No changes to workflow permissions or production settings.
+- PR #81 remains draft; tests are not verified. Next: wait for runner availability or use an authorized local runner/CI environment; do not interpret the failure as code tests failing.
