@@ -360,3 +360,11 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - No retention period or replay horizon was approved. No automatic cleanup was added: choosing a period without owner approval risks deleting audit/replay evidence. Before automation, align receipt/outbox retention and consider durable deduplication tombstones. Never prune queued/dead command replies.
 - PR #81 stays draft; no merge, YDB migration, webhook activation, production deployment or customer traffic test. Focused local MAX adapter verification remains 8/8 only; full standby suite, server tests, YDB tests, security scans, callback live test and target-DB migration remain unverified.
 - Next: unblock a real runner or authorized local execution for the complete workflow command; independently inspect callback payload contract and add explicit tests for callback shape/authorization, then validate YDB migration in a non-production database.
+
+
+## MAX callback schema regression coverage (2026-11-16)
+
+- Rechecked the current official MAX Update schema. For `message_callback`, the actor is `callback.user.user_id`; the original `message` is nullable and, when present, contains the recipient (`chat_id`, `chat_type`). The callback event is delivered through Webhook. Source: https://dev.max.ru/docs-api/objects/Update/.
+- Added two server regression tests in commit `09fc97c06d21e6bcdcdb9cebd71dacbc5c0371ab`: (1) callback with `message: null` / no recipient context must return 403 and persist nothing; (2) allowlisted operator callback addressed to `chat_type: channel` must return 403 and persist nothing. This supplements the existing valid callback test and strict group-type checks.
+- The tests are authored but not executed. A commit-associated workflow run was not yet visible when checked. Do not report these tests as passing until a runner executes the full standby test command.
+- PR #81 remains open/draft. No live webhook or MAX group was contacted.
