@@ -66,6 +66,9 @@ export function assertDurableAdminRuntime({ operatorsConfigured = false, maxWebh
   if (missingEnquiryCapabilities.length) {
     throw new Error('Russian standby requires durable enquiry persistence and delivery queue capabilities: ' + missingEnquiryCapabilities.join(', '));
   }
+  if (maxWebhookConfigured && typeof requestStore.ensureMaxCommandReplySchema !== 'function') throw new Error('MAX webhook requires durable command reply outbox schema support');
+  const outboxCapabilities = ['claimDueMaxCommandReplies','completeMaxCommandReply','failMaxCommandReply'];
+  if (maxWebhookConfigured && outboxCapabilities.some(name => typeof requestStore[name] !== 'function')) throw new Error('MAX webhook requires a durable retryable command reply outbox');
   if (maxWebhookConfigured && typeof requestStore.recordMaxWebhookEvent !== 'function') {
     throw new Error('MAX webhook requires durable idempotent webhook receipt storage');
   }
@@ -201,6 +204,25 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
       reason:configured ? 'notification_delivery_failed' : 'notification_channels_not_configured'
     };
   }
+  async function retryMaxCommandReplies() {
+    if (!requestStore || typeof requestStore.claimDueMaxCommandReplies !== 'function') return [];
+    const claims = await requestStore.claimDueMaxCommandReplies({ now:clock(), limit:20, leaseMs:60_000 });
+    const results = [];
+    for (const claim of claims) {
+      let outcome;
+      try { outcome = await maxAdapter.sendOperatorMessage(claim.text); }
+      catch { outcome = { ok:false, retryable:true, reason:'max_network_error' }; }
+      if (outcome?.ok) {
+        const completed = await requestStore.completeMaxCommandReply({ eventDigest:claim.eventDigest, leaseToken:claim.leaseToken, now:clock() });
+        results.push({ eventDigest:claim.eventDigest, status:completed?.status || 'stale' });
+      } else {
+        const reason = ['max_rate_limited','max_server_error','max_network_error','max_request_rejected'].includes(outcome?.reason) ? outcome.reason : 'max_request_rejected';
+        const failed = await requestStore.failMaxCommandReply({ eventDigest:claim.eventDigest, leaseToken:claim.leaseToken, retryable:Boolean(outcome?.retryable), errorCode:reason, now:clock(), maxAttempts:8 });
+        results.push({ eventDigest:claim.eventDigest, status:failed?.status || 'stale' });
+      }
+    }
+    return results;
+  }
   async function receiveMaxWebhook(req, res) {
     if (!/^[A-Za-z0-9_-]{5,256}$/.test(String(env.MAX_WEBHOOK_SECRET || '')) || ! /^-?\d{1,20}$/.test(String(env.MAX_OPERATOR_CHAT_ID || ''))) return json(res,503,{ ok:false,error:'MAX webhook is not configured.' });
     const allowedOperatorIds = new Set(String(env.MAX_OPERATOR_USER_IDS || '').split(/[\s,]+/).filter(id => /^-?\d{1,20}$/.test(id)));
@@ -225,8 +247,6 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     if (!senderId || !allowedOperatorIds.has(senderId)) return json(res,403,{ ok:false,error:'Sender is not an authorized operator.' });
     const digest = createHash('sha256').update(JSON.stringify(update)).digest('hex');
     try {
-      const result = await maxEventStore.recordMaxWebhookEvent({ digest,eventType:type,eventTimestamp:timestamp,chatId:String(chatId),messageId:messageId || null,senderUserId:senderId || null });
-      if (result?.duplicate) return json(res,200,{ ok:true,duplicate:true });
       let command = null;
       let responseText = null;
       if (type === 'message_created') {
@@ -248,17 +268,18 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
           }
         }
       }
-      if (command && responseText) {
-        try {
-          if (typeof auditStore?.recordOperatorAuditEvent !== 'function') throw new Error('Audit store unavailable');
-          await auditOperatorAction({ id:senderId, role:'operator' }, `max.command.${command}`, 'request', command === 'status' ? String(messageId || 'status') : 'group', { reason:'max_group_command' });
-          const sent = await maxAdapter.sendOperatorMessage(responseText);
-          if (!sent.ok) return json(res,503,{ ok:false,error:'Could not send MAX command response.' });
-        } catch {
-          return json(res,503,{ ok:false,error:'MAX command could not be processed safely.' });
-        }
-      }
-      return json(res,200,{ ok:true,duplicate:false,command:command || 'ignored' });
+      const reply = command && responseText ? {
+        commandKind:command,
+        actorId:senderId,
+        text:responseText,
+        auditEvent:{ eventId:randomUUID(), targetId:command === 'status' ? String(messageId || 'status') : 'group' }
+      } : null;
+      const result = await maxEventStore.recordMaxWebhookEvent({
+        digest,eventType:type,eventTimestamp:timestamp,chatId:String(chatId),messageId:messageId || null,senderUserId:senderId || null,reply
+      });
+      if (result?.duplicate) return json(res,200,{ ok:true,duplicate:true });
+      if (reply) retryMaxCommandReplies().catch(() => {});
+      return json(res,200,{ ok:true,duplicate:false,command:command || 'ignored',queuedReply:Boolean(reply) });
     } catch {
       return json(res,503,{ ok:false,error:'Could not persist MAX event.' });
     }
@@ -451,6 +472,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
   }
   const handler = async (req,res) => { try { await handle(req,res); } catch { if (!res.headersSent) json(res,500,{ error:'Внутренняя ошибка резервного сайта.' }); else res.destroy(); } };
   handler.retryDue = retryDue;
+  handler.retryMaxCommandReplies = retryMaxCommandReplies;
   return handler;
 }
 function escapeHtml(value) { return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -484,7 +506,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       await driver.ready();
       requestStore = createYdbRequestStore({ sql:query(driver), schemaManagedExternally });
       if (schemaManagedExternally) await requestStore.verifySchema();
-      else await requestStore.ensureMaxWebhookSchema();
+      else { await requestStore.ensureMaxWebhookSchema(); await requestStore.ensureMaxCommandReplySchema(); }
       process.stdout.write('YDB request-oriented inbox v2 enabled\\n');
     } else if (process.env.YDB_CONNECTION_STRING) {
       const [{ Driver }, { query }, { MetadataCredentialsProvider }, { createYdbInboxStore }] = await Promise.all([
