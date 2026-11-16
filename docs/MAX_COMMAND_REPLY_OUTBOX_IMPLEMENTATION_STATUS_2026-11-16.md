@@ -59,3 +59,12 @@ PR #81 remains draft. PR #79 remains draft. PR #80 remains a documentation contr
 
 - Cross-checked the MAX sender against the current official MAX API reference: the documented host is `platform-api2.max.ru`; `POST /messages` accepts `chat_id` as a query parameter, uses `Authorization: <access_token>`, and supports message text up to 4000 characters. This confirms the adapter's host, endpoint, destination parameter and auth header; it does not replace a live bot/group integration test. Source: https://dev.max.ru/docs-api/methods/POST/messages
 - Latest validation run after the sanitizer test and status-doc update (`43928324080`) again completed as failure with no job steps and no logs. No test code ran.
+
+## Per-chat rate limiting and Retry-After (2026-11-16)
+
+- Official MAX `POST /messages` documentation states a maximum of two messages per second to one dialog/group/channel and explicitly recommends queueing or delaying sends when the limit is reached: https://dev.max.ru/docs-api/methods/POST/messages (checked 2026-11-16).
+- `standby/channels/max-adapter.mjs` now serializes every outbound message path (operator replies and notifications) through one per-adapter queue, with a configurable minimum 550 ms between request starts (safe margin below the 500 ms platform minimum). Concurrent calls cannot race past the limiter.
+- The adapter parses numeric or HTTP-date `Retry-After` on HTTP 429 and returns a bounded `retryAfterMs` without exposing response bodies or credentials.
+- `standby/server.mjs` passes the server-provided delay into the durable outbox retry schedule, with a 5-second minimum and 15-minute maximum delay. Normal exponential retry remains bounded.
+- Added adapter tests for concurrent mixed-path sends and Retry-After parsing, and dispatcher test asserting a 12-second Retry-After is persisted as the retry base.
+- Changes are authored but not yet executed by a functioning test runner. GitHub Actions has repeatedly failed before runner startup; do not report these tests as passing.
