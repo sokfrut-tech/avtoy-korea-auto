@@ -510,10 +510,14 @@ test('MAX webhook persists allowlisted operator-group event metadata before HTTP
   const stored = [];
   const maxEventStore = { async recordMaxWebhookEvent(event) { stored.push(event); return { duplicate:false }; } };
   const { base } = await fixture(t, { maxEventStore, env:{ MAX_WEBHOOK_SECRET:'test_secret-123', MAX_OPERATOR_CHAT_ID:'987654321', MAX_OPERATOR_USER_IDS:'12345' } });
-  const update = { update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'msg-001',text:'!status 12345678'}} };
+  const update = { update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'msg-001',text:'обычное сообщение без команды'}} };
   const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'test_secret-123'},body:JSON.stringify(update)});
   assert.equal(response.status,200);
-  assert.deepEqual(await response.json(),{ok:true,duplicate:false});
+  const body=await response.json();
+  assert.equal(body.ok,true);
+  assert.equal(body.duplicate,false);
+  assert.equal(body.command,'ignored');
+  assert.equal(body.queuedReply,false);
   assert.equal(stored.length,1);
   assert.equal(stored[0].eventType,'message_created');
   assert.equal(stored[0].chatId,'987654321');
