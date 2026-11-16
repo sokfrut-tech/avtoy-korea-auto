@@ -812,6 +812,7 @@ test('MAX !help command replies only to the configured operator group and audits
   assert.equal(stored.length,1);
   assert.equal(audited.length,1);
   assert.equal(audited[0].action,'max.command.help');
+  assert.deepEqual(audited[0].metadata,{reason:'max_group_command'});
   assert.equal(outbound.length,1);
   assert.equal(outbound[0].url,'https://platform-api2.max.ru/messages?chat_id=987654321');
   assert.match(outbound[0].body.text,/!status/);
@@ -835,6 +836,7 @@ test('MAX !status command returns only enquiry state and never customer contact 
   assert.equal(response.status,200);
   assert.equal((await response.json()).command,'status');
   assert.equal(audited[0].action,'max.command.status');
+  assert.deepEqual(audited[0].metadata,{reason:'max_group_command'});
   assert.match(outbound[0],/Заявка abcd1234: queued/);
   assert.doesNotMatch(outbound[0],/Секретное имя|999 123|Sportage/);
 });
