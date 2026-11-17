@@ -33,11 +33,8 @@ function fakeSql() {
     if (query.startsWith('SELECT * FROM standby_max_command_replies')) {
       const row=replies.get(values[0]); return row ? [[{...row}]] : [];
     }
-    if (query.startsWith('SELECT status, lease_token, attempts FROM standby_max_command_replies')) {
-      const row=replies.get(values[0]); return row ? [[{status:row.status,lease_token:row.lease_token,attempts:row.attempts}]] : [];
-    }
-    if (query.startsWith('SELECT status, lease_token FROM standby_max_command_replies')) {
-      const row=replies.get(values[0]); return row ? [[{status:row.status,lease_token:row.lease_token}]] : [];
+    if (query.startsWith('SELECT status, lease_token, attempts, actor_id, command_kind FROM standby_max_command_replies')) {
+      const row=replies.get(values[0]); return row ? [[{status:row.status,lease_token:row.lease_token,attempts:row.attempts,actor_id:row.actor_id,command_kind:row.command_kind}]] : [];
     }
     if (query.startsWith("UPDATE standby_max_command_replies SET status = 'sending'")) {
       const [until,token,digest]=values; const row=replies.get(digest); if(row) Object.assign(row,{status:'sending',lock_until:until,lease_token:token}); return [];
@@ -97,6 +94,7 @@ test('outbox leases fence stale workers and successful delivery completes once',
   assert.equal(await store.completeMaxCommandReply({eventDigest:first.eventDigest,leaseToken:'stale',now:1800000000100}),null);
   assert.equal((await store.completeMaxCommandReply({eventDigest:first.eventDigest,leaseToken:first.leaseToken,now:1800000000100})).status,'sent');
   assert.equal(fake.replies.get(first.eventDigest).status,'sent');
+  assert.equal([...fake.audit.values()].filter(row=>row.action==='max.command.delivery'&&row.outcome==='accepted').length,1);
   assert.equal(await store.claimDueMaxCommandReplies({now:1800000000200}),[]);
 });
 
@@ -138,6 +136,10 @@ test('failed delivery is rescheduled with bounded retry and eventually dead-lett
   const [second]=await store.claimDueMaxCommandReplies({now:1800000005000});
   const dead=await store.failMaxCommandReply({eventDigest:second.eventDigest,leaseToken:second.leaseToken,errorCode:'max_network_error',retryable:true,now:1800000005000,retryBaseMs:5000,maxAttempts:2});
   assert.equal(dead.status,'dead'); assert.equal(fake.replies.get(first.eventDigest).last_error,'max_network_error');
+  const deliveryAudit=[...fake.audit.values()].filter(row=>row.action==='max.command.delivery');
+  assert.equal(deliveryAudit.length,2);
+  assert.deepEqual(deliveryAudit.map(row=>row.outcome).sort(),['failed','failed']);
+  assert.equal(deliveryAudit.some(row=>row.metadata.includes('max_network_error')),true);
 });
 
 test('outbox accepts a six-hour MAX Retry-After within the documented bound',async()=>{
