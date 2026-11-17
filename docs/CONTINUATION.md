@@ -433,3 +433,11 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Test commit: `8c12d8ac1f03f488b60321d2bdb5df9bab45781a`.
 - This is a deterministic fake-SQL state-machine test. It does not prove YDB transaction isolation or concurrent transaction behavior; a real YDB integration/concurrency test remains required before merge/deploy.
 - No production resources, database, migration, or MAX API were touched.
+
+
+## Concurrent MAX outbox claimant regression — 2026-11-17
+- Added a deterministic concurrent-claim regression. The fake SQL transaction boundary now serializes `begin()` callbacks, and two workers race to claim the same due row; the assertion requires exactly one lease owner.
+- Test commit: `8cfb379749b9e1dbdc7db8f5194a7641d34583f0`.
+- Scope limitation: this validates application-level re-checking after the candidate scan under serialized transactions, but the fake is not YDB and does not prove YDB serializable-read-write conflict/retry behavior or cross-process concurrency. Those still require an integration test against the target YDB engine/version.
+- Static audit of MAX command audit rows: sender ID is retained as actor_id, actor_role is explicitly `operator`, command/action and target are allowlisted (`help`, `status`, `invalid`; status target is request UUID). MAX allowlist currently grants only these low-impact group commands, not panel permissions; panel role tokens remain separately authenticated. No role escalation path was identified in these paths.
+- No production database, MAX endpoint, migration, or deployment was touched.
