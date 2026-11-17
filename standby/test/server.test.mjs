@@ -608,6 +608,24 @@ test('operator panel keeps admin token in memory and provides phone contact acti
 });
 
 
+test('MAX webhook does not persist commands when outbound bot credentials are missing', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{
+    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},
+    maxEventStore:{async recordMaxWebhookEvent(){writes++;return {duplicate:false};}}
+  });
+  const response=await fetch(base+'/api/max/webhook',{
+    method:'POST',
+    headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},
+    body:JSON.stringify({
+      update_type:'message_created',timestamp:1794740000000,
+      message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'help-no-outbound',text:'!help'}}
+    })
+  });
+  assert.equal(response.status,503);
+  assert.equal(writes,0);
+});
+
 test('MAX webhook rejects a non-allowlisted group member', async t => {
   let writes=0;
   const {base}=await fixture(t,{env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},maxEventStore:{async recordMaxWebhookEvent(){writes++;}}});
