@@ -23,22 +23,22 @@ set /p GV_INPUT="Ссылка на GitVerse [Enter = %GV_URL%]: "
 if not "%GV_INPUT%"=="" set "GV_URL=%GV_INPUT%"
 
 echo.
-echo [2/3] Готовим чистую витрину без секретов...
+echo [2/3] Готовим чистую витрину без секретов (партиями до 18 МБ для защиты от HTTP 413)...
 set "GIT_EXE=C:\Program Files\Git\cmd\git.exe"
 if not exist "%GIT_EXE%" set "GIT_EXE=git"
 
 pushd standby\public
 if not exist ".git" (
   "%GIT_EXE%" init -b main
+  "%GIT_EXE%" config user.name "AVTOY KOREA"
+  "%GIT_EXE%" config user.email "noreply@avtoykorea.local"
 )
 "%GIT_EXE%" remote remove origin 2>nul
 "%GIT_EXE%" remote add origin "%GV_URL%"
-"%GIT_EXE%" add -A
-"%GIT_EXE%" commit -m "chore: update AVTOY KOREA Russian mirror catalogue" 2>nul
 
 echo.
 echo [3/3] Отправляем витрину на российский сервер GitVerse...
-"%GIT_EXE%" push -u origin main --force
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $pub=(Get-Location).Path; $git='%GIT_EXE%'; $files=& $git status --porcelain -u | ForEach-Object { $_.Substring(3).Trim('\"') } | Where-Object { Test-Path $_ } | Sort-Object { (Get-Item $_).Length }; if (-not $files) { & $git push -u origin main; exit $LASTEXITCODE }; $max=18*1024*1024; $batches=@(); $cur=New-Object System.Collections.Generic.List[string]; $bytes=0L; foreach($f in $files){ $len=(Get-Item $f).Length; if($cur.Count -gt 0 -and ($bytes+$len) -gt $max){ $batches+=,($cur.ToArray()); $cur=New-Object System.Collections.Generic.List[string]; $bytes=0L }; $cur.Add($f); $bytes+=$len }; if($cur.Count -gt 0){ $batches+=,($cur.ToArray()) }; for($i=0;$i -lt $batches.Count;$i++){ & $git add -- $batches[$i]; & $git commit -q -m ('chore: publish showcase batch '+($i+1)+'/'+$batches.Count); & $git push -u origin main; if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE } }"
 popd
 
 echo.
