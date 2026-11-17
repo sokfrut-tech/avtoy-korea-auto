@@ -400,3 +400,10 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Updated the dispatcher regression test to use `Retry-After: 3600` and assert a one-hour initial delay plus six-hour maximum. Commit: `d00b2f1565e913437e040a48bf2a5399ccb88ed5`.
 - The new dispatcher regression test and full storage/server test suites have not yet been executed locally. No live MAX request, YDB migration/parser, target database, CodeQL, or secret scan was run. Production unchanged; PR remains draft.
 - Next: obtain and execute the full standby test set in the isolated local runtime, then continue server/webhook/YDB audit and update this file with concrete evidence.
+
+
+## MAX webhook outbound-credential guard — 2026-11-17
+- Further server-flow audit found a second real defect: an authorized `!help`/`!status` command could be durably accepted and queued even when `MAX_BOT_TOKEN` was absent. The dispatcher would then receive `max_not_configured` (non-retryable) and dead-letter the reply, although the webhook had already returned HTTP 200.
+- Fixed `standby/server.mjs`: if a recognized command needs a reply but the configured MAX adapter is not ready, return HTTP 503 before persisting the webhook event. This allows provider retry after outbound credentials are corrected and avoids accepting an undeliverable command. Commit `4536581870377305307017d1d9c5a379ba668630`.
+- Added regression test asserting HTTP 503 and zero event-store writes when `MAX_BOT_TOKEN` is missing. Commit `836fcbaf7ba69858f2acb7970541c3bac4a04e85`.
+- This server integration regression test has not yet been executed locally; the previously reported 14/14 local tests cover only MAX adapter and operator-auth modules. No live MAX webhook/provider retry has been tested.
