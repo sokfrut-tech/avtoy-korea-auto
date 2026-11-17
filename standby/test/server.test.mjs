@@ -934,6 +934,29 @@ test('MAX callback fails closed when the original message and recipient context 
   assert.equal(writes,0);
 });
 
+test('MAX webhook ignores non-canonical chat-id and callback recipient fallbacks', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{
+    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},
+    maxEventStore:{async recordMaxWebhookEvent(){writes++;}}
+  });
+  const headers={'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'};
+  const fallbackOnly={
+    update_type:'message_callback',timestamp:1794740000000,chat_id:987654321,
+    callback:{user:{user_id:12345},message:{recipient:{chat_id:987654321,chat_type:'chat'}}},
+    message:null
+  };
+  const conflicting={
+    update_type:'message_created',timestamp:1794740000001,chat_id:987654321,
+    message:{sender:{user_id:12345},recipient:{chat_id:111111111,chat_type:'chat'},body:{mid:'conflicting-chat'}}
+  };
+  const first=await fetch(base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify(fallbackOnly)});
+  const second=await fetch(base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify(conflicting)});
+  assert.equal(first.status,403);
+  assert.equal(second.status,403);
+  assert.equal(writes,0);
+});
+
 test('MAX callback rejects a channel recipient even when the clicking operator is allowlisted', async t => {
   let writes=0;
   const {base}=await fixture(t,{
