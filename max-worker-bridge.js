@@ -133,17 +133,19 @@ const MAX_ADMIN_HELP = [
   "🤖 Управление AVTOY KOREA в MAX",
   "",
   "Команды администратора:",
+  "• /adminlink — войти в веб-панель управления сайтом в 1 клик",
   "• /site (или !site) — список опубликованных авто и отзывов",
   "• /orders (или !orders) — последние заявки клиентов (контакты видны только в личке)",
   "• !status <номер_или_id> — проверить статус заявки",
-  "• !unpublish <id> — снять авто или отзыв с сайта (например: !unpublish car_1002326996766_3482)",
+  "• !unpublish <id> — снять авто или отзыв с сайта",
+  "• /clean — очистить дубли фото и старые хвосты контактов в каталоге",
   "• /replymax <user_id> <текст> — ответить клиенту в MAX",
   "• /myid — показать ваш MAX User ID",
   "• /help (или !help) — эта справка"
 ].join("\n");
 
 export async function handleMaxBotWebhook(request, env, helpers = {}) {
-  const { callTelegram, telegramAdminIds = [], unpublishById, fetchImpl = fetch } = helpers;
+  const { callTelegram, telegramAdminIds = [], unpublishById, issueAdminMagicLink, cleanupCatalog, fetchImpl = fetch } = helpers;
   const expectedSecret = String(env.MAX_WEBHOOK_SECRET || "").trim();
   const suppliedSecret = request.headers.get("x-max-bot-api-secret") || "";
   if (!expectedSecret || !safeSecretEqual(suppliedSecret, expectedSecret)) {
@@ -253,6 +255,20 @@ export async function handleMaxBotWebhook(request, env, helpers = {}) {
     if (/^[!/](help|admin|start)$/i.test(text)) {
       await replyToDialog(MAX_ADMIN_HELP);
       return Response.json({ ok: true, command: "help" });
+    }
+
+    if (/^[!/]adminlink$/i.test(text) && typeof issueAdminMagicLink === "function") {
+      const linkInfo = await issueAdminMagicLink();
+      await replyToDialog(
+        `🔐 Вход в Центр управления AVTOY KOREA:\n${linkInfo.magicUrl}\n\nКод для ручного ввода: ${linkInfo.code}\n(действует 5 минут, одноразовый)`
+      );
+      return Response.json({ ok: true, command: "adminlink" });
+    }
+
+    if (/^[!/]clean$/i.test(text) && typeof cleanupCatalog === "function") {
+      const res = await cleanupCatalog();
+      await replyToDialog(`✨ Автоочистка выполнена!\nОбновлено карточек авто: ${res.cleanedCars}\nСнято битых записей: ${res.removedBroken}`);
+      return Response.json({ ok: true, command: "clean" });
     }
 
     if (/^[!/]site$/i.test(text) && env.REVIEWS) {

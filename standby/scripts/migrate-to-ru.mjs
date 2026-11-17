@@ -8,6 +8,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createS3MediaStore } from '../storage/s3-media-store.mjs';
+import { cleanCarDisplayCaption, deduplicateMediaItems } from '../../catalog-formatter.js';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const STANDBY_DIR = path.resolve(SCRIPT_DIR, '..');
@@ -106,8 +107,8 @@ async function extractFrontendHtmlFromWorker({ maxBotUrl = process.env.MAX_BOT_U
     : '';
   html = html.replace(/\$\{env\.MAX_BOT_URL[\s\S]*?\}\s*(?=\r?\n\s*<a class="pill")/, safeMaxBtn);
 
-  // Unescape template literal double-backslashes from worker.js (e.g. /\\.(mp4|...)/ -> /\.(mp4|...)/)
-  html = html.replace(/\\\\\./g, '\\.');
+  // Unescape template literal double-backslashes from worker.js (e.g. \\s -> \s, \\d -> \d, \\. -> \.)
+  html = html.replace(/\\\\([bdswBDSW.nrt+?*()[\]{}|^$])/g, '\\$1');
 
   // Localize logo and hero slides so zero foreign image CDNs are queried by Russian visitors
   html = html.replace('src="/assets/logo.jpg"', 'src="./assets/logo.jpg"');
@@ -258,14 +259,15 @@ export async function runMigration() {
     const rawItems = Array.isArray(car.mediaItems) && car.mediaItems.length
       ? car.mediaItems
       : (car.media ? [{ url: car.media, type: car.mediaType || 'photo' }] : []);
-    const mediaItems = await mirrorMediaList(car.id, 'car', rawItems);
+    const rawMediaItems = await mirrorMediaList(car.id, 'car', rawItems);
+    const mediaItems = deduplicateMediaItems(rawMediaItems);
     if (!mediaItems.length) {
       skippedCars.push({ id: car.id, caption: String(car.caption || '').slice(0, 80), reason: 'all_media_unavailable_404' });
       continue;
     }
     migratedCars.push({
       id: car.id,
-      caption: car.caption || '',
+      caption: cleanCarDisplayCaption(car.caption || ''),
       media: mediaItems[0].url,
       mediaItems,
       mediaOrderKnown: Boolean(car.mediaOrderKnown),
@@ -325,7 +327,34 @@ export async function runMigration() {
   return report;
 }
 
+export async function rebuildLocalBundle() {
+  const snapPath = path.join(DATA_DIR, 'public-snapshot.json');
+  const snap = JSON.parse(await fs.readFile(snapPath, 'utf8'));
+  const updatedAt = new Date().toISOString();
+  snap.updatedAt = updatedAt;
+  snap.cars = (snap.cars || []).map(car => {
+    const mediaItems = deduplicateMediaItems(car.mediaItems || []);
+    return {
+      ...car,
+      caption: cleanCarDisplayCaption(car.caption || ''),
+      media: mediaItems[0]?.url || car.media,
+      mediaItems
+    };
+  });
+  await writeAndVerifyFile(snapPath, Buffer.from(JSON.stringify(snap, null, 2) + '\n'));
+  await writeAndVerifyFile(path.join(API_STATIC_DIR, 'cars.json'), Buffer.from(JSON.stringify({ cars: snap.cars, updatedAt }) + '\n'));
+  await writeAndVerifyFile(path.join(API_STATIC_DIR, 'reviews.json'), Buffer.from(JSON.stringify({ reviews: snap.reviews || [], updatedAt }) + '\n'));
+  const indexHtml = await extractFrontendHtmlFromWorker({});
+  await writeAndVerifyFile(path.join(PUBLIC_DIR, 'index.html'), Buffer.from(indexHtml, 'utf8'));
+  return { cars: snap.cars.length, reviews: (snap.reviews || []).length };
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv.includes('--fast-rebuild')) {
+    rebuildLocalBundle()
+      .then(r => console.log(`Локальная витрина пересобрана: авто ${r.cars}, отзывов ${r.reviews}`))
+      .catch(err => { console.error(err); process.exitCode = 1; });
+  } else {
   runMigration()
     .then(report => {
       console.log('=== МИГРАЦИЯ КАТАЛОГА AVTOY KOREA УСПЕШНО ЗАВЕРШЕНА ===');
@@ -341,4 +370,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       console.error('Ошибка миграции:', err);
       process.exitCode = 1;
     });
+  }
 }

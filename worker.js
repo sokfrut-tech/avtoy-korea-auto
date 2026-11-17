@@ -1,5 +1,7 @@
 import { mergeOrderedMediaItems, orderedMediaFromRecord } from "./media-order.js";
 import { MAX_TELEGRAM_BOT_VIDEO_BYTES, deliverOrderToMax, handleMaxBotWebhook, resolveMirrorCorsHeaders } from "./max-worker-bridge.js";
+import { cleanCarDisplayCaption } from "./catalog-formatter.js";
+import { ADMIN_PRO_CSP, ADMIN_PRO_HTML, enrichAdminItem, runAdminCatalogCleanup, sendOrEditTelegramPanel } from "./admin-suite.js";
 
 async function beginModerationEdit(callback, env, type, id, answer) {
  const adminId = String((callback.from && callback.from.id) || "");
@@ -157,9 +159,9 @@ const ADMIN_HELP_TEXT = [
 async function sendAdminHelp(env, chatId) {
  await callTelegram(env, "sendMessage", {
   chat_id: chatId,
-  text: ADMIN_HELP_TEXT,
+  text: ADMIN_HELP_TEXT + "\n\n🎛 Новое: /panel — компактный Центр управления в одном сообщении (без спама в чате).",
   reply_markup: { inline_keyboard: [
-  [{ text: "🌐 Что на сайте", callback_data: "admincmd:site" }],
+  [{ text: "🎛 Панель управления", callback_data: "panel:home" }, { text: "🌐 Что на сайте", callback_data: "admincmd:site" }],
   [{ text: "🔐 Открыть панель сайта", url: "https://avtoy-korea-auto.sokfrut.workers.dev/admin" }]
  ] }
  });
@@ -168,11 +170,11 @@ async function sendAdminHelp(env, chatId) {
 async function setAdminCommands(env, adminId) {
  await callTelegram(env, "setMyCommands", {
   commands: [
-   { command: "admin", description: "Меню администратора" },
-   { command: "adminlink", description: "Одноразовый вход в панель сайта" },
-   { command: "site", description: "Что опубликовано на сайте" },
+   { command: "panel", description: "Центр управления (авто, отзывы, заявки)" },
+   { command: "adminlink", description: "Вход в веб-панель в 1 клик" },
+   { command: "admin", description: "Меню и подсказка администратора" },
+   { command: "site", description: "Полный список карточек с фото" },
    { command: "log", description: "Журнал действий администраторов" },
-   { command: "help", description: "Подсказка администратора" },
    { command: "reply", description: "Ответить клиенту: /reply <chat_id> текст" }
   ],
   scope: { type: "chat", chat_id: Number(adminId) }
@@ -396,12 +398,14 @@ const THANKS_PATTERN = /спасибо|благодар/i;
 // Убираем рекламный хвост канала из описаний, оставляя полезный текст публикации.
 // На сайте в описании машины не показываем контакты продавца: строки с именем и связью по контакту.
 function publicCarCaption(value) {
- return cleanPublicationText(value)
-  .split("\n")
-  .filter(line => !/^\s*(?:📲|📞|☎️?|👤|✉️?)?\s*(?:контакт|продавец|менеджер|связ|звон|позвон|тел\b|телефон|whats?app|viber|telegram|телеграм|написать|писать)/i.test(line))
-  .join("\n")
-  .replace(/\n{3,}/g, "\n\n")
-  .trim();
+ return cleanCarDisplayCaption(
+  cleanPublicationText(value)
+   .split("\n")
+   .filter(line => !/^\s*(?:📲|📞|☎️?|👤|✉️?)?\s*(?:контакт|продавец|менеджер|связ|звон|позвон|тел\b|телефон|whats?app|viber|telegram|телеграм|написать|писать)/i.test(line))
+   .join("\n")
+   .replace(/\n{3,}/g, "\n\n")
+   .trim()
+ );
 }
 
 function cleanPublicationText(value) {
@@ -713,8 +717,8 @@ async function handleAdminMediaUpload(msg, env, adminIds) {
  }
  if (!state.cardSent) {
   const review = state.review;
-  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}]]};
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nМедиа загружено вами в личный чат с ботом. Проверьте и выберите действие.",reply_markup:keyboard});
+  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}],[{text:"🚘 Опубликовать как АВТОМОБИЛЬ",callback_data:"pubascar:" + id}]]};
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nМедиа загружено вами в личный чат с ботом. Можно опубликовать как отзыв или сразу как автомобиль в каталог.",reply_markup:keyboard});
   state.cardSent = true;
   await env.REVIEWS.put(uploadKey,JSON.stringify(state),{expirationTtl:2592000});
  }
@@ -1652,10 +1656,7 @@ async function getWebAdminSession(request, env, adminIds) {
  return { ...session, tokenHash };
 }
 
-async function sendAdminLoginCode(env, adminId) {
- if (!env.REVIEWS) {
-  return callTelegram(env, "sendMessage", { chat_id: adminId, text: "Хранилище REVIEWS не настроено. Вход в панель сайта недоступен." });
- }
+async function issueAdminLoginCodeFor(env, adminId) {
  const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 100000000).padStart(8, "0");
  const codeHash = await sha256Hex(code);
  const currentKey = "admin_login_current:" + adminId;
@@ -1663,9 +1664,23 @@ async function sendAdminLoginCode(env, adminId) {
  if (oldHash) await env.REVIEWS.delete("admin_login:" + oldHash);
  await env.REVIEWS.put("admin_login:" + codeHash, JSON.stringify({ adminId: String(adminId) }), { expirationTtl: 300 });
  await env.REVIEWS.put(currentKey, codeHash, { expirationTtl: 300 });
+ return {
+  code,
+  magicUrl: "https://avtoy-korea-auto.sokfrut.workers.dev/admin#code=" + code
+ };
+}
+
+async function sendAdminLoginCode(env, adminId) {
+ if (!env.REVIEWS) {
+  return callTelegram(env, "sendMessage", { chat_id: adminId, text: "Хранилище REVIEWS не настроено. Вход в панель сайта недоступен." });
+ }
+ const { code, magicUrl } = await issueAdminLoginCodeFor(env, adminId);
  return callTelegram(env, "sendMessage", {
   chat_id: adminId,
-  text: "🔐 ДОСТУП К ПАНЕЛИ AVTOY KOREA\n\nОткройте сайт: https://avtoy-korea-auto.sokfrut.workers.dev/admin\n\nКод входа: " + code + "\n\nКод одноразовый, действует 5 минут. Не пересылайте его другим людям."
+  text: "🔐 ДОСТУП К ПАНЕЛИ AVTOY KOREA\n\nОткройте сайт: https://avtoy-korea-auto.sokfrut.workers.dev/admin\n\nКод входа: " + code + "\n\nКод одноразовый, действует 5 минут. Не пересылайте его другим людям.",
+  reply_markup: {
+   inline_keyboard: [[{ text: "🔐 Войти в Центр управления в 1 клик", url: magicUrl }]]
+  }
  });
 }
 
@@ -1733,7 +1748,7 @@ async function handleWebAdminApi(request, url, env, adminIds) {
  const session = await getWebAdminSession(request, env, adminIds);
  if (!session) return json({ error: "Unauthorized" }, 401);
 
- if (path === "/api/admin/items" && request.method === "GET") {
+ if ((path === "/api/admin/items" || path === "/api/admin/dashboard") && request.method === "GET") {
   const items = [];
   for (const [prefix, isCar] of [["car_approved:", true], ["approved:", false]]) {
    let cursor;
@@ -1745,23 +1760,107 @@ async function handleWebAdminApi(request, url, env, adminIds) {
      let record;
      try { record = JSON.parse(raw); } catch { continue; }
      const id = key.name.slice(prefix.length);
-     const photos = Array.isArray(record.photos) ? record.photos.length : (record.fileId ? 1 : 0);
-     const videos = Array.isArray(record.videos) ? record.videos.length : 0;
-     items.push({
-      id,
-      kind: isCar ? "car" : "review",
-      label: siteLabel(id, record),
-      text: String(isCar ? record.caption || "" : record.text || ""),
-      mediaCount: photos + videos,
-      publishedAt: record.publishedAt || ""
-     });
+     items.push(enrichAdminItem(id, record, isCar, siteLabel));
      if (items.length >= 100) break;
     }
     cursor = items.length >= 100 || page.list_complete ? null : page.cursor;
    } while (cursor);
   }
   items.sort((a, b) => String(b.publishedAt).localeCompare(String(a.publishedAt)));
-  return json({ items });
+  if (path === "/api/admin/items") return json({ items });
+
+  const pending = [];
+  for (const [prefix, isCar] of [["car_pending:", true], ["pending:", false]]) {
+   const page = await env.REVIEWS.list({ prefix });
+   for (const key of page.keys.slice(0, 50)) {
+    const raw = await env.REVIEWS.get(key.name);
+    if (!raw) continue;
+    try {
+     const record = JSON.parse(raw);
+     const id = key.name.slice(prefix.length);
+     pending.push({
+      id,
+      kind: isCar ? "car" : "review",
+      cleanTitle: siteLabel(id, record),
+      label: siteLabel(id, record),
+      text: String(isCar ? record.caption || "" : record.text || ""),
+      mediaCount: (Array.isArray(record.photos) ? record.photos.length : 0) + (Array.isArray(record.videos) ? record.videos.length : 0),
+      mediaItems: [],
+      publishedAt: record.createdAt || ""
+     });
+    } catch {}
+   }
+  }
+
+  const orders = [];
+  const ordPage = await env.REVIEWS.list({ prefix: "order:" });
+  for (const key of ordPage.keys.slice(0, 100)) {
+   const raw = await env.REVIEWS.get(key.name);
+   if (!raw) continue;
+   try { orders.push(JSON.parse(raw)); } catch {}
+  }
+  orders.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  return json({ items, pending, orders });
+ }
+
+ if (path === "/api/admin/cleanup" && request.method === "POST") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  const res = await runAdminCatalogCleanup(env, session.adminId, writeLog);
+  return json({ ok: true, ...res });
+ }
+
+ const pendingPubMatch = path.match(/^\/api\/admin\/pending\/(car_-?\d+_\d+|-?\d+_\d+)\/publish$/);
+ if (pendingPubMatch && request.method === "POST") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  const id = pendingPubMatch[1];
+  let body = {};
+  try { body = await request.json(); } catch {}
+  const isCar = id.startsWith("car_") || body.kind === "car";
+  const pendKey = (id.startsWith("car_") ? "car_pending:" : "pending:") + id;
+  const raw = await env.REVIEWS.get(pendKey);
+  if (!raw) return json({ error: "Pending item not found" }, 404);
+  const rec = JSON.parse(raw);
+  const customText = typeof body.text === "string" ? cleanPublicationText(body.text) : null;
+  if (isCar) {
+   const carId = id.startsWith("car_") ? id : "car_" + id.replace(/-/g, "");
+   if (customText !== null) rec.caption = cleanCarDisplayCaption(customText).slice(0, 3000);
+   rec.id = carId;
+   rec.publishedAt = new Date().toISOString();
+   await env.REVIEWS.put("car_approved:" + carId, JSON.stringify(rec));
+  } else {
+   if (customText !== null) rec.text = customText.slice(0, 1000);
+   rec.publishedAt = new Date().toISOString();
+   await env.REVIEWS.put("approved:" + id, JSON.stringify(rec));
+  }
+  await env.REVIEWS.delete(pendKey);
+  await writeLog(env, session.adminId, "опубликован через веб-панель", isCar ? "машина" : "отзыв", id, "");
+  return json({ ok: true });
+ }
+
+ const pendingDelMatch = path.match(/^\/api\/admin\/pending\/(car_-?\d+_\d+|-?\d+_\d+)$/);
+ if (pendingDelMatch && request.method === "DELETE") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  const id = pendingDelMatch[1];
+  await env.REVIEWS.delete((id.startsWith("car_") ? "car_pending:" : "pending:") + id);
+  return json({ ok: true });
+ }
+
+ const orderPatchMatch = path.match(/^\/api\/admin\/orders\/([A-Za-z0-9_-]{6,64})$/);
+ if (orderPatchMatch && request.method === "PATCH") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  let body = {};
+  try { body = await request.json(); } catch {}
+  const status = String(body.status || "");
+  if (!["new", "in_work", "done"].includes(status)) return json({ error: "Invalid status" }, 400);
+  const id = orderPatchMatch[1];
+  const raw = await env.REVIEWS.get("order:" + id);
+  if (!raw) return json({ error: "Order not found" }, 404);
+  const ord = JSON.parse(raw);
+  ord.status = status;
+  ord.updatedAt = new Date().toISOString();
+  await env.REVIEWS.put("order:" + id, JSON.stringify(ord));
+  if (ord.number) await env.REVIEWS.put("order_no:" + ord.number, JSON.stringify(ord));
+  return json({ ok: true });
  }
 
  const itemMatch = path.match(/^\/api\/admin\/items\/(car_-?\d+_\d+|-?\d+_\d+)$/);
@@ -1775,19 +1874,48 @@ async function handleWebAdminApi(request, url, env, adminIds) {
   const raw = await env.REVIEWS.get(key);
   if (!raw) return json({ error: "Publication not found" }, 404);
   const record = JSON.parse(raw);
-  const currentText = String(isCar ? record.caption || "" : record.text || "");
-  const instruction = String(body && body.instruction || "").trim();
-  if (!instruction) return json({ error: "Text is required" }, 400);
-  const edit = applyModerationTextEdit(currentText, instruction);
-  if (edit.error) return json({ error: edit.error }, 422);
-  const edited = cleanPublicationText(edit.text);
-  if (!edited) return json({ error: "Publication text cannot be empty" }, 422);
+
+  if (isCar && Number.isInteger(body?.setCoverPhotoIndex) && Array.isArray(record.photos)) {
+   const idx = body.setCoverPhotoIndex;
+   if (idx >= 0 && idx < record.photos.length) {
+    const [picked] = record.photos.splice(idx, 1);
+    record.photos.unshift(picked);
+    record.mediaOrderKnown = false;
+    record.editedAt = new Date().toISOString();
+    await env.REVIEWS.put(key, JSON.stringify(record));
+    return json({ ok: true });
+   }
+  }
+
+  if (isCar && Number.isInteger(body?.deletePhotoIndex) && Array.isArray(record.photos)) {
+   const idx = body.deletePhotoIndex;
+   if (idx >= 0 && idx < record.photos.length && record.photos.length > 1) {
+    removePhotosAt(record, [idx + 1]);
+    record.editedAt = new Date().toISOString();
+    await env.REVIEWS.put(key, JSON.stringify(record));
+    return json({ ok: true });
+   }
+  }
+
+  let edited;
+  if (typeof body?.directText === "string") {
+   edited = isCar ? cleanCarDisplayCaption(cleanPublicationText(body.directText)) : cleanPublicationText(body.directText);
+  } else {
+   const currentText = String(isCar ? record.caption || "" : record.text || "");
+   const instruction = String(body && body.instruction || "").trim();
+   if (!instruction) return json({ error: "Text is required" }, 400);
+   const edit = applyModerationTextEdit(currentText, instruction);
+   if (edit.error) return json({ error: edit.error }, 422);
+   edited = cleanPublicationText(edit.text);
+   if (!edited) return json({ error: "Publication text cannot be empty" }, 422);
+  }
+
   if (isCar) {
    record.originalCaption = record.originalCaption === undefined ? record.caption : record.originalCaption;
-   record.caption = edited.slice(0, 3000);
+   record.caption = String(edited || "").slice(0, 3000);
   } else {
    record.originalText = record.originalText === undefined ? record.text : record.originalText;
-   record.text = edited.slice(0, 1000);
+   record.text = String(edited || "").slice(0, 1000);
    record.hasThanks = THANKS_PATTERN.test(record.text);
   }
   record.editedAt = new Date().toISOString();
@@ -1808,7 +1936,7 @@ async function handleWebAdminApi(request, url, env, adminIds) {
  return json({ error: "Not found" }, 404);
 }
 
-const ADMIN_PAGE_HTML = "<!doctype html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<meta name=\"robots\" content=\"noindex,nofollow\">\n<title>AVTOY KOREA — управление сайтом</title>\n<style>\n:root{color-scheme:dark;--bg:#0b1018;--panel:#151d29;--line:#2a3545;--text:#f3f6fb;--muted:#9eacbd;--accent:#f04c36;--ok:#6ed5a0}\n*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#1d2a3b 0,transparent 38%),var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}\nmain{width:min(980px,calc(100% - 28px));margin:0 auto;padding:28px 0 60px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:26px}h1{font-size:clamp(23px,4vw,34px);line-height:1.12;margin:0}header p,.muted{color:var(--muted);margin:7px 0 0}.panel,.item{background:linear-gradient(145deg,#192433,#121a25);border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:0 18px 45px #0003}\n#login{max-width:460px;margin:8vh auto 0}label{display:block;color:#d7e0ec;font-weight:650;margin:14px 0 7px}input,textarea{width:100%;border:1px solid #354256;background:#0d1520;color:var(--text);border-radius:12px;padding:12px 13px;font:inherit}textarea{min-height:150px;resize:vertical}input:focus,textarea:focus{outline:2px solid #f04c3680;border-color:var(--accent)}\nbutton{border:0;border-radius:12px;padding:11px 15px;font:700 14px system-ui;cursor:pointer;background:var(--accent);color:white;min-height:42px}button.secondary{background:#293649;color:#e8eef7;border:1px solid #40506a}button.danger{background:#542b31;border:1px solid #8e3f48}button:disabled{opacity:.55;cursor:wait}.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}.status{min-height:24px;color:var(--muted);margin:10px 0}.status.error{color:#ff958c}.status.ok{color:var(--ok)}.items{display:grid;gap:16px}.item h2{font-size:18px;margin:0 0 4px}.item .meta{color:var(--muted);font-size:12px;margin-bottom:14px}.item .fragments{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.top-actions{display:flex;gap:8px;align-items:center}#app[hidden],#login[hidden]{display:none!important}\n@media(max-width:600px){main{width:min(100% - 20px,980px);padding-top:18px}header{align-items:flex-start;flex-direction:column}.panel,.item{padding:16px;border-radius:16px}.item .fragments{grid-template-columns:1fr}.top-actions{width:100%}.top-actions button{flex:1}}\n</style>\n</head>\n<body>\n<main>\n<header><div><h1>AVTOY KOREA</h1><p>Управление опубликованными автомобилями и отзывами</p></div><div class=\"top-actions\"><button id=\"logout\" class=\"secondary\" hidden>Выйти</button></div></header>\n<section id=\"login\" class=\"panel\">\n<h2>Вход администратора</h2>\n<p class=\"muted\">Получите одноразовый код в личном чате Telegram-бота командой /adminlink.</p>\n<form id=\"login-form\">\n<label for=\"code\">Код из Telegram</label>\n<input id=\"code\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"8\" pattern=\"[0-9]{8}\" placeholder=\"8 цифр\" required>\n<div class=\"actions\"><button type=\"submit\">Войти</button></div>\n</form>\n<p id=\"login-status\" class=\"status\" role=\"status\"></p>\n</section>\n<section id=\"app\" hidden>\n<div class=\"panel\" style=\"margin-bottom:16px\"><div class=\"top-actions\"><h2 style=\"margin:0;flex:1\">Публикации на сайте</h2><button id=\"refresh\" class=\"secondary\">Обновить</button></div><p class=\"muted\">Редактирование меняет только текст выбранной публикации. Снятие с сайта возвращает её в очередь модерации.</p><p id=\"status\" class=\"status\" role=\"status\"></p></div>\n<div id=\"items\" class=\"items\"></div>\n</section>\n</main>\n<script>\nconst loginSection=document.getElementById(\"login\"),appSection=document.getElementById(\"app\"),itemsRoot=document.getElementById(\"items\"),statusNode=document.getElementById(\"status\"),loginStatus=document.getElementById(\"login-status\"),logoutButton=document.getElementById(\"logout\");\nasync function api(path,method,body){\n const options={method:method||\"GET\",credentials:\"same-origin\",headers:{}};\n if(body!==undefined){options.headers[\"content-type\"]=\"application/json\";options.body=JSON.stringify(body);}\n const response=await fetch(path,options);let data={};try{data=await response.json();}catch{}\n if(!response.ok)throw new Error(data.error||(\"HTTP \"+response.status));return data;\n}\nfunction status(message,error){statusNode.textContent=message||\"\";statusNode.className=\"status\"+(error?\" error\":\" ok\");}\nfunction makeButton(label,kind,handler){const b=document.createElement(\"button\");b.type=\"button\";b.textContent=label;if(kind)b.className=kind;b.addEventListener(\"click\",handler);return b;}\nfunction showLogin(message){loginSection.hidden=false;appSection.hidden=true;logoutButton.hidden=true;loginStatus.textContent=message||\"\";loginStatus.className=\"status error\";}\nfunction showApp(){loginSection.hidden=true;appSection.hidden=false;logoutButton.hidden=false;loadItems();}\nfunction renderItem(item){\n const card=document.createElement(\"article\");card.className=\"item\";\n const heading=document.createElement(\"h2\");heading.textContent=item.label||\"Публикация\";\n const meta=document.createElement(\"div\");meta.className=\"meta\";meta.textContent=(item.kind===\"car\"?\"Автомобиль\":\"Отзыв\")+\" · медиа: \"+item.mediaCount+\" · \"+(item.publishedAt||\"дата не указана\");\n const text=document.createElement(\"textarea\");text.value=item.text||\"\";text.setAttribute(\"aria-label\",\"Текст публикации\");\n const save=makeButton(\"Сохранить весь текст\",\"\",async()=>{try{await api(\"/api/admin/items/\"+encodeURIComponent(item.id),\"PATCH\",{instruction:text.value});status(\"Текст сохранён: \"+(item.label||item.id));await loadItems();}catch(e){status(e.message,true);}});\n const fragment=document.createElement(\"input\");fragment.placeholder=\"Фрагмент для удаления или замены\";\n const replacement=document.createElement(\"input\");replacement.placeholder=\"Новый текст (для замены)\";\n const removeFragment=makeButton(\"Удалить фрагмент\",\"secondary\",async()=>{if(!fragment.value.trim())return status(\"Укажите точный фрагмент\",true);try{await api(\"/api/admin/items/\"+encodeURIComponent(item.id),\"PATCH\",{instruction:\"УДАЛИТЬ: \"+fragment.value});status(\"Фрагмент удалён\");await loadItems();}catch(e){status(e.message,true);}});\n const replaceFragment=makeButton(\"Заменить фрагмент\",\"secondary\",async()=>{if(!fragment.value.trim())return status(\"Укажите старый фрагмент\",true);try{await api(\"/api/admin/items/\"+encodeURIComponent(item.id),\"PATCH\",{instruction:\"ЗАМЕНИТЬ: \"+fragment.value+\" => \"+replacement.value});status(\"Фрагмент заменён\");await loadItems();}catch(e){status(e.message,true);}});\n const remove=makeButton(\"Снять публикацию\",\"danger\",async()=>{if(!confirm(\"Снять только эту публикацию с сайта? Она вернётся в очередь модерации.\"))return;try{await api(\"/api/admin/items/\"+encodeURIComponent(item.id),\"DELETE\");status(\"Публикация снята с сайта\");await loadItems();}catch(e){status(e.message,true);}});\n const fragments=document.createElement(\"div\");fragments.className=\"fragments\";fragments.appendChild(fragment);fragments.appendChild(replacement);\n const actions=document.createElement(\"div\");actions.className=\"actions\";actions.appendChild(save);actions.appendChild(removeFragment);actions.appendChild(replaceFragment);actions.appendChild(remove);\n card.appendChild(heading);card.appendChild(meta);card.appendChild(text);card.appendChild(fragments);card.appendChild(actions);return card;\n}\nasync function loadItems(){\n status(\"Загружаем публикации…\");\n try{const data=await api(\"/api/admin/items\");itemsRoot.replaceChildren();if(!data.items||!data.items.length){const empty=document.createElement(\"p\");empty.className=\"muted\";empty.textContent=\"На сайте пока нет опубликованных материалов.\";itemsRoot.appendChild(empty);}else{data.items.forEach(item=>itemsRoot.appendChild(renderItem(item)));}status(\"Загружено публикаций: \"+(data.items||[]).length);}\n catch(e){if(e.message===\"Unauthorized\"){showLogin(\"Сессия завершена. Получите новый код в Telegram командой /adminlink.\");return;}status(e.message,true);}\n}\ndocument.getElementById(\"login-form\").addEventListener(\"submit\",async e=>{e.preventDefault();loginStatus.textContent=\"Проверяем код…\";try{await api(\"/api/admin/login\",\"POST\",{code:document.getElementById(\"code\").value.trim()});document.getElementById(\"code\").value=\"\";showApp();}catch(err){loginStatus.textContent=err.message;loginStatus.className=\"status error\";}});\ndocument.getElementById(\"refresh\").addEventListener(\"click\",loadItems);\nlogoutButton.addEventListener(\"click\",async()=>{try{await api(\"/api/admin/logout\",\"POST\");showLogin(\"Вы вышли из панели.\");}catch(e){status(e.message,true);}});\n(async()=>{try{await api(\"/api/admin/session\");showApp();}catch{showLogin(\"\");}})();\n</script>\n</body>\n</html>";
+const ADMIN_PAGE_HTML = ADMIN_PRO_HTML;
 
 export default {
  async fetch(request, env) {
@@ -1827,7 +1955,9 @@ export default {
    return handleMaxBotWebhook(request, env, {
     callTelegram,
     telegramAdminIds: adminIds,
-    unpublishById: id => unpublishItem(env, adminIds, id)
+    unpublishById: id => unpublishItem(env, adminIds, id),
+    issueAdminMagicLink: () => issueAdminLoginCodeFor(env, adminIds[0] || "max_admin"),
+    cleanupCatalog: () => runAdminCatalogCleanup(env, adminIds[0] || "max_admin", writeLog)
    });
   }
   if (request.method === "OPTIONS" && (url.pathname === "/api/request" || url.pathname === "/api/cars" || url.pathname === "/api/reviews")) {
@@ -1876,6 +2006,44 @@ export default {
      else if (String(cb.data || "").startsWith("mphoto:")) await handlePhotoDeleteCallback(cb, env, adminIds);
      else if (String(cb.data || "") === "adminhelp") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); await sendAdminHelp(env, cb.message.chat.id); }
      else if (String(cb.data || "") === "admincmd:site") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); await showSiteList(cb.message.chat.id, env); }
+     else if (String(cb.data || "").startsWith("panel:")) {
+      const sub = String(cb.data).slice("panel:".length);
+      if (sub === "noop") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); }
+      else if (sub === "cleanall") {
+       const res = await runAdminCatalogCleanup(env, callbackUserId, writeLog);
+       await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: `Очищено авто: ${res.cleanedCars}, снято битых: ${res.removedBroken}`, show_alert: true });
+       await sendOrEditTelegramPanel(env, cb.message.chat.id, cb.message.message_id, "home", { callTelegram, siteLabel, sha256Hex });
+      } else {
+       await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id });
+       await sendOrEditTelegramPanel(env, cb.message.chat.id, cb.message.message_id, sub, { callTelegram, siteLabel, sha256Hex });
+      }
+     }
+     else if (String(cb.data || "").startsWith("pubascar:")) {
+      const pendId = String(cb.data).slice("pubascar:".length);
+      const pendRaw = env.REVIEWS ? await env.REVIEWS.get("pending:" + pendId) : null;
+      if (!pendRaw) { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "Материал уже обработан", show_alert: true }); }
+      else {
+       const rev = JSON.parse(pendRaw);
+       const carId = "car_" + pendId.replace(/-/g, "");
+       const carRec = {
+        id: carId,
+        caption: cleanCarDisplayCaption(cleanPublicationText(rev.text || "")).slice(0, 3000),
+        fileId: rev.fileId || null,
+        photos: Array.isArray(rev.photos) ? rev.photos : [],
+        videos: rev.kind === "video" && rev.fileId ? [{ file_id: rev.fileId }] : (Array.isArray(rev.videos) ? rev.videos : []),
+        mediaType: rev.kind === "video" && !(rev.photos && rev.photos.length) ? "video" : "photo",
+        publishedAt: new Date().toISOString(),
+        sourceUrl: rev.sourceUrl || "Загрузка администратора"
+       };
+       await env.REVIEWS.put("car_approved:" + carId, JSON.stringify(carRec));
+       await env.REVIEWS.delete("pending:" + pendId);
+       const upRaw = await env.REVIEWS.get("admin_upload:" + pendId);
+       if (upRaw) { const st = JSON.parse(upRaw); st.status = "approved"; await env.REVIEWS.put("admin_upload:" + pendId, JSON.stringify(st), { expirationTtl: 2592000 }); }
+       await writeLog(env, callbackUserId, "опубликован как авто из лички", "машина", carId, siteLabel(carId, carRec));
+       await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "🚘 Автомобиль опубликован в каталог!" });
+       await callTelegram(env, "sendMessage", { chat_id: cb.message.chat.id, text: "🚘 Автомобиль успешно добавлен в каталог сайта!", reply_markup: { inline_keyboard: [[{ text: "🗑 Снять с сайта", callback_data: "sitedel:" + carId }, { text: "🎛 Панель", callback_data: "panel:home" }]] } });
+      }
+     }
      else if (String(cb.data || "").startsWith("rejr:")) await handleRejectReasonCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("undo:")) await handleUndoCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("car")) await handleCarCallback(cb, env, adminIds);
@@ -1994,6 +2162,9 @@ export default {
       const notice = "👋 Новый пользователь бота AVTOY KOREA\nИмя: " + String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано") + "\nChat ID: " + chatId;
       await Promise.all(adminIds.map(id => send(id, notice)));
      }
+    } else if (text === "/panel" && adminIds.includes(chatId)) {
+     await setAdminCommands(env, chatId).catch(() => {});
+     await sendOrEditTelegramPanel(env, chatId, null, "home", { callTelegram, siteLabel, sha256Hex });
     } else if (text === "/admin" && adminIds.includes(chatId)) {
      await setAdminCommands(env, chatId);
      await sendAdminHelp(env, chatId);
@@ -2057,7 +2228,7 @@ export default {
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
-    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+    "content-security-policy": ADMIN_PRO_CSP
    }});
   }
   const webAdminResponse = await handleWebAdminApi(request, url, env, adminIds);
@@ -2740,6 +2911,61 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
  #cars .car-gallery-main{aspect-ratio:16/10;min-height:0}
  #cars h2{color:#f4f6f9!important;font-size:clamp(24px,6vw,30px);line-height:1.2}
 }
+
+/* AVTOY KOREA 2026 Pro Showroom Theme & Interactive Catalogue Controls */
+:root{--bg:#070c14;--panel:#101723;--panel-2:#162032;--line:#253247;--text:#f4f7fc;--muted:#9aa9be;--red:#f12f38}
+body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#070c14!important;color:#f4f7fc!important}
+#cars,#order,#reviews,#request{background:transparent!important;color:#f4f7fc!important}
+#order .card,#reviews .card,#request .form-card,#order .get{background:linear-gradient(155deg,#151f30,#0e1521)!important;color:#f4f7fc!important;border:1px solid #263349!important;box-shadow:0 18px 46px #0006!important}
+#order .card p,#reviews .review-text,#request .form-intro,#request .hint,#cars .sub,#reviews .sub,#order .sub{color:#9fb0c7!important}
+#order .get ul{color:#e5ecf6!important}
+.cars>.card{background:linear-gradient(160deg,#151f30,#0d1420)!important;color:#f4f7fc!important;border:1px solid #26344b!important;border-radius:18px!important;box-shadow:0 16px 40px #0006!important;display:flex!important;flex-direction:column!important}
+.cars>.card:hover{border-color:#f12f3888!important;transform:translateY(-4px)}
+#cars .car-card .car-body{flex:1;display:flex;flex-direction:column;padding:18px!important}
+#cars .car-card .car-body h3{color:#f8fafc!important;font-size:18px!important;margin:0 0 10px!important}
+.catalog-toolbar{display:flex;flex-direction:column;gap:14px;margin:18px 0 24px;padding:16px 18px;border-radius:18px;background:linear-gradient(150deg,#131c2b,#0d1420);border:1px solid #253247}
+.catalog-search-row{display:grid;grid-template-columns:1fr 230px;gap:12px}
+.catalog-input,.catalog-select{width:100%;background:#080d16;border:1px solid #2b3a52;border-radius:12px;color:#f4f7fc;padding:12px 14px;font-size:14px;outline:none}
+.catalog-input:focus,.catalog-select:focus{border-color:var(--red);box-shadow:0 0 0 3px #f12f3825}
+.catalog-brands{display:flex;gap:8px;flex-wrap:wrap}
+.brand-chip{border:1px solid #2a3950;background:#0b121e;color:#cbd5e1;padding:8px 14px;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer;transition:all .16s}
+.brand-chip:hover{border-color:#f12f3880;color:#fff}
+.brand-chip.is-active{background:var(--red);border-color:var(--red);color:#fff;box-shadow:0 6px 18px #f12f3835}
+.car-badges{position:absolute;top:10px;left:10px;z-index:3;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
+.car-badge{padding:4px 10px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;backdrop-filter:blur(8px)}
+.car-badge.is-new{background:#15803de6;color:#dcfce7;border:1px solid #22c55e80}
+.car-badge.is-video{background:#f12f38e6;color:#fff}
+.car-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.car-chip{padding:5px 9px;border-radius:8px;background:#0a101b;border:1px solid #243146;color:#d4deec;font-size:12px;font-weight:600}
+.car-Card-pricebox{margin-top:auto;padding-top:14px;border-top:1px solid #222f43;display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:12px}
+.car-price-val{font:900 21px/1.1 "Manrope",sans-serif;color:#fff}
+.car-price-note{font-size:11px;color:#93a4bc;text-align:right}
+.car-actions-row{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center}
+.car-spec-btn{padding:11px 13px;border-radius:11px;border:1px solid #2c3b54;background:#0b121e;color:#dbe4f0;font-weight:700;font-size:13px;cursor:pointer}
+.car-spec-btn:hover{border-color:#f12f38;color:#fff}
+#cars .car-card .car-link{display:inline-flex;align-items:center;justify-content:center;padding:11px 14px;border-radius:11px;background:var(--red);color:#fff!important;font-weight:800;font-size:13px;width:100%;text-align:center;box-shadow:0 8px 20px #f12f3828}
+#cars .car-card.is-upgraded .car-description{display:none}
+.selected-car-banner{display:none;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;margin-bottom:14px;border-radius:12px;background:#f12f381c;border:1px solid #f12f3866;color:#ffd7d9;font-size:13px;font-weight:700}
+.selected-car-banner.is-visible{display:flex}
+.selected-car-banner button{background:none;border:0;color:#fff;font-size:18px;cursor:pointer;padding:0 4px}
+.car-modal{position:fixed;inset:0;z-index:1000;background:rgba(4,7,13,.88);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:18px}
+.car-modal-dialog{width:min(960px,100%);max-height:90vh;overflow-y:auto;background:#0f1724;border:1px solid #2b3a52;border-radius:22px;padding:24px;color:#f4f7fc;box-shadow:0 28px 80px #000b}
+.car-modal-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:22px;margin-top:14px}
+.car-modal-stage{aspect-ratio:16/10;background:#060a11;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;border:1px solid #233146}
+.car-modal-stage img,.car-modal-stage video{width:100%;height:100%;object-fit:contain}
+.car-modal-thumbs{display:flex;gap:7px;overflow-x:auto;padding:10px 0 4px}
+.car-modal-thumbs button{flex:0 0 74px;height:52px;padding:0;border-radius:8px;overflow:hidden;border:2px solid transparent;background:#060a11;cursor:pointer}
+.car-modal-thumbs button.is-active{border-color:var(--red)}
+.car-modal-thumbs img{width:100%;height:100%;object-fit:cover}
+.car-modal-specs{display:grid;gap:7px;margin:12px 0 16px}
+.review-story{margin:12px 0 0;color:#d0dae8;font-size:14px;line-height:1.58;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.review-story.is-open{display:block;-webkit-line-clamp:unset}
+.review-more{margin-top:6px;padding:0;border:0;background:none;color:#ff806e;font-size:12px;font-weight:700;cursor:pointer;align-self:flex-start}
+@media(max-width:780px){
+ .catalog-search-row{grid-template-columns:1fr}
+ .car-modal-grid{grid-template-columns:1fr}
+ .car-actions-row{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
@@ -2782,7 +3008,20 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
 <section class="wrap section" id="cars" style="padding-top:20px">
   <div class="eyebrow">Наши автомобили</div>
   <h2>Автомобили в продаже и под заказ</h2>
+  <p class="sub">Проверенные автомобили из Южной Кореи, Китая и ОАЭ с расчётом стоимости под ключ.</p>
+  <div class="catalog-toolbar" id="cars-toolbar" hidden>
+    <div class="catalog-search-row">
+      <input class="catalog-input" id="cars-search" type="search" placeholder="Поиск по марке, модели, комплектации, городу или году…">
+      <select class="catalog-select" id="cars-sort" aria-label="Сортировка автомобилей">
+        <option value="newest">Сначала новые поступления</option>
+        <option value="price_asc">Сначала дешевле</option>
+        <option value="price_desc">Сначала дороже</option>
+      </select>
+    </div>
+    <div class="catalog-brands" id="cars-brands" role="tablist" aria-label="Фильтр по маркам"></div>
+  </div>
   <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Загружаем актуальные предложения…</div></article></div>
+  <p class="cars-hint" id="cars-empty-filter" hidden>По выбранному фильтру ничего не найдено — попробуйте сбросить фильтр.</p>
 </section>
 <section class="wrap section" id="order" style="padding-top:40px">
   <div class="eyebrow">Как заказать</div>
@@ -2832,6 +3071,7 @@ h1,h2,h3,h4,.brand,.car-link{font-family:"Manrope","Inter",system-ui,sans-serif}
       <p class="hint">Можно обратиться и по вопросам рекламы, партнёрства или размещения предложений.</p>
     </div>
     <div>
+      <div class="selected-car-banner" id="selected-car-banner"><span id="selected-car-label"></span><button type="button" id="selected-car-clear" aria-label="Сбросить выбранный автомобиль">×</button></div>
       <form id="request-form" novalidate>
         <div class="form-grid">
           <div class="field"><label for="name">Ваше имя *</label><input id="name" name="name" required maxlength="100" autocomplete="name" placeholder="Как к вам обращаться"></div>
@@ -2974,7 +3214,14 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
       gallery.addEventListener('touchend',function(e){var delta=e.changedTouches[0].clientX-touchStart;if(Math.abs(delta)>35)showReviewMedia(mediaIndex+(delta<0?1:-1))},{passive:true});
       showReviewMedia(0);card.appendChild(gallery);
     }
-    // Отзывы на сайте показываем только как фото/видео: текст публикации не выводим.
+    if(rv.text&&String(rv.text).trim()&&String(rv.text).trim().toLowerCase()!=='отзыв'){
+      var story=document.createElement('p');story.className='review-story';story.textContent=String(rv.text).trim();card.appendChild(story);
+      if(String(rv.text).trim().length>160){
+        var moreBtn=document.createElement('button');moreBtn.type='button';moreBtn.className='review-more';moreBtn.textContent='Читать полностью';
+        moreBtn.addEventListener('click',function(){var open=story.classList.toggle('is-open');moreBtn.textContent=open?'Свернуть':'Читать полностью';});
+        card.appendChild(moreBtn);
+      }
+    }
     list.appendChild(card);
     var dot=document.createElement('button');dot.type='button';dot.className='review-dot';dot.setAttribute('aria-label','Показать отзыв '+(index+1));
     dot.addEventListener('click',function(){list.scrollTo({left:card.offsetLeft-list.offsetLeft,behavior:'smooth'})});dots.appendChild(dot);
@@ -3034,7 +3281,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
  data.cars.forEach(function(car){
   var media=Array.isArray(car.mediaItems)&&car.mediaItems.length?car.mediaItems:(car.media?[{url:car.media,type:car.mediaType}]:[]);
   var isVideo=car.mediaType==='video';
-  var article=document.createElement('article'); article.className='card car-card';
+  var article=document.createElement('article'); article.className='card car-card'; article.dataset.carRaw=JSON.stringify(car);
   var body=document.createElement('div'); body.className='car-body';
   var heading=splitVehicleHeading((car.caption||'Автомобиль из объявления').split(NL)[0]);
   if(heading.trim){var trim=document.createElement('div');trim.className='car-trim';trim.textContent=heading.trim;body.appendChild(trim);}
@@ -3144,6 +3391,7 @@ fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error(
   }
   article.appendChild(body); list.appendChild(article);
  });
+ if(window.upgradeAvtoyCatalogue)window.upgradeAvtoyCatalogue();
 }).catch(function(){
  var list=document.getElementById('cars-list'); if(!list)return;
  list.textContent='';
@@ -3192,6 +3440,268 @@ loadCars();
   root.addEventListener('focusout',function(event){if(!root.contains(event.relatedTarget)){paused=false;startTimer();}});
   document.addEventListener('visibilitychange',startTimer);
   startTimer();
+})();
+</script>
+<script>
+(function(){
+  var BRAND_RULES=[
+    ['Kia',/\\b(kia|киа)\\b/i],['Hyundai',/\\b(hyundai|хендай|хёндай|solaris|sonata|avante|kona|creta)\\b/i],
+    ['Volkswagen',/\\b(volkswagen|vw|tharu|t-roc|t-cross|tacqua|bora)\\b/i],['Mercedes-Benz',/\\b(mercedes|glb|glc|gle)\\b/i],
+    ['Chevrolet',/\\b(chevrolet|shevrolet|monza|trailblazer)\\b/i],['Geely',/\\b(geely|coolray|monjaro)\\b/i],
+    ['Mitsubishi',/\\b(mitsubishi|asx|outlander)\\b/i],['Honda',/\\b(honda|crider|cr-v)\\b/i],
+    ['Haval',/\\b(haval|h6|jolion)\\b/i],['Skoda',/\\b(skoda|kamiq|kodiaq)\\b/i],
+    ['KG Mobility',/\\b(kg[_\\s-]*mobility|ssangyong|tiboli|tivoli)\\b/i],['Zeekr',/\\b(zeekr)\\b/i]
+  ];
+  var NL=String.fromCharCode(10);
+  function cleanCaption(raw){
+    return String(raw||'').replace(/\\r/g,'').replace(/\\*+/g,'')
+      .replace(/(?:^|\\n)\\s*Для заказа(?:\\s+автомобиля|\\s+аналогичного автомобиля)?\\s+обращайтесь\\s*:?[\\s\\S]*$/i,'')
+      .replace(/(?:^|\\n)\\s*По актуальному курсу на сегодняшний день\\s*/gi,NL)
+      .replace(/(?:^|\\n)\\s*Организуем доставку до Вас!?\\s*/gi,NL)
+      .replace(/(?:^|\\n)\\s*(?:Владимир|Менеджер|Контакт|Продавец)\\s*:\\s*\\+?\\s*$/gim,'')
+      .replace(/(?:^|\\n)\\s*\\+\\s*$/gm,'').trim();
+  }
+  function parseCar(car){
+    var cleaned=cleanCaption(car.caption||'');
+    var lines=cleaned.split(NL).map(function(l){return l.replace(/\\u00a0/g,' ').trim();}).filter(Boolean);
+    var ti=0,promo='';
+    if(lines.length>1&&/^(?:встречайте(?:\\s+новый)?|новинка|в\\s+наличии)$/i.test(lines[0])){
+      if(/наличии/i.test(lines[0]))promo='В наличии';
+      ti=1;
+    }
+    var title=(lines[ti]||'').replace(/^в\\s+наличии\\s+(?:новый\\s+)?/i,function(){promo='В наличии';return '';});
+    title=title.replace(/KG_MOBILITY_SSANGYONG/gi,'KG Mobility').replace(/\\bTIBOLI\\b/gi,'Tivoli').replace(/\\bShevrolet\\b/gi,'Chevrolet').replace(/_/g,' ').trim();
+    var extraTrim='';
+    if(lines[ti+1]&&lines[ti+1].indexOf(':')<0&&/^[A-Z0-9\\s-]{4,32}$/.test(lines[ti+1])&&!/цена|год|пробег/i.test(lines[ti+1]))extraTrim=lines[ti+1];
+    var specs=[],features=[],priceNum=null,priceFmt='По запросу',priceNote='расчёт под ключ';
+    for(var i=0;i<lines.length;i++){
+      if(i===ti||(extraTrim&&i===ti+1))continue;
+      var ln=lines[i];
+      if(/^цена(?:\\s+под\\s+ключ)?/i.test(ln)){
+        var cm=ln.match(/до\\s+([А-Яа-яЁёA-Za-z\\s/-]+?)\\s*:?$/i);
+        if(cm)priceNote='под ключ до '+cm[1].trim();
+        var inl=ln.replace(/^.*?:/,'').trim();
+        var cand=/\\d/.test(inl)?inl:(lines[i+1]||'');
+        var dg=cand.replace(/[^\\d]/g,'');
+        if(dg.length>=6&&dg.length<=9){priceNum=Number(dg);priceFmt=priceNum.toLocaleString('ru-RU')+' ₽';if(!/\\d/.test(inl))i++;}
+        continue;
+      }
+      if(/^[\\d\\s.,]{6,15}\\s*₽$/.test(ln)){var d2=ln.replace(/[^\\d]/g,'');if(d2.length>=6){priceNum=Number(d2);priceFmt=priceNum.toLocaleString('ru-RU')+' ₽';continue;}}
+      if(/^(?:характеристики|комплектация|описание|опции)\\s*:?$/i.test(ln))continue;
+      var cIdx=ln.indexOf(':')>=0?ln.indexOf(':'):ln.indexOf('：');
+      if(cIdx>=2&&cIdx<=32&&ln.slice(cIdx+1).trim()){
+        specs.push({k:ln.slice(0,cIdx).trim(),v:ln.slice(cIdx+1).trim().replace(/\\bShevrolet\\b/gi,'Chevrolet')});
+        continue;
+      }
+      var m;
+      if((m=ln.match(/^Год(?:\\s+выпуска)?\\s+(.+)$/i)))specs.push({k:'Год выпуска',v:m[1]});
+      else if((m=ln.match(/^Пробег\\s+(.+)$/i)))specs.push({k:'Пробег',v:m[1]});
+      else if((m=ln.match(/^Мощность\\s+(.+)$/i)))specs.push({k:'Мощность',v:m[1]});
+      else if((m=ln.match(/^(Бензин|Дизель|Гибрид|Электро|Газ)\\s+(.+)$/i))){specs.push({k:'Топливо',v:m[1]});specs.push({k:'Двигатель',v:m[2]});}
+      else if(ln.length>=3&&!/^цена\\s+по\\s+запросу$/i.test(ln))features.push(ln.replace(/^[•●▪✓✔-]\\s*/,''));
+    }
+    function getSpec(rx){for(var j=0;j<specs.length;j++)if(rx.test(specs[j].k))return specs[j].v;return '';}
+    var yr=(getSpec(/^год/i).match(/\\b(20\\d{2})\\b/)||title.match(/\\b(20\\d{2})\\b/)||[])[1]||'';
+    var milRaw=getSpec(/^пробег/i),mil='',isNew=false;
+    if(/новый|^0(?:\\s*км)?$/i.test(milRaw.trim())){mil='Без пробега';isNew=true;}
+    else if(milRaw){var md=milRaw.replace(/[^\\d]/g,'');mil=md?Number(md).toLocaleString('ru-RU')+' км':milRaw;}
+    var eng=getSpec(/^двигатель/i),fuel=getSpec(/^топливо/i),pwr=getSpec(/^мощность/i),drv=getSpec(/^привод/i);
+    var brand='Другие',hay=title+' '+getSpec(/^марка/i)+' '+getSpec(/^модель/i);
+    for(var b=0;b<BRAND_RULES.length;b++){if(BRAND_RULES[b][1].test(hay)){brand=BRAND_RULES[b][0];break;}}
+    var media=Array.isArray(car.mediaItems)?car.mediaItems:[];
+    var hasVideo=media.some(function(x){return x&&x.type==='video';});
+    if(!title)title=hasVideo?'Видеообзор автомобиля под заказ':'Автомобиль из Южной Кореи';
+    var chips=[];
+    if(yr)chips.push(yr+' г.');
+    if(mil)chips.push(mil);
+    if(eng||fuel)chips.push([eng?(eng.indexOf('л')>=0?eng:eng+' л'):'',fuel].filter(Boolean).join(' · '));
+    if(pwr||drv)chips.push([pwr?(pwr.indexOf('л.с')>=0||pwr.indexOf('лс')>=0?pwr:pwr+' л.с.'):'',drv?drv.replace(/\\s*\\(.*?\\)/,'').trim():''].filter(Boolean).join(' · '));
+    return {brand:brand,title:title,trim:extraTrim||getSpec(/^комплектация/i),promo:promo||(isNew?'Новый':''),hasVideo:hasVideo,chips:chips,priceNum:priceNum,priceFmt:priceFmt,priceNote:priceNote,specs:specs.filter(function(s){return !/^(?:марка|модель)$/i.test(s.k);}),features:features,searchText:(title+' '+brand+' '+cleaned).toLowerCase()};
+  }
+
+  function selectCarIntoForm(meta){
+    var modelInput=document.getElementById('model');
+    var banner=document.getElementById('selected-car-banner');
+    var label=document.getElementById('selected-car-label');
+    if(modelInput)modelInput.value=meta.title+(meta.priceFmt&&meta.priceFmt!=='По запросу'?' ('+meta.priceFmt+')':'');
+    if(banner&&label){
+      label.textContent='🚘 Выбран автомобиль: '+meta.title+' — '+meta.priceFmt;
+      banner.classList.add('is-visible');
+    }
+    var sec=document.getElementById('request'),nameInput=document.getElementById('name');
+    if(sec)sec.scrollIntoView({behavior:'smooth',block:'start'});
+    if(nameInput)window.setTimeout(function(){nameInput.focus({preventScroll:true});},350);
+  }
+  document.getElementById('selected-car-clear')?.addEventListener('click',function(){
+    document.getElementById('selected-car-banner')?.classList.remove('is-visible');
+    var m=document.getElementById('model');if(m)m.value='';
+  });
+
+  function openCarDetailModal(car,meta){
+    var overlay=document.createElement('div');overlay.className='car-modal';
+    var dlg=document.createElement('div');dlg.className='car-modal-dialog';
+    var top=document.createElement('div');top.style.display='flex';top.style.justifyContent='space-between';top.style.alignItems='flex-start';top.style.gap='12px';
+    var hWrap=document.createElement('div');
+    if(meta.trim){var tr=document.createElement('div');tr.style.color='#ff806e';tr.style.fontWeight='800';tr.style.fontSize='11px';tr.style.letterSpacing='.12em';tr.style.textTransform='uppercase';tr.textContent=meta.trim;hWrap.appendChild(tr);}
+    var h3=document.createElement('h3');h3.style.margin='4px 0 0';h3.style.fontSize='24px';h3.textContent=meta.title;hWrap.appendChild(h3);
+    var closeBtn=document.createElement('button');closeBtn.type='button';closeBtn.className='car-spec-btn';closeBtn.textContent='✕ Закрыть';
+    function close(){overlay.remove();}
+    closeBtn.onclick=close;overlay.onclick=function(e){if(e.target===overlay)close();};
+    top.appendChild(hWrap);top.appendChild(closeBtn);dlg.appendChild(top);
+
+    var grid=document.createElement('div');grid.className='car-modal-grid';
+    var left=document.createElement('div');
+    var stage=document.createElement('div');stage.className='car-modal-stage';
+    var thumbs=document.createElement('div');thumbs.className='car-modal-thumbs';
+    var rawMedia=Array.isArray(car.mediaItems)&&car.mediaItems.length?car.mediaItems:(car.media?[{url:car.media,type:car.mediaType}]:[]);
+    var seen={},media=[];
+    rawMedia.forEach(function(m){var u=typeof m==='string'?m:m.url;if(!u||seen[u])return;seen[u]=true;media.push({url:u,video:(m&&m.type==='video')||/\\.(mp4|webm|mov)$/i.test(u)});});
+    function renderStage(idx){
+      stage.textContent='';
+      var it=media[idx];if(!it)return;
+      var node=document.createElement(it.video?'video':'img');node.src=it.url;
+      if(it.video){node.controls=true;node.playsInline=true;}
+      stage.appendChild(node);
+      Array.from(thumbs.children).forEach(function(b,bi){b.classList.toggle('is-active',bi===idx);});
+    }
+    if(media.length>1){
+      media.forEach(function(m,idx){
+        var b=document.createElement('button');b.type='button';
+        if(m.video){b.textContent='▶';b.style.color='#fff';b.style.fontWeight='800';}
+        else{var im=document.createElement('img');im.src=m.url;im.loading='lazy';b.appendChild(im);}
+        b.onclick=function(){renderStage(idx);};thumbs.appendChild(b);
+      });
+    }
+    renderStage(0);
+    left.appendChild(stage);if(media.length>1)left.appendChild(thumbs);
+
+    var right=document.createElement('div');
+    var pBox=document.createElement('div');pBox.style.padding='14px 16px';pBox.style.borderRadius='14px';pBox.style.background='#09101b';pBox.style.border='1px solid #243248';
+    var pVal=document.createElement('div');pVal.className='car-price-val';pVal.style.fontSize='26px';pVal.textContent=meta.priceFmt;
+    var pSub=document.createElement('div');pSub.style.color='#93a4bc';pSub.style.fontSize='12px';pSub.style.marginTop='4px';pSub.textContent=meta.priceNote+' · актуальный расчёт';
+    pBox.appendChild(pVal);pBox.appendChild(pSub);right.appendChild(pBox);
+
+    var spWrap=document.createElement('div');spWrap.className='car-modal-specs';
+    meta.specs.forEach(function(s){
+      var r=document.createElement('div');r.className='car-description-row';
+      var k=document.createElement('strong');k.textContent=s.k;
+      var v=document.createElement('span');v.textContent=s.v;
+      r.appendChild(k);r.appendChild(v);spWrap.appendChild(r);
+    });
+    right.appendChild(spWrap);
+    if(meta.features.length){
+      var ul=document.createElement('ul');ul.className='car-description-list';ul.style.marginBottom='16px';
+      meta.features.forEach(function(f){var li=document.createElement('li');li.textContent=f;ul.appendChild(li);});
+      right.appendChild(ul);
+    }
+    var orderBtn=document.createElement('button');orderBtn.type='button';orderBtn.className='btn btn-red';orderBtn.style.width='100%';orderBtn.textContent='Заказать расчёт по этому авто →';
+    orderBtn.onclick=function(){close();selectCarIntoForm(meta);};
+    right.appendChild(orderBtn);
+
+    grid.appendChild(left);grid.appendChild(right);dlg.appendChild(grid);overlay.appendChild(dlg);document.body.appendChild(overlay);
+  }
+
+  window.upgradeAvtoyCatalogue=function(){
+    var list=document.getElementById('cars-list');if(!list)return;
+    var cards=Array.from(list.querySelectorAll('article.car-card'));
+    if(!cards.length)return;
+    var toolbar=document.getElementById('cars-toolbar'),brandsEl=document.getElementById('cars-brands');
+    var searchEl=document.getElementById('cars-search'),sortEl=document.getElementById('cars-sort');
+    var emptyHint=document.getElementById('cars-empty-filter');
+    var brandCounts={},videoCount=0;
+    var entries=[];
+
+    cards.forEach(function(card,origIdx){
+      var car={};try{car=JSON.parse(card.dataset.carRaw||'{}');}catch{}
+      var meta=parseCar(car);
+      card.classList.add('is-upgraded');
+      brandCounts[meta.brand]=(brandCounts[meta.brand]||0)+1;
+      if(meta.hasVideo)videoCount++;
+
+      var h3=card.querySelector('h3');
+      if(h3)h3.textContent=meta.title;
+      var existingTrim=card.querySelector('.car-trim');
+      if(meta.trim&&!existingTrim&&h3){
+        var tr=document.createElement('div');tr.className='car-trim';tr.textContent=meta.trim;
+        h3.parentNode.insertBefore(tr,h3);
+      }
+
+      var gallery=card.querySelector('.car-gallery');
+      if(gallery){
+        var badges=document.createElement('div');badges.className='car-badges';
+        if(meta.promo){var b1=document.createElement('span');b1.className='car-badge is-new';b1.textContent=meta.promo;badges.appendChild(b1);}
+        if(meta.hasVideo){var b2=document.createElement('span');b2.className='car-badge is-video';b2.textContent='▶ Видеообзор';badges.appendChild(b2);}
+        if(badges.childNodes.length)gallery.appendChild(badges);
+      }
+
+      var body=card.querySelector('.car-body');
+      var link=card.querySelector('.car-link');
+      if(body&&link){
+        if(meta.chips.length){
+          var chipsWrap=document.createElement('div');chipsWrap.className='car-chips';
+          meta.chips.forEach(function(c){var sp=document.createElement('span');sp.className='car-chip';sp.textContent=c;chipsWrap.appendChild(sp);});
+          body.insertBefore(chipsWrap,link);
+        }
+        var pBox=document.createElement('div');pBox.className='car-Card-pricebox';
+        var pVal=document.createElement('div');pVal.className='car-price-val';pVal.textContent=meta.priceFmt;
+        var pNote=document.createElement('div');pNote.className='car-price-note';pNote.textContent=meta.priceNote;
+        pBox.appendChild(pVal);pBox.appendChild(pNote);body.insertBefore(pBox,link);
+
+        var row=document.createElement('div');row.className='car-actions-row';
+        var specBtn=document.createElement('button');specBtn.type='button';specBtn.className='car-spec-btn';specBtn.textContent='Характеристики';
+        specBtn.onclick=function(){openCarDetailModal(car,meta);};
+        link.onclick=function(e){e.preventDefault();selectCarIntoForm(meta);};
+        row.appendChild(specBtn);row.appendChild(link);body.appendChild(row);
+      }
+      entries.push({card:card,meta:meta,origIdx:origIdx});
+    });
+
+    var activeBrand='all';
+    if(toolbar&&brandsEl){
+      toolbar.hidden=false;brandsEl.textContent='';
+      function addChip(key,label){
+        var btn=document.createElement('button');btn.type='button';btn.className='brand-chip'+(key==='all'?' is-active':'');
+        btn.textContent=label;
+        btn.onclick=function(){
+          activeBrand=key;
+          Array.from(brandsEl.children).forEach(function(c){c.classList.remove('is-active');});
+          btn.classList.add('is-active');
+          applyFilters();
+        };
+        brandsEl.appendChild(btn);
+      }
+      addChip('all','Все ('+entries.length+')');
+      Object.keys(brandCounts).sort(function(a,b){return brandCounts[b]-brandCounts[a];}).forEach(function(br){
+        if(br!=='Другие')addChip(br,br+' ('+brandCounts[br]+')');
+      });
+      if(videoCount>0)addChip('__video','▶ С видео ('+videoCount+')');
+    }
+
+    function applyFilters(){
+      var q=(searchEl?searchEl.value:'').trim().toLowerCase();
+      var sortMode=sortEl?sortEl.value:'newest';
+      var sorted=entries.slice();
+      if(sortMode==='price_asc'){
+        sorted.sort(function(a,b){return (a.meta.priceNum||999999999)-(b.meta.priceNum||999999999);});
+      }else if(sortMode==='price_desc'){
+        sorted.sort(function(a,b){return (b.meta.priceNum||0)-(a.meta.priceNum||0);});
+      }else{
+        sorted.sort(function(a,b){return a.origIdx-b.origIdx;});
+      }
+      var visible=0;
+      sorted.forEach(function(e){
+        var matchBrand=activeBrand==='all'||(activeBrand==='__video'?e.meta.hasVideo:e.meta.brand===activeBrand);
+        var matchQ=!q||e.meta.searchText.indexOf(q)>=0;
+        var ok=matchBrand&&matchQ;
+        e.card.style.display=ok?'':'none';
+        if(ok)visible++;
+        list.appendChild(e.card);
+      });
+      if(emptyHint){emptyHint.hidden=visible>0;emptyHint.classList.toggle('is-on',visible===0);}
+    }
+    searchEl?.addEventListener('input',applyFilters);
+    sortEl?.addEventListener('change',applyFilters);
+  };
 })();
 </script>
 </body>

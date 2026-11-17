@@ -1,0 +1,226 @@
+// Smart vehicle & review text cleaner and structured metadata parser for AVTOY KOREA.
+
+export function cleanCarDisplayCaption(raw) {
+  return String(raw || "")
+    .replace(/\r/g, "")
+    .replace(/\*+/g, "")
+    // Strip leftover Telegram contact tails ("Для заказа автомобиля обращайтесь: Владимир: +")
+    .replace(/(?:^|\n)\s*Для заказа(?:\s+автомобиля|\s+аналогичного автомобиля)?\s+обращайтесь\s*:?[\s\S]*$/i, "")
+    .replace(/(?:^|\n)\s*По актуальному курсу на сегодняшний день\s*/gi, "\n")
+    .replace(/(?:^|\n)\s*Организуем доставку до Вас!?\s*/gi, "\n")
+    .replace(/(?:^|\n)\s*(?:Владимир|Менеджер|Контакт|Продавец)\s*:\s*\+?\s*$/gim, "")
+    .replace(/(?:^|\n)\s*\+\s*$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+const BRAND_ALIASES = [
+  { canonical: "Kia", rx: /\b(?:kia|киа)\b/i },
+  { canonical: "Hyundai", rx: /\b(?:hyundai|хендай|хёндай|solaris|sonata|avante|palisade|kona|creta)\b/i },
+  { canonical: "Volkswagen", rx: /\b(?:volkswagen|фольксваген|vw|tharu|t-roc|t-cross|tacqua|bora|tiguan|tayron)\b/i },
+  { canonical: "Mercedes-Benz", rx: /\b(?:mercedes(?:-benz)?|мерседес|glb|glc|gle)\b/i },
+  { canonical: "Chevrolet", rx: /\b(?:chevrolet|shevrolet|шевроле|monza|trailblazer)\b/i },
+  { canonical: "Geely", rx: /\b(?:geely|джили|coolray|monjaro|atlas)\b/i },
+  { canonical: "Toyota", rx: /\b(?:toyota|тойота|rav4|camry|highlander)\b/i },
+  { canonical: "Honda", rx: /\b(?:honda|хонда|crider|cr-v|vezel|breeze)\b/i },
+  { canonical: "Mitsubishi", rx: /\b(?:mitsubishi|митсубиси|asx|outlander)\b/i },
+  { canonical: "Skoda", rx: /\b(?:skoda|шкода|kamiq|karoq|kodiaq|octavia)\b/i },
+  { canonical: "Haval", rx: /\b(?:haval|хавал|h6|jolion|dargo)\b/i },
+  { canonical: "Zeekr", rx: /\b(?:zeekr|зикр)\b/i },
+  { canonical: "KG Mobility", rx: /\b(?:kg[_\s-]*mobility|ssangyong|tiboli|tivoli|torres|korando)\b/i },
+  { canonical: "BMW", rx: /\b(?:bmw|бмв)\b/i },
+  { canonical: "Audi", rx: /\b(?:audi|ауди)\b/i },
+  { canonical: "Changan", rx: /\b(?:changan|чанган)\b/i }
+];
+
+export function parseVehicleCardData(car) {
+  const cleaned = cleanCarDisplayCaption(car?.caption || "");
+  const lines = cleaned
+    .split("\n")
+    .map(l => l.replace(/\u00a0/g, " ").trim())
+    .filter(Boolean);
+
+  // Drop promo lead-in lines like "встречайте новый" or "В НАЛИЧИИ НОВЫЙ ..."
+  let titleLineIndex = 0;
+  let promoBadge = "";
+  if (lines.length > 1 && /^(?:встречайте(?:\s+новый)?|новинка|спецпредложение|в\s+наличии)$/i.test(lines[0])) {
+    if (/в\s+наличии/i.test(lines[0])) promoBadge = "В наличии";
+    titleLineIndex = 1;
+  }
+
+  let rawTitle = (lines[titleLineIndex] || "").replace(/^в\s+наличии\s+(?:новый\s+)?/i, match => {
+    promoBadge = "В наличии";
+    return "";
+  });
+  rawTitle = rawTitle
+    .replace(/KG_MOBILITY_SSANGYONG/gi, "KG Mobility (SsangYong)")
+    .replace(/\bTIBOLI\b/gi, "Tivoli")
+    .replace(/\bShevrolet\b/gi, "Chevrolet")
+    .replace(/_/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  // Check if line right after title is an all-caps trim line (e.g. "SUPER PERFORMANCE" or "LUXURY EDITION")
+  let extraTrimLine = "";
+  if (
+    lines[titleLineIndex + 1] &&
+    !lines[titleLineIndex + 1].includes(":") &&
+    /^[A-Z0-9\s-]{4,32}$/.test(lines[titleLineIndex + 1]) &&
+    !/цена|год|пробег/i.test(lines[titleLineIndex + 1])
+  ) {
+    extraTrimLine = lines[titleLineIndex + 1];
+  }
+
+  const kvPairs = [];
+  const features = [];
+  let priceRub = null;
+  let priceFormatted = "По запросу";
+  let priceNote = "расчёт под ключ";
+
+  for (let i = 0; i < lines.length; i++) {
+    if (i === titleLineIndex || (extraTrimLine && i === titleLineIndex + 1)) continue;
+    const line = lines[i];
+
+    // Check price header + next line with number, or inline price
+    if (/^цена(?:\s+под\s+ключ)?/i.test(line)) {
+      const cityMatch = line.match(/до\s+([А-Яа-яЁёA-Za-z\s/-]+?)\s*:?$/i);
+      if (cityMatch) priceNote = "под ключ до " + cityMatch[1].trim();
+      const inlineNum = line.replace(/^.*?:/, "").trim();
+      const candidate = /\d/.test(inlineNum) ? inlineNum : (lines[i + 1] || "");
+      const digits = candidate.replace(/[^\d]/g, "");
+      if (digits.length >= 6 && digits.length <= 9) {
+        priceRub = Number(digits);
+        priceFormatted = priceRub.toLocaleString("ru-RU") + " ₽";
+        if (!/\d/.test(inlineNum)) i += 1;
+      } else if (/по\s+запросу/i.test(line) || /по\s+запросу/i.test(candidate)) {
+        priceFormatted = "По запросу";
+      }
+      continue;
+    }
+
+    // Standalone ruble price line
+    if (/^[\d\s.,]{6,15}\s*₽$/.test(line)) {
+      const digits = line.replace(/[^\d]/g, "");
+      if (digits.length >= 6) {
+        priceRub = Number(digits);
+        priceFormatted = priceRub.toLocaleString("ru-RU") + " ₽";
+        continue;
+      }
+    }
+
+    if (/^цена\s+по\s+запросу$/i.test(line)) {
+      priceFormatted = "По запросу";
+      continue;
+    }
+
+    if (/^(?:характеристики|комплектация|описание|опции)\s*:?$/i.test(line)) {
+      continue;
+    }
+
+    const colonIdx = line.indexOf(":") >= 0 ? line.indexOf(":") : line.indexOf("：");
+    if (colonIdx >= 2 && colonIdx <= 32 && line.slice(colonIdx + 1).trim()) {
+      const k = line.slice(0, colonIdx).trim();
+      const v = line.slice(colonIdx + 1).trim().replace(/\bShevrolet\b/gi, "Chevrolet");
+      kvPairs.push({ key: k, value: v });
+      continue;
+    }
+
+    // Short keyless lines like "Год 2026/06", "Бензин 2л", "Пробег 0", "Мощность 1400лс"
+    let m;
+    if ((m = line.match(/^Год(?:\s+выпуска)?\s+(.+)$/i))) {
+      kvPairs.push({ key: "Год выпуска", value: m[1] });
+    } else if ((m = line.match(/^Пробег\s+(.+)$/i))) {
+      kvPairs.push({ key: "Пробег", value: m[1] });
+    } else if ((m = line.match(/^Мощность\s+(.+)$/i))) {
+      kvPairs.push({ key: "Мощность", value: m[1] });
+    } else if ((m = line.match(/^(Бензин|Дизель|Гибрид|Электро|Газ)\s+(.+)$/i))) {
+      kvPairs.push({ key: "Топливо", value: m[1] });
+      kvPairs.push({ key: "Двигатель", value: m[2] });
+    } else if (line.length >= 3) {
+      features.push(line.replace(/^[•●▪✓✔-]\s*/, ""));
+    }
+  }
+
+  const findSpec = rx => kvPairs.find(p => rx.test(p.key))?.value || "";
+  const yearRaw = findSpec(/^год/i);
+  const yearMatch = yearRaw.match(/\b(20\d{2})\b/) || rawTitle.match(/\b(20\d{2})\b/);
+  const year = yearMatch ? yearMatch[1] : (yearRaw || "");
+
+  const mileageRaw = findSpec(/^пробег/i);
+  let mileage = "";
+  let isNew = false;
+  if (/новый|^0(?:\s*км)?$/i.test(mileageRaw.trim())) {
+    mileage = "Без пробега";
+    isNew = true;
+  } else if (mileageRaw) {
+    const mDigits = mileageRaw.replace(/[^\d]/g, "");
+    mileage = mDigits ? Number(mDigits).toLocaleString("ru-RU") + " км" : mileageRaw;
+  }
+
+  const engineVol = findSpec(/^двигатель/i);
+  const fuel = findSpec(/^топливо/i);
+  const powerRaw = findSpec(/^мощность/i);
+  const driveRaw = findSpec(/^привод/i);
+
+  let brand = "";
+  const fullSearchText = `${rawTitle} ${findSpec(/^марка/i)} ${findSpec(/^модель/i)}`;
+  for (const b of BRAND_ALIASES) {
+    if (b.rx.test(fullSearchText)) {
+      brand = b.canonical;
+      break;
+    }
+  }
+
+  const hasVideo = Array.isArray(car?.mediaItems) && car.mediaItems.some(m => m?.type === "video");
+  if (!rawTitle) {
+    rawTitle = hasVideo ? "Видеообзор автомобиля под заказ" : "Автомобиль из Южной Кореи";
+  }
+
+  // Filter redundant Марка / Модель out of displayed fullSpecs table
+  const displaySpecs = kvPairs.filter(p => !/^(?:марка|модель)$/i.test(p.key));
+
+  const engineChip = [engineVol ? (engineVol.includes("л") ? engineVol : engineVol + " л") : "", fuel]
+    .filter(Boolean)
+    .join(" · ");
+  const powerChip = powerRaw ? (powerRaw.includes("л.с") || powerRaw.includes("лс") ? powerRaw.replace(/лс/i, " л.с.").replace(/\s+/g, " ") : powerRaw + " л.с.") : "";
+  const driveChip = driveRaw ? driveRaw.replace(/\s*\(.*?\)/, "").trim() : "";
+
+  return {
+    id: car?.id || "",
+    brand: brand || "Другие",
+    title: rawTitle,
+    trim: extraTrimLine || findSpec(/^комплектация/i) || "",
+    promoBadge: promoBadge || (isNew ? "Новый" : ""),
+    year: year ? year + " г." : "",
+    mileage,
+    engineChip,
+    powerChip,
+    driveChip,
+    priceRub,
+    priceFormatted,
+    priceNote,
+    hasVideo,
+    isNew,
+    displaySpecs,
+    features,
+    cleanedCaption: cleaned
+  };
+}
+
+export function deduplicateMediaItems(items) {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    if (!item) continue;
+    const url = typeof item === "string" ? item : item.url;
+    if (!url) continue;
+    // Match trailing hash segment in migrated filenames like "-8c3245c8f1eb.jpg" or exact URL
+    const hashMatch = String(url).match(/-([0-9a-f]{12})\.[a-z0-9]+$/i);
+    const key = hashMatch ? `hash:${hashMatch[1].toLowerCase()}` : `url:${url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(typeof item === "string" ? { type: "photo", url } : item);
+  }
+  return out;
+}
