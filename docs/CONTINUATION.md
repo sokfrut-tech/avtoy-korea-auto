@@ -414,3 +414,7 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Changed `standby/server.mjs` to derive both chat ID and chat type only from `update.message.recipient`; missing or mismatched canonical recipient now fails closed. Commit `5681808629e22e523f6c04f0507e536fd5f63153`.
 - Added regression coverage for (a) `message:null` plus forged top-level `chat_id` and nested callback recipient, and (b) a top-level chat ID that conflicts with the actual message recipient. Both must return 403 without persistence. Commit `338bb0649acbb5ab8fca73cddccc0dab19709d5b`.
 - These newly added server tests have not yet been executed; they are source-level changes only pending local full-suite execution.
+
+
+## Latest Actions observation — 2026-11-17
+- Latest head `87e97aca68fc38401c965e3c6d68caa297c8b43a` triggered MAX validation run `44012659596`; job `133803099296` failed with `steps=[]`. No test command executed. This repeats the runner-before-steps failure; local focused test evidence remains 14/14 adapter/auth tests only.
