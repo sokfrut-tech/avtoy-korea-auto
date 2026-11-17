@@ -236,8 +236,10 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     const type = cleanText(update?.update_type,64);
     const timestamp = Number(update?.timestamp);
     const message = update?.message;
-    const recipient = message?.recipient || update?.callback?.message?.recipient || {};
-    const chatId = update?.chat_id ?? recipient.chat_id;
+    // MAX Update carries the destination in the top-level message.recipient.
+    // Do not accept legacy/top-level chat_id or callback.message fallbacks.
+    const recipient = message?.recipient || {};
+    const chatId = recipient.chat_id;
     const chatType = recipient.chat_type || '';
     if (!['message_created','message_callback'].includes(type) || !Number.isSafeInteger(timestamp) || timestamp <= 0) return json(res,400,{ ok:false,error:'Unsupported or malformed MAX update.' });
     if (String(chatId ?? '') !== String(env.MAX_OPERATOR_CHAT_ID) || chatType !== 'chat') return json(res,403,{ ok:false,error:'Event is outside the configured operator group.' });
