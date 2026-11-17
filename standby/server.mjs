@@ -186,10 +186,11 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
       const data = JSON.parse(await fs.readFile(snapshotFile, 'utf8'));
       return {
         cars:Array.isArray(data.cars) ? data.cars.filter(c => c && c.id && typeof c.caption === 'string' && Array.isArray(c.mediaItems)) : [],
+        news:Array.isArray(data.news) ? data.news.filter(n => n && n.id && (n.text || (Array.isArray(n.mediaItems) && n.mediaItems.length > 0))) : [],
         reviews:Array.isArray(data.reviews) ? data.reviews.filter(r => r && r.id && Array.isArray(r.mediaItems) && (r.text || r.mediaItems.length > 0)) : [],
         updatedAt:data.updatedAt || null
       };
-    } catch (e) { if (e.code === 'ENOENT') return { cars:[], reviews:[], updatedAt:null }; throw e; }
+    } catch (e) { if (e.code === 'ENOENT') return { cars:[], news:[], reviews:[], updatedAt:null }; throw e; }
   }
   async function deliver(item) {
     const token = env.TELEGRAM_BOT_TOKEN;
@@ -455,6 +456,10 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     if (req.method === 'GET' && url.pathname === '/api/cars') {
       try { const snapshot = await readSnapshot(); return json(res,200,{ cars:snapshot.cars, updatedAt:snapshot.updatedAt }); }
       catch { return json(res,500,{ error:'Каталог временно недоступен.' }); }
+    }
+    if (req.method === 'GET' && url.pathname === '/api/news') {
+      try { const snapshot = await readSnapshot(); return json(res,200,{ news:snapshot.news, updatedAt:snapshot.updatedAt }); }
+      catch { return json(res,500,{ error:'Новости временно недоступны.' }); }
     }
     if (req.method === 'GET' && url.pathname === '/api/reviews') {
       try { const snapshot = await readSnapshot(); return json(res,200,{ reviews:snapshot.reviews, updatedAt:snapshot.updatedAt }); }

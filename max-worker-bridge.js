@@ -134,11 +134,12 @@ const MAX_ADMIN_HELP = [
   "",
   "Команды администратора:",
   "• /adminlink — войти в веб-панель управления сайтом в 1 клик",
-  "• /site (или !site) — список опубликованных авто и отзывов",
+  "• /news <текст> — опубликовать новость на сайт",
+  "• /site (или !site) — список опубликованных авто, новостей и отзывов",
   "• /orders (или !orders) — последние заявки клиентов (контакты видны только в личке)",
   "• !status <номер_или_id> — проверить статус заявки",
-  "• !unpublish <id> — снять авто или отзыв с сайта",
-  "• /clean — очистить дубли фото и старые хвосты контактов в каталоге",
+  "• !unpublish <id> — снять авто, новость или отзыв с сайта",
+  "• /clean — очистить дубли фото и перенести рыночные посты в «Новости»",
   "• /replymax <user_id> <текст> — ответить клиенту в MAX",
   "• /myid — показать ваш MAX User ID",
   "• /help (или !help) — эта справка"
@@ -267,16 +268,34 @@ export async function handleMaxBotWebhook(request, env, helpers = {}) {
 
     if (/^[!/]clean$/i.test(text) && typeof cleanupCatalog === "function") {
       const res = await cleanupCatalog();
-      await replyToDialog(`✨ Автоочистка выполнена!\nОбновлено карточек авто: ${res.cleanedCars}\nСнято битых записей: ${res.removedBroken}`);
+      await replyToDialog(`✨ Автоочистка выполнена!\nОбновлено авто: ${res.cleanedCars}\nПеренесено в Новости: ${res.movedToNews || 0}\nСнято битых: ${res.removedBroken}`);
       return Response.json({ ok: true, command: "clean" });
+    }
+
+    const newsCmdMatch = text.match(/^[!/]news\s+([\s\S]+)$/i);
+    if (newsCmdMatch && env.REVIEWS) {
+      const newsId = `news_${senderId}_${Date.now()}`;
+      const newsRec = {
+        id: newsId,
+        category: "news",
+        kind: "text",
+        text: newsCmdMatch[1].trim().slice(0, 3000),
+        photos: [],
+        videos: [],
+        publishedAt: new Date().toISOString()
+      };
+      await env.REVIEWS.put("news_approved:" + newsId, JSON.stringify(newsRec));
+      await replyToDialog(`📰 Новость опубликована на сайт!\nID: ${newsId}\nЧтобы снять: !unpublish ${newsId}`);
+      return Response.json({ ok: true, command: "news", id: newsId });
     }
 
     if (/^[!/]site$/i.test(text) && env.REVIEWS) {
       const carsPage = await env.REVIEWS.list({ prefix: "car_approved:" });
+      const newsPage = await env.REVIEWS.list({ prefix: "news_approved:" });
       const revPage = await env.REVIEWS.list({ prefix: "approved:" });
       const lines = [
         `🌐 Каталог AVTOY KOREA`,
-        `🚘 Автомобилей: ${carsPage.keys.length} · ⭐ Отзывов: ${revPage.keys.length}`,
+        `🚘 Авто: ${carsPage.keys.length} · 📰 Новостей: ${newsPage.keys.length} · ⭐ Отзывов: ${revPage.keys.length}`,
         ""
       ];
       for (const k of carsPage.keys.slice(0, 15)) {
@@ -334,7 +353,7 @@ export async function handleMaxBotWebhook(request, env, helpers = {}) {
       return Response.json({ ok: true, command: "status" });
     }
 
-    const unpubMatch = text.match(/^[!/]unpublish\s+(car_-?\d+_\d+|-?\d+_\d+)$/i);
+    const unpubMatch = text.match(/^[!/]unpublish\s+((?:car_|news_)?-?\d+_\d+)$/i);
     if (unpubMatch && typeof unpublishById === "function") {
       const targetId = unpubMatch[1];
       const ok = await unpublishById(targetId);

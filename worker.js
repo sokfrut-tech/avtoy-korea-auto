@@ -1,6 +1,6 @@
 import { mergeOrderedMediaItems, orderedMediaFromRecord } from "./media-order.js";
 import { MAX_TELEGRAM_BOT_VIDEO_BYTES, deliverOrderToMax, handleMaxBotWebhook, resolveMirrorCorsHeaders } from "./max-worker-bridge.js";
-import { cleanCarDisplayCaption } from "./catalog-formatter.js";
+import { cleanCarDisplayCaption, isMarketNewsRecord } from "./catalog-formatter.js";
 import { ADMIN_PRO_CSP, ADMIN_PRO_HTML, enrichAdminItem, runAdminCatalogCleanup, sendOrEditTelegramPanel } from "./admin-suite.js";
 
 async function beginModerationEdit(callback, env, type, id, answer) {
@@ -123,6 +123,10 @@ function siteLabel(id, record) {
   const firstLine = String(record.caption || "").split("\n").find(line => line.trim()) || "Без описания";
   return "Автомобиль: " + firstLine.trim().slice(0, 60);
  }
+ if (id.startsWith("news_")) {
+  const firstLine = String(record.text || record.caption || "").split("\n").find(line => line.trim()) || "Без заголовка";
+  return "Новость: " + firstLine.trim().slice(0, 60);
+ }
  const text = String(record.text || "").trim();
  return "Отзыв: " + (text ? "«" + text.slice(0, 50) + "»" : "видео без текста");
 }
@@ -170,7 +174,8 @@ async function sendAdminHelp(env, chatId) {
 async function setAdminCommands(env, adminId) {
  await callTelegram(env, "setMyCommands", {
   commands: [
-   { command: "panel", description: "Центр управления (авто, отзывы, заявки)" },
+   { command: "panel", description: "Центр управления (авто, новости, отзывы, заявки)" },
+   { command: "news", description: "Опубликовать новость: /news текст" },
    { command: "adminlink", description: "Вход в веб-панель в 1 клик" },
    { command: "admin", description: "Меню и подсказка администратора" },
    { command: "site", description: "Полный список карточек с фото" },
@@ -184,28 +189,34 @@ async function setAdminCommands(env, adminId) {
 async function showSiteList(chatId, env) {
  if (!env.REVIEWS) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "Хранилище не настроено." });
  const cars = await env.REVIEWS.list({ prefix: "car_approved:" });
+ const news = await env.REVIEWS.list({ prefix: "news_approved:" });
  const reviews = await env.REVIEWS.list({ prefix: "approved:" });
- const entries = [...cars.keys.map(key => ({ key, type: "car" })), ...reviews.keys.map(key => ({ key, type: "review" }))];
+ const entries = [
+  ...cars.keys.map(key => ({ key, type: "car" })),
+  ...news.keys.map(key => ({ key, type: "news" })),
+  ...reviews.keys.map(key => ({ key, type: "review" }))
+ ];
  const items = [];
  for (const entry of entries) {
   const raw = await env.REVIEWS.get(entry.key.name);
   if (!raw) continue;
-  const id = entry.key.name.replace(/^(car_approved|approved):/, "");
+  const id = entry.key.name.replace(/^(car_approved|news_approved|approved):/, "");
   const record = JSON.parse(raw);
   const photos = entry.type === "car" ? postPhotos(record) : uniqueFileItems(Array.isArray(record.photos) && record.photos.length ? record.photos : (record.fileId && record.kind !== "video" ? [{ file_id: record.fileId }] : []));
-  const videos = entry.type === "car" ? postVideos(record) : uniqueFileItems(Array.isArray(record.videos) ? record.videos : (record.kind === "video" && record.fileId ? [{ file_id: record.fileId }] : []));
+  const videos = entry.type === "car" ? postVideos(record) : uniqueFileItems(Array.isArray(record.videos) && record.videos.length ? record.videos : (record.kind === "video" && record.fileId ? [{ file_id: record.fileId }] : []));
   items.push({ id, record, photos, videos, label: siteLabel(id, record), type: entry.type });
  }
  if (!items.length) return callTelegram(env, "sendMessage", { chat_id: chatId, text: "На сайте сейчас ничего не опубликовано." });
  const carsCount = items.filter(item => item.type === "car").length;
- const reviewsCount = items.length - carsCount;
+ const newsCount = items.filter(item => item.type === "news").length;
+ const reviewsCount = items.length - carsCount - newsCount;
  await callTelegram(env, "sendMessage", {
   chat_id: chatId,
-  text: "🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ\n\n🚘 Автомобилей: " + carsCount + "\n⭐ Отзывов: " + reviewsCount + "\n\nНиже — отдельные карточки. Фото, название и кнопки относятся только к одной публикации."
+  text: "🌐 УПРАВЛЕНИЕ ПУБЛИКАЦИЯМИ\n\n🚘 Автомобилей: " + carsCount + "\n📰 Новостей: " + newsCount + "\n⭐ Отзывов: " + reviewsCount + "\n\nНиже — отдельные карточки. Фото, название и кнопки относятся только к одной публикации."
  });
  for (let index = 0; index < items.length; index++) {
   const item = items[index];
-  const title = (item.type === "car" ? "🚘 АВТОМОБИЛЬ" : "⭐ ОТЗЫВ") + " · " + (index + 1) + "/" + items.length;
+  const title = (item.type === "car" ? "🚘 АВТОМОБИЛЬ" : (item.type === "news" ? "📰 НОВОСТЬ" : "⭐ ОТЗЫВ")) + " · " + (index + 1) + "/" + items.length;
   const details = title + "\n" + item.label + "\n\nФото: " + item.photos.length + " · Видео: " + item.videos.length;
   const keyboard = { inline_keyboard: [[
    { text: "✏️ Изменить описание", callback_data: "siteedit:" + item.id },
@@ -229,7 +240,7 @@ async function showSiteList(chatId, env) {
    await callTelegram(env, "sendMessage", { chat_id: chatId, text: details + (item.videos.length ? "\nВидео приложено" : "\n⚠️ Нет фотографии"), reply_markup: keyboard });
   }
  }
- return callTelegram(env, "sendMessage", { chat_id: chatId, text: "Готово. Нажимайте кнопки только под карточкой нужного автомобиля или отзыва.", reply_markup: { inline_keyboard: [[{ text: "❓ Подсказка администратора", callback_data: "adminhelp" }]] } });
+ return callTelegram(env, "sendMessage", { chat_id: chatId, text: "Готово. Нажимайте кнопки только под карточкой нужного автомобиля, новости или отзыва.", reply_markup: { inline_keyboard: [[{ text: "❓ Подсказка администратора", callback_data: "adminhelp" }]] } });
 }
 
 async function sendPendingCarCard(env, adminIds, car, id, lead) {
@@ -254,10 +265,11 @@ async function handleSiteDeleteCallback(callback, env, adminIds) {
   if (chat && messageId) await callTelegram(env, "deleteMessage", { chat_id: chat.id, message_id: messageId });
   return answer("Отменено");
  }
- const match = data.match(/^sitedel(ok)?:(car_-?\d+_\d+|-?\d+_\d+)$/);
+ const match = data.match(/^sitedel(ok)?:(car_-?\d+_\d+|news_[A-Za-z0-9_-]+|-?\d+_\d+)$/);
  if (!match || !env.REVIEWS) return answer("Материал не найден", true);
  const confirmed = Boolean(match[1]), id = match[2];
- const raw = await env.REVIEWS.get((id.startsWith("car_") ? "car_approved:" : "approved:") + id);
+ const prefix = id.startsWith("car_") ? "car_approved:" : (id.startsWith("news_") ? "news_approved:" : "approved:");
+ const raw = await env.REVIEWS.get(prefix + id);
  if (!raw) return answer("Уже не опубликовано на сайте", true);
  const record = JSON.parse(raw);
  if (!confirmed) {
@@ -270,7 +282,7 @@ async function handleSiteDeleteCallback(callback, env, adminIds) {
  }
  const removed = await unpublishItem(env, adminIds, id);
  if (!removed) return answer("Уже не опубликовано на сайте", true);
- await writeLog(env, fromId, "снят с сайта", id.startsWith("car_") ? "машина" : "отзыв", id, siteLabel(id, record));
+ await writeLog(env, fromId, "снят с сайта", id.startsWith("car_") ? "машина" : (id.startsWith("news_") ? "новость" : "отзыв"), id, siteLabel(id, record));
  await offerUndo(env, fromId, id, { action: "restore", record }, "↩️ Снято с сайта. Материал в ожидании модерации.");
  if (chat && messageId) await callTelegram(env, "deleteMessage", { chat_id: chat.id, message_id: messageId });
  return answer("Снято с сайта. Материал вернулся в ожидание");
@@ -280,18 +292,19 @@ async function handleSiteEditCallback(callback, env, adminIds) {
  const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
  const adminId = String((callback.from && callback.from.id) || "");
  if (!adminIds.includes(adminId) || !env.REVIEWS) return answer("Нет доступа", true);
- const match = String(callback.data || "").match(/^siteedit:(car_-?\d+_\d+|-?\d+_\d+)$/);
+ const match = String(callback.data || "").match(/^siteedit:(car_-?\d+_\d+|news_[A-Za-z0-9_-]+|-?\d+_\d+)$/);
  if (!match) return answer("Материал не найден", true);
  const id = match[1];
  const isCar = id.startsWith("car_");
- const key = (isCar ? "car_approved:" : "approved:") + id;
+ const isNews = id.startsWith("news_");
+ const key = (isCar ? "car_approved:" : (isNews ? "news_approved:" : "approved:")) + id;
  const raw = await env.REVIEWS.get(key);
  if (!raw) return answer("Публикация уже снята с сайта", true);
  const record = JSON.parse(raw);
- const session = { type: isCar ? "car_site" : "review_site", id, createdAt: new Date().toISOString() };
+ const session = { type: isCar ? "car_site" : (isNews ? "news_site" : "review_site"), id, createdAt: new Date().toISOString() };
  await env.REVIEWS.put("moderation_edit:" + adminId, JSON.stringify(session), { expirationTtl: 86400 });
- const label = isCar ? "АВТОМОБИЛЯ" : "ОТЗЫВА";
- const currentText = String(isCar ? record.caption || "" : record.text || "");
+ const label = isCar ? "АВТОМОБИЛЯ" : (isNews ? "НОВОСТИ" : "ОТЗЫВА");
+ const currentText = String(isCar ? record.caption || "" : record.text || record.caption || "");
  const instructions = "Текущий опубликованный текст ниже. Ответьте на это сообщение одной командой:\n" +
   "• ЗАМЕНИТЬ: старый фрагмент => новый фрагмент\n" +
   "• УДАЛИТЬ: ненужный фрагмент\n" +
@@ -313,17 +326,18 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
  const promptText = String(msg.reply_to_message.text || msg.reply_to_message.caption || "");
  if (!promptText.startsWith("✏️ РЕДАКТИРОВАНИЕ ")) return false;
  const session = JSON.parse(rawSession);
- if (!session || !["review", "car", "car_site", "review_site"].includes(session.type) || !session.id) return false;
+ if (!session || !["review", "car", "news", "car_site", "review_site", "news_site"].includes(session.type) || !session.id) return false;
  const instruction = String(msg.text || msg.caption || "").trim();
  if (!instruction) {
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: "Правка пустая. Отправьте команду изменения или полный текст ответом на сообщение редактирования." });
   return true;
  }
- const isPublished = session.type === "car_site" || session.type === "review_site";
+ const isPublished = session.type === "car_site" || session.type === "review_site" || session.type === "news_site";
  const isCar = session.type === "car" || session.type === "car_site";
+ const isNews = session.type === "news" || session.type === "news_site";
  const key = isPublished
-  ? (isCar ? "car_approved:" : "approved:") + session.id
-  : (isCar ? "car_pending:" : "pending:") + session.id;
+  ? (isCar ? "car_approved:" : (isNews ? "news_approved:" : "approved:")) + session.id
+  : (isCar ? "car_pending:" : (isNews ? "news_pending:" : "pending:")) + session.id;
  const raw = await env.REVIEWS.get(key);
  if (!raw) {
   await env.REVIEWS.delete("moderation_edit:" + adminId);
@@ -348,6 +362,9 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
   if (isCar) {
    item.originalCaption = item.originalCaption === undefined ? item.caption : item.originalCaption;
    item.caption = edited.slice(0, 3000);
+  } else if (isNews) {
+   item.originalText = item.originalText === undefined ? item.text : item.originalText;
+   item.text = cleanCarDisplayCaption(edited).slice(0, 3000);
   } else {
    item.originalText = item.originalText === undefined ? item.text : item.originalText;
    item.text = edited.slice(0, 1000);
@@ -356,7 +373,7 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
   item.editedAt = new Date().toISOString();
   item.editedBy = adminId;
   await env.REVIEWS.put(key, JSON.stringify(item));
-  await writeLog(env, adminId, "изменён текст опубликованного материала", isCar ? "машина" : "отзыв", session.id, siteLabel(session.id, item));
+  await writeLog(env, adminId, "изменён текст опубликованного материала", isCar ? "машина" : (isNews ? "новость" : "отзыв"), session.id, siteLabel(session.id, item));
   await env.REVIEWS.delete("moderation_edit:" + adminId);
   await callTelegram(env, "sendMessage", {
    chat_id: adminId,
@@ -375,6 +392,17 @@ async function handleAdminModerationEditReply(msg, env, adminIds) {
    [{ text: "✏️ Редактировать описание", callback_data: "caredit:" + session.id }]
   ] };
   await callTelegram(env, "sendMessage", { chat_id: adminId, text: "🚘 ОПИСАНИЕ АВТОМОБИЛЯ ОБНОВЛЕНО\n\n" + item.caption + "\n\nИсходный текст сохранён в хранилище.", reply_markup: keyboard });
+ } else if (isNews) {
+  item.originalText = item.originalText === undefined ? item.text : item.originalText;
+  item.text = cleanCarDisplayCaption(edited).slice(0, 3000);
+  item.editedAt = new Date().toISOString();
+  item.editedBy = adminId;
+  await env.REVIEWS.put(key, JSON.stringify(item));
+  const keyboard = { inline_keyboard: [
+   [{ text: "✅ Опубликовать новость", callback_data: "newspub:" + session.id }, { text: "❌ Отклонить", callback_data: "newsrej:" + session.id }],
+   [{ text: "✏️ Редактировать текст", callback_data: "newsedit:" + session.id }]
+  ] };
+  await callTelegram(env, "sendMessage", { chat_id: adminId, text: "📰 ТЕКСТ НОВОСТИ ОБНОВЛЁН\n\n" + item.text + "\n\nИсходный текст сохранён в хранилище.", reply_markup: keyboard });
  } else {
   item.originalText = item.originalText === undefined ? item.text : item.originalText;
   item.text = edited.slice(0, 1000);
@@ -717,8 +745,8 @@ async function handleAdminMediaUpload(msg, env, adminIds) {
  }
  if (!state.cardSent) {
   const review = state.review;
-  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}],[{text:"🚘 Опубликовать как АВТОМОБИЛЬ",callback_data:"pubascar:" + id}]]};
-  await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nМедиа загружено вами в личный чат с ботом. Можно опубликовать как отзыв или сразу как автомобиль в каталог.",reply_markup:keyboard});
+  const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать",callback_data:"pub:" + id},{text:"❌ Не публиковать",callback_data:"rej:" + id}],[{text:"🙈 Скрыть имя",callback_data:"anon:" + id}],[{text:"🚘 Как АВТОМОБИЛЬ",callback_data:"pubascar:" + id},{text:"📰 Как НОВОСТЬ",callback_data:"pubasnews:" + id}]]};
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:formatReviewCard(review) + "\n\nМедиа загружено вами в личный чат с ботом. Выберите, куда опубликовать: Отзыв, Автомобиль или Новость.",reply_markup:keyboard});
   state.cardSent = true;
   await env.REVIEWS.put(uploadKey,JSON.stringify(state),{expirationTtl:2592000});
  }
@@ -886,7 +914,8 @@ async function offerUndo(env, adminId, id, state, text, extraRows) {
 // Снимает материал с сайта и возвращает в ожидание. Возвращает прежнюю запись или null.
 async function unpublishItem(env, adminIds, id) {
  const isCar = id.startsWith("car_");
- const storedKey = (isCar ? "car_approved:" : "approved:") + id;
+ const isNews = id.startsWith("news_");
+ const storedKey = (isCar ? "car_approved:" : (isNews ? "news_approved:" : "approved:")) + id;
  const raw = await env.REVIEWS.get(storedKey);
  if (!raw) return null;
  const record = JSON.parse(raw);
@@ -896,6 +925,16 @@ async function unpublishItem(env, adminIds, id) {
   await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
   await env.REVIEWS.delete(storedKey);
   await sendPendingCarCard(env, adminIds, car, id, "↩️ Снято с сайта. Объявление снова ожидает решения модератора.");
+ } else if (isNews) {
+  const newsItem = { ...record };
+  delete newsItem.publishedAt;
+  await env.REVIEWS.put("news_pending:" + id, JSON.stringify(newsItem));
+  await env.REVIEWS.delete(storedKey);
+  await Promise.all(adminIds.map(adminId => callTelegram(env, "sendMessage", {
+   chat_id: adminId,
+   text: "↩️ Новость снята с сайта и перемещена в очередь модерации.\n\n" + String(newsItem.text || newsItem.caption || "").slice(0, 1500),
+   reply_markup: { inline_keyboard: [[{ text: "✅ Опубликовать снова", callback_data: "newspub:" + id }, { text: "❌ Удалить", callback_data: "newsrej:" + id }]] }
+  })));
  } else {
   const photos = Array.isArray(record.photos) ? record.photos : [];
   const review = {
@@ -917,23 +956,24 @@ async function handleUndoCallback(callback, env, adminIds) {
  const answer = (text, alert = false) => callTelegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text, show_alert: alert });
  const fromId = String((callback.from && callback.from.id) || "");
  if (!adminIds.includes(fromId)) return answer("Нет доступа", true);
- const match = String(callback.data || "").match(/^undo:((?:car_)?-?\d+_\d+)$/);
+ const match = String(callback.data || "").match(/^undo:(car_-?\d+_\d+|news_[A-Za-z0-9_-]+|-?\d+_\d+)$/);
  if (!match || !env.REVIEWS) return answer("Не распознано", true);
  const id = match[1];
  const raw = await env.REVIEWS.get("undo:" + id);
  if (!raw) return answer("Время для отмены вышло", true);
  const state = JSON.parse(raw);
  await env.REVIEWS.delete("undo:" + id);
- const kind = id.startsWith("car_") ? "машина" : "отзыв";
+ const isCar = id.startsWith("car_");
+ const isNews = id.startsWith("news_");
+ const kind = isCar ? "машина" : (isNews ? "новость" : "отзыв");
  if (state.action === "unpublish") {
   const done = await unpublishItem(env, adminIds, id);
   if (!done) return answer("Уже не на сайте", true);
   await writeLog(env, fromId, "отмена публикации", kind, id, "");
   return answer("Публикация отменена");
  }
-  const isCar = id.startsWith("car_");
-  await env.REVIEWS.put((isCar ? "car_approved:" : "approved:") + id, JSON.stringify(state.record));
-  await env.REVIEWS.delete((isCar ? "car_pending:" : "pending:") + id);
+  await env.REVIEWS.put((isCar ? "car_approved:" : (isNews ? "news_approved:" : "approved:")) + id, JSON.stringify(state.record));
+  await env.REVIEWS.delete((isCar ? "car_pending:" : (isNews ? "news_pending:" : "pending:")) + id);
   await writeLog(env, fromId, "отмена снятия", kind, id, "");
   return answer("Снова опубликовано на сайте");
 }
@@ -1313,11 +1353,77 @@ async function handleImportedReview(post, env, adminIds) {
  }
 }
 
+async function handleNewsPost(post, env, adminIds) {
+ const chat = post.chat || {};
+ if (!env.REVIEWS) return;
+ const text = cleanCarDisplayCaption(cleanPublicationText(post.caption || post.text)).slice(0, 3000);
+ const photos = postPhotos(post);
+ const videos = postVideos(post);
+ if (!text && !photos.length && !videos.length) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"Новость не импортирована: нет текста, фото или видео."})));
+  return;
+ }
+ const number = messageNumberOf(post.message_id);
+ const id = "news_" + String(chat.id || "admin").replace(/-/g,"") + "_" + number;
+ if (await env.REVIEWS.get("news_approved:" + id)) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"✅ Эта новость уже опубликована на сайте."})));
+  return;
+ }
+ const newsItem = {
+  id,
+  category: "news",
+  kind: videos.length ? "video" : "text",
+  text,
+  fileId: photos[0]?.file_id || videos[0]?.file_id || null,
+  photos,
+  videos,
+  mediaItems: Array.isArray(post.mediaItems) ? post.mediaItems : [],
+  mediaOrderKnown: post.mediaOrderKnown === true,
+  createdAt: new Date().toISOString()
+ };
+ await env.REVIEWS.put("news_pending:" + id, JSON.stringify(newsItem));
+ const keyboard = {inline_keyboard:[[{text:"✅ Опубликовать новость",callback_data:"newspub:" + id},{text:"❌ Отклонить",callback_data:"newsrej:" + id}],[{text:"✏️ Редактировать текст",callback_data:"newsedit:" + id}]]};
+ await Promise.all(adminIds.map(async adminId => {
+  await sendChannelMedia(env, adminId, photos, videos, text, newsItem.mediaOrderKnown ? newsItem.mediaItems : null);
+  await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📰 НОВОСТЬ НА МОДЕРАЦИИ\n\n" + (text || "Без текста") + "\n\nФото: " + photos.length + " · Видео: " + videos.length,reply_markup:keyboard});
+ }));
+}
+
+async function handleNewsCallback(callback, env, adminIds) {
+ const answer = (text, alert=false) => callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
+ const fromId = String((callback.from && callback.from.id) || "");
+ if (!adminIds.includes(fromId)) return answer("Нет доступа",true);
+ const match = String(callback.data || "").match(/^news(pub|rej|edit):(news_-?[0-9a-z_]+)$/i);
+ if (!match || !env.REVIEWS) return answer("Новость не найдена",true);
+ const [, action, id] = match;
+ const raw = await env.REVIEWS.get("news_pending:" + id);
+ if (!raw) return answer("Новость уже обработана или не найдена",true);
+ const newsItem = JSON.parse(raw);
+ if (action === "edit") {
+  await env.REVIEWS.put("moderation_edit:" + fromId, JSON.stringify({ type: "news", id, createdAt: new Date().toISOString() }), { expirationTtl: 86400 });
+  await callTelegram(env, "sendMessage", {
+   chat_id: fromId,
+   text: "✏️ РЕДАКТИРОВАНИЕ НОВОСТИ\n\nОтправьте исправленный текст ответом на это сообщение:\n\n" + (newsItem.text || "— пусто —").slice(0, 3000),
+   reply_markup: { force_reply: true }
+  });
+  return answer("Отправьте новый текст ответом");
+ }
+ if (action === "rej") {
+  await env.REVIEWS.delete("news_pending:" + id);
+  return answer("Новость отклонена");
+ }
+ await env.REVIEWS.put("news_approved:" + id, JSON.stringify({ ...newsItem, publishedAt: new Date().toISOString() }));
+ await env.REVIEWS.delete("news_pending:" + id);
+ await writeLog(env, fromId, "опубликована", "новость", id, siteLabel(id, newsItem));
+ await offerUndo(env, fromId, id, { action: "unpublish" }, "📰 Новость опубликована на сайте!", [[{ text: "🗑 Убрать с сайта", callback_data: "sitedel:" + id }]]);
+ return answer("Новость опубликована на сайте");
+}
+
 async function handleImportChoice(callback, env, adminIds) {
  const answer = (text, alert=false) => callTelegram(env,"answerCallbackQuery",{callback_query_id:callback.id,text,show_alert:alert});
  const fromId = String((callback.from && callback.from.id) || "");
  if (!adminIds.includes(fromId)) return answer("Нет доступа",true);
- const match = String(callback.data || "").match(/^imp:(car|review):(-?\d+_\d+)$/);
+ const match = String(callback.data || "").match(/^imp:(car|review|news):(-?\d+_\d+)$/);
  if (!match || !env.REVIEWS) return answer("Импорт не найден",true);
  const [,kind,id] = match;
  const key = "import_pending:" + id;
@@ -1326,14 +1432,15 @@ async function handleImportChoice(callback, env, adminIds) {
  const entry = JSON.parse(raw);
  const post = entry && entry.post ? entry.post : entry;
  if (kind === "car") await handleCarPost(post,env,adminIds);
+ else if (kind === "news") await handleNewsPost(post,env,adminIds);
  else await handleImportedReview(post,env,adminIds);
  await env.REVIEWS.delete(key);
- return answer(kind === "car" ? "Передано в модерацию автомобилей" : "Передано в модерацию отзывов");
+ return answer(kind === "car" ? "Передано в модерацию автомобилей" : (kind === "news" ? "Передано в модерацию новостей" : "Передано в модерацию отзывов"));
 }
 
 async function resendChannelImportEntry(entry, id, env, adminIds) {
  const post = entry && entry.post ? entry.post : entry;
- const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
+ const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id},{text:"📰 Новость",callback_data:"imp:news:" + id}]]};
  const photos = postPhotos(post);
  const videos = postVideos(post);
  const caption = String(post.caption || post.text || "Без текста").slice(0,2500);
@@ -1397,6 +1504,21 @@ async function mergeChannelPartMedia(post, id, env) {
   car.mediaOrderKnown = hadCanonicalOrder ? (car.mediaOrderKnown === true && mergedOrder.mediaOrderKnown) : (!hadCarMedia && mergedOrder.mediaOrderKnown);
   if (!car.fileId) car.fileId = (car.photos[car.photos.length - 1] || car.videos[0] || {}).file_id || null;
   await env.REVIEWS.put(carKey, JSON.stringify(car));
+  return;
+ }
+ const newsKey = "news_pending:news_" + String(id).slice(0, String(id).lastIndexOf("_")).replace(/-/g,"") + "_" + number;
+ const newsRaw = await env.REVIEWS.get(newsKey);
+ if (newsRaw) {
+  const newsItem = JSON.parse(newsRaw);
+  const hadMedia = (Array.isArray(newsItem.photos) && newsItem.photos.length) || (Array.isArray(newsItem.videos) && newsItem.videos.length) || Boolean(newsItem.fileId);
+  const hadCanonicalOrder = Array.isArray(newsItem.mediaItems) && newsItem.mediaItems.length > 0;
+  newsItem.photos = uniqueFileItems([...(Array.isArray(newsItem.photos) ? newsItem.photos : []), ...photos]);
+  newsItem.videos = uniqueFileItems([...(Array.isArray(newsItem.videos) ? newsItem.videos : []), ...videos]);
+  const mergedOrder = mergeOrderedMediaItems(newsItem.mediaItems || [], incomingItems);
+  newsItem.mediaItems = mergedOrder.mediaItems;
+  newsItem.mediaOrderKnown = hadCanonicalOrder ? (newsItem.mediaOrderKnown === true && mergedOrder.mediaOrderKnown) : (!hadMedia && mergedOrder.mediaOrderKnown);
+  if (!newsItem.fileId) newsItem.fileId = (newsItem.photos[0] || newsItem.videos[0] || {}).file_id || null;
+  await env.REVIEWS.put(newsKey, JSON.stringify(newsItem));
  }
 }
 
@@ -1421,8 +1543,10 @@ async function stageChannelPost(post, env, adminIds) {
  }
  const number = messageNumberOf(id);
  const carId = "car_" + String(chat.id).replace(/-/g,"") + "_" + number;
+ const newsId = "news_" + String(chat.id).replace(/-/g,"") + "_" + number;
  const approvedCar = await env.REVIEWS.get("car_approved:" + carId);
- if (await env.REVIEWS.get("approved:" + id) || approvedCar) {
+ const approvedNews = await env.REVIEWS.get("news_approved:" + newsId);
+ if (await env.REVIEWS.get("approved:" + id) || approvedCar || approvedNews) {
   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"✅ Эта публикация уже опубликована на сайте. Повторная копия не создана: https://t.me/" + chat.username + "/" + number})));
   return;
  }
@@ -1460,7 +1584,7 @@ async function stageChannelPost(post, env, adminIds) {
  const mediaSeed = mergeOrderedMediaItems([], [...photos.map(item=>({...item,type:item.mime_type ? "document" : "photo",sourceMessageId:Number(post.message_id)||null})), ...videos.map(item=>({...item,type:"video",sourceMessageId:Number(post.message_id)||null}))]);
  const stored = {...post,chat,message_id:Number(number),albumId:post.media_group_id ? String(post.media_group_id) : "",photo:photos,videos,mediaItems:mediaSeed.mediaItems,mediaOrderKnown:mediaSeed.mediaOrderKnown};
  await env.REVIEWS.put("import_pending:" + id,JSON.stringify({...stored,post:stored}),{expirationTtl:2592000});
- const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id}]]};
+ const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id},{text:"📰 Новость",callback_data:"imp:news:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
   await sendChannelMedia(env, adminId, photos, videos, "", stored.mediaOrderKnown === true ? stored.mediaItems : null);
   await callTelegram(env,"sendMessage",{chat_id:adminId,text:"📥 Новая публикация из @avtoYkorea. Выберите раздел для импорта.\n\n" + String(post.caption || post.text || "Без текста").slice(0,2500) + "\n\nСнимки одного альбома объединяются в одну карточку.\nДата оригинала: " + (post.sourceDate ? new Date(post.sourceDate*1000).toLocaleString("ru-RU",{timeZone:"Europe/Moscow"}) : "не определена"),reply_markup:keyboard}); }));
@@ -1750,7 +1874,7 @@ async function handleWebAdminApi(request, url, env, adminIds) {
 
  if ((path === "/api/admin/items" || path === "/api/admin/dashboard") && request.method === "GET") {
   const items = [];
-  for (const [prefix, isCar] of [["car_approved:", true], ["approved:", false]]) {
+  for (const [prefix, kind] of [["car_approved:", "car"], ["news_approved:", "news"], ["approved:", "review"]]) {
    let cursor;
    do {
     const page = await env.REVIEWS.list({ prefix, ...(cursor ? { cursor } : {}) });
@@ -1760,17 +1884,17 @@ async function handleWebAdminApi(request, url, env, adminIds) {
      let record;
      try { record = JSON.parse(raw); } catch { continue; }
      const id = key.name.slice(prefix.length);
-     items.push(enrichAdminItem(id, record, isCar, siteLabel));
-     if (items.length >= 100) break;
+     items.push(enrichAdminItem(id, record, kind, siteLabel));
+     if (items.length >= 120) break;
     }
-    cursor = items.length >= 100 || page.list_complete ? null : page.cursor;
+    cursor = items.length >= 120 || page.list_complete ? null : page.cursor;
    } while (cursor);
   }
   items.sort((a, b) => String(b.publishedAt).localeCompare(String(a.publishedAt)));
   if (path === "/api/admin/items") return json({ items });
 
   const pending = [];
-  for (const [prefix, isCar] of [["car_pending:", true], ["pending:", false]]) {
+  for (const [prefix, kind] of [["car_pending:", "car"], ["news_pending:", "news"], ["pending:", "review"]]) {
    const page = await env.REVIEWS.list({ prefix });
    for (const key of page.keys.slice(0, 50)) {
     const raw = await env.REVIEWS.get(key.name);
@@ -1780,10 +1904,10 @@ async function handleWebAdminApi(request, url, env, adminIds) {
      const id = key.name.slice(prefix.length);
      pending.push({
       id,
-      kind: isCar ? "car" : "review",
+      kind,
       cleanTitle: siteLabel(id, record),
       label: siteLabel(id, record),
-      text: String(isCar ? record.caption || "" : record.text || ""),
+      text: String(kind === "car" ? record.caption || "" : record.text || record.caption || ""),
       mediaCount: (Array.isArray(record.photos) ? record.photos.length : 0) + (Array.isArray(record.videos) ? record.videos.length : 0),
       mediaItems: [],
       publishedAt: record.createdAt || ""
@@ -1803,20 +1927,76 @@ async function handleWebAdminApi(request, url, env, adminIds) {
   return json({ items, pending, orders });
  }
 
+ if (path === "/api/admin/news" && request.method === "POST") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  let body = {};
+  try { body = await request.json(); } catch { return json({ error: "Invalid request" }, 400); }
+  const cleaned = cleanCarDisplayCaption(cleanPublicationText(String(body?.text || ""))).slice(0, 3000);
+  if (!cleaned) return json({ error: "Введите текст новости" }, 400);
+  const id = "news_admin_" + Date.now();
+  const newsRec = {
+   id,
+   category: "news",
+   kind: "text",
+   text: cleaned,
+   photos: [],
+   videos: [],
+   publishedAt: new Date().toISOString()
+  };
+  await env.REVIEWS.put("news_approved:" + id, JSON.stringify(newsRec));
+  await writeLog(env, session.adminId, "опубликована через веб-панель", "новость", id, siteLabel(id, newsRec));
+  return json({ ok: true, id });
+ }
+
  if (path === "/api/admin/cleanup" && request.method === "POST") {
   if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
   const res = await runAdminCatalogCleanup(env, session.adminId, writeLog);
   return json({ ok: true, ...res });
  }
 
- const pendingPubMatch = path.match(/^\/api\/admin\/pending\/(car_-?\d+_\d+|-?\d+_\d+)\/publish$/);
+ const moveMatch = path.match(/^\/api\/admin\/items\/(news_[A-Za-z0-9_-]+|-?\d+_\d+)\/move$/);
+ if (moveMatch && request.method === "POST") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  const id = moveMatch[1];
+  let body = {};
+  try { body = await request.json(); } catch {}
+  const targetKind = body?.targetKind === "news" ? "news" : (body?.targetKind === "review" ? "review" : "");
+  if (!targetKind) return json({ error: "Invalid targetKind" }, 400);
+  if (targetKind === "news" && !id.startsWith("news_")) {
+   const raw = await env.REVIEWS.get("approved:" + id);
+   if (!raw) return json({ error: "Review not found" }, 404);
+   const rev = JSON.parse(raw);
+   const newId = "news_" + id.replace(/^-/, "");
+   const newsRec = { ...rev, id: newId, originalReviewId: id, category: "news", publishedAt: rev.publishedAt || new Date().toISOString() };
+   await env.REVIEWS.put("news_approved:" + newId, JSON.stringify(newsRec));
+   await env.REVIEWS.delete("approved:" + id);
+   await writeLog(env, session.adminId, "перенесено из отзывов в новости", "новость", newId, siteLabel(newId, newsRec));
+   return json({ ok: true, id: newId });
+  }
+  if (targetKind === "review" && id.startsWith("news_")) {
+   const raw = await env.REVIEWS.get("news_approved:" + id);
+   if (!raw) return json({ error: "News item not found" }, 404);
+   const rec = JSON.parse(raw);
+   const revId = rec.originalReviewId || (/^\d+_\d+$/.test(id.slice(5)) ? id.slice(5) : "0_" + Date.now());
+   const revRec = { ...rec, id: revId, category: "review", publishedAt: rec.publishedAt || new Date().toISOString() };
+   delete revRec.originalReviewId;
+   await env.REVIEWS.put("approved:" + revId, JSON.stringify(revRec));
+   await env.REVIEWS.delete("news_approved:" + id);
+   await writeLog(env, session.adminId, "перенесено из новостей в отзывы", "отзыв", revId, siteLabel(revId, revRec));
+   return json({ ok: true, id: revId });
+  }
+  return json({ ok: true, id });
+ }
+
+ const pendingPubMatch = path.match(/^\/api\/admin\/pending\/(car_-?\d+_\d+|news_[A-Za-z0-9_-]+|-?\d+_\d+)\/publish$/);
  if (pendingPubMatch && request.method === "POST") {
   if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
   const id = pendingPubMatch[1];
   let body = {};
   try { body = await request.json(); } catch {}
   const isCar = id.startsWith("car_") || body.kind === "car";
-  const pendKey = (id.startsWith("car_") ? "car_pending:" : "pending:") + id;
+  const isNews = !isCar && (id.startsWith("news_") || body.kind === "news");
+  const pendKey = (id.startsWith("car_") ? "car_pending:" : (id.startsWith("news_") ? "news_pending:" : "pending:")) + id;
   const raw = await env.REVIEWS.get(pendKey);
   if (!raw) return json({ error: "Pending item not found" }, 404);
   const rec = JSON.parse(raw);
@@ -1827,21 +2007,28 @@ async function handleWebAdminApi(request, url, env, adminIds) {
    rec.id = carId;
    rec.publishedAt = new Date().toISOString();
    await env.REVIEWS.put("car_approved:" + carId, JSON.stringify(rec));
+  } else if (isNews) {
+   const newsId = id.startsWith("news_") ? id : "news_" + id.replace(/-/g, "");
+   if (customText !== null) rec.text = cleanCarDisplayCaption(customText).slice(0, 3000);
+   rec.id = newsId;
+   rec.category = "news";
+   rec.publishedAt = new Date().toISOString();
+   await env.REVIEWS.put("news_approved:" + newsId, JSON.stringify(rec));
   } else {
    if (customText !== null) rec.text = customText.slice(0, 1000);
    rec.publishedAt = new Date().toISOString();
    await env.REVIEWS.put("approved:" + id, JSON.stringify(rec));
   }
   await env.REVIEWS.delete(pendKey);
-  await writeLog(env, session.adminId, "опубликован через веб-панель", isCar ? "машина" : "отзыв", id, "");
+  await writeLog(env, session.adminId, "опубликован через веб-панель", isCar ? "машина" : (isNews ? "новость" : "отзыв"), id, "");
   return json({ ok: true });
  }
 
- const pendingDelMatch = path.match(/^\/api\/admin\/pending\/(car_-?\d+_\d+|-?\d+_\d+)$/);
+ const pendingDelMatch = path.match(/^\/api\/admin\/pending\/(car_-?\d+_\d+|news_[A-Za-z0-9_-]+|-?\d+_\d+)$/);
  if (pendingDelMatch && request.method === "DELETE") {
   if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
   const id = pendingDelMatch[1];
-  await env.REVIEWS.delete((id.startsWith("car_") ? "car_pending:" : "pending:") + id);
+  await env.REVIEWS.delete((id.startsWith("car_") ? "car_pending:" : (id.startsWith("news_") ? "news_pending:" : "pending:")) + id);
   return json({ ok: true });
  }
 
@@ -1863,14 +2050,15 @@ async function handleWebAdminApi(request, url, env, adminIds) {
   return json({ ok: true });
  }
 
- const itemMatch = path.match(/^\/api\/admin\/items\/(car_-?\d+_\d+|-?\d+_\d+)$/);
+ const itemMatch = path.match(/^\/api\/admin\/items\/(car_-?\d+_\d+|news_[A-Za-z0-9_-]+|-?\d+_\d+)$/);
  if (itemMatch && request.method === "PATCH") {
   if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
   let body;
   try { body = await request.json(); } catch { return json({ error: "Invalid request" }, 400); }
   const id = itemMatch[1];
   const isCar = id.startsWith("car_");
-  const key = (isCar ? "car_approved:" : "approved:") + id;
+  const isNews = id.startsWith("news_");
+  const key = (isCar ? "car_approved:" : (isNews ? "news_approved:" : "approved:")) + id;
   const raw = await env.REVIEWS.get(key);
   if (!raw) return json({ error: "Publication not found" }, 404);
   const record = JSON.parse(raw);
@@ -1899,9 +2087,9 @@ async function handleWebAdminApi(request, url, env, adminIds) {
 
   let edited;
   if (typeof body?.directText === "string") {
-   edited = isCar ? cleanCarDisplayCaption(cleanPublicationText(body.directText)) : cleanPublicationText(body.directText);
+   edited = (isCar || isNews) ? cleanCarDisplayCaption(cleanPublicationText(body.directText)) : cleanPublicationText(body.directText);
   } else {
-   const currentText = String(isCar ? record.caption || "" : record.text || "");
+   const currentText = String(isCar ? record.caption || "" : record.text || record.caption || "");
    const instruction = String(body && body.instruction || "").trim();
    if (!instruction) return json({ error: "Text is required" }, 400);
    const edit = applyModerationTextEdit(currentText, instruction);
@@ -1913,6 +2101,9 @@ async function handleWebAdminApi(request, url, env, adminIds) {
   if (isCar) {
    record.originalCaption = record.originalCaption === undefined ? record.caption : record.originalCaption;
    record.caption = String(edited || "").slice(0, 3000);
+  } else if (isNews) {
+   record.originalText = record.originalText === undefined ? record.text : record.originalText;
+   record.text = String(edited || "").slice(0, 3000);
   } else {
    record.originalText = record.originalText === undefined ? record.text : record.originalText;
    record.text = String(edited || "").slice(0, 1000);
@@ -1921,7 +2112,7 @@ async function handleWebAdminApi(request, url, env, adminIds) {
   record.editedAt = new Date().toISOString();
   record.editedBy = session.adminId;
   await env.REVIEWS.put(key, JSON.stringify(record));
-  await writeLog(env, session.adminId, "изменён текст через веб-панель", isCar ? "машина" : "отзыв", id, siteLabel(id, record));
+  await writeLog(env, session.adminId, "изменён текст через веб-панель", isCar ? "машина" : (isNews ? "новость" : "отзыв"), id, siteLabel(id, record));
   return json({ ok: true });
  }
 
@@ -1930,7 +2121,7 @@ async function handleWebAdminApi(request, url, env, adminIds) {
   const id = itemMatch[1];
   const record = await unpublishItem(env, adminIds, id);
   if (!record) return json({ error: "Publication not found" }, 404);
-  await writeLog(env, session.adminId, "снят с сайта через веб-панель", id.startsWith("car_") ? "машина" : "отзыв", id, siteLabel(id, record));
+  await writeLog(env, session.adminId, "снят с сайта через веб-панель", id.startsWith("car_") ? "машина" : (id.startsWith("news_") ? "новость" : "отзыв"), id, siteLabel(id, record));
   return json({ ok: true });
  }
  return json({ error: "Not found" }, 404);
@@ -1960,7 +2151,7 @@ export default {
     cleanupCatalog: () => runAdminCatalogCleanup(env, adminIds[0] || "max_admin", writeLog)
    });
   }
-  if (request.method === "OPTIONS" && (url.pathname === "/api/request" || url.pathname === "/api/cars" || url.pathname === "/api/reviews")) {
+  if (request.method === "OPTIONS" && (url.pathname === "/api/request" || url.pathname === "/api/cars" || url.pathname === "/api/reviews" || url.pathname === "/api/news")) {
    return new Response(null, { status: 204, headers: resolveMirrorCorsHeaders(request, env) });
   }
 
@@ -2011,7 +2202,7 @@ export default {
       if (sub === "noop") { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id }); }
       else if (sub === "cleanall") {
        const res = await runAdminCatalogCleanup(env, callbackUserId, writeLog);
-       await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: `Очищено авто: ${res.cleanedCars}, снято битых: ${res.removedBroken}`, show_alert: true });
+       await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: `Очищено авто: ${res.cleanedCars}, в новости: ${res.movedToNews || 0}, снято битых: ${res.removedBroken}`, show_alert: true });
        await sendOrEditTelegramPanel(env, cb.message.chat.id, cb.message.message_id, "home", { callTelegram, siteLabel, sha256Hex });
       } else {
        await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id });
@@ -2044,9 +2235,37 @@ export default {
        await callTelegram(env, "sendMessage", { chat_id: cb.message.chat.id, text: "🚘 Автомобиль успешно добавлен в каталог сайта!", reply_markup: { inline_keyboard: [[{ text: "🗑 Снять с сайта", callback_data: "sitedel:" + carId }, { text: "🎛 Панель", callback_data: "panel:home" }]] } });
       }
      }
+     else if (String(cb.data || "").startsWith("pubasnews:")) {
+      const pendId = String(cb.data).slice("pubasnews:".length);
+      const pendRaw = env.REVIEWS ? await env.REVIEWS.get("pending:" + pendId) : null;
+      if (!pendRaw) { await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "Материал уже обработан", show_alert: true }); }
+      else {
+       const rev = JSON.parse(pendRaw);
+       const newsId = "news_" + pendId.replace(/-/g, "");
+       const newsRec = {
+        id: newsId,
+        category: "news",
+        kind: rev.kind === "video" ? "video" : "text",
+        text: cleanCarDisplayCaption(cleanPublicationText(rev.text || "")).slice(0, 3000),
+        fileId: rev.fileId || null,
+        photos: Array.isArray(rev.photos) ? rev.photos : [],
+        videos: rev.kind === "video" && rev.fileId ? [{ file_id: rev.fileId }] : (Array.isArray(rev.videos) ? rev.videos : []),
+        publishedAt: new Date().toISOString(),
+        sourceUrl: rev.sourceUrl || "Загрузка администратора"
+       };
+       await env.REVIEWS.put("news_approved:" + newsId, JSON.stringify(newsRec));
+       await env.REVIEWS.delete("pending:" + pendId);
+       const upRaw = await env.REVIEWS.get("admin_upload:" + pendId);
+       if (upRaw) { const st = JSON.parse(upRaw); st.status = "approved"; await env.REVIEWS.put("admin_upload:" + pendId, JSON.stringify(st), { expirationTtl: 2592000 }); }
+       await writeLog(env, callbackUserId, "опубликована как новость из лички", "новость", newsId, siteLabel(newsId, newsRec));
+       await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "📰 Новость опубликована на сайт!" });
+       await callTelegram(env, "sendMessage", { chat_id: cb.message.chat.id, text: "📰 Новость успешно добавлена в раздел «Новости» на сайте!", reply_markup: { inline_keyboard: [[{ text: "🗑 Снять с сайта", callback_data: "sitedel:" + newsId }, { text: "🎛 Панель", callback_data: "panel:home" }]] } });
+      }
+     }
      else if (String(cb.data || "").startsWith("rejr:")) await handleRejectReasonCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("undo:")) await handleUndoCallback(cb, env, adminIds);
      else if (String(cb.data || "").startsWith("car")) await handleCarCallback(cb, env, adminIds);
+     else if (String(cb.data || "").startsWith("news")) await handleNewsCallback(cb, env, adminIds);
      else await handleReviewCallback(cb, env, adminIds);
     } catch { return new Response("Telegram processing failed", { status: 502 }); }
     return Response.json({ ok: true });
@@ -2161,6 +2380,32 @@ export default {
      if (!adminIds.includes(chatId)) {
       const notice = "👋 Новый пользователь бота AVTOY KOREA\nИмя: " + String((msg.from && (msg.from.first_name || msg.from.username)) || "не указано") + "\nChat ID: " + chatId;
       await Promise.all(adminIds.map(id => send(id, notice)));
+     }
+    } else if (/^\/news(?:@\w+)?(?:\s+([\s\S]+))?$/i.test(text) && adminIds.includes(chatId)) {
+     const m = text.match(/^\/news(?:@\w+)?(?:\s+([\s\S]+))?$/i);
+     const rawBody = m && m[1] ? cleanCarDisplayCaption(cleanPublicationText(m[1])).slice(0, 3000) : "";
+     if (!rawBody) {
+      await send(chatId, "📰 Как разместить новость на сайте:\n\n1️⃣ С фото или видео — просто отправьте фото/видео с текстом сюда в бот и нажмите кнопку «📰 Как НОВОСТЬ».\n2️⃣ Из канала @avtoYkorea — перешлите пост в бот и нажмите «📰 Новость».\n3️⃣ Текстовая новость без фото — отправьте:\n/news Заголовок новости\nПодробный текст новости...");
+     } else if (!env.REVIEWS) {
+      await send(chatId, "Хранилище REVIEWS не настроено.");
+     } else {
+      const newsId = "news_" + chatId + "_" + String(msg.message_id || Date.now());
+      const newsRec = {
+       id: newsId,
+       category: "news",
+       kind: "text",
+       text: rawBody,
+       photos: [],
+       videos: [],
+       publishedAt: new Date().toISOString()
+      };
+      await env.REVIEWS.put("news_approved:" + newsId, JSON.stringify(newsRec));
+      await writeLog(env, chatId, "опубликована командой /news", "новость", newsId, siteLabel(newsId, newsRec));
+      await api("sendMessage", {
+       chat_id: chatId,
+       text: "📰 Новость опубликована на сайте!\n\n" + rawBody.slice(0, 1000),
+       reply_markup: { inline_keyboard: [[{ text: "✏️ Изменить", callback_data: "siteedit:" + newsId }, { text: "🗑 Снять с сайта", callback_data: "sitedel:" + newsId }], [{ text: "🎛 Панель", callback_data: "panel:home" }]] }
+      });
      }
     } else if (text === "/panel" && adminIds.includes(chatId)) {
      await setAdminCommands(env, chatId).catch(() => {});
@@ -2339,6 +2584,96 @@ export default {
    for (const name of ["content-length","content-range","accept-ranges"]) { const value = upstream.headers.get(name); if (value) mediaHeaders[name] = value; }
    return new Response(upstream.body,{status:upstream.status,headers:mediaHeaders});
   }
+  if (request.method === "GET" && url.pathname === "/api/news") {
+   const news = [];
+   const seenBaseIds = new Set();
+   if (env.REVIEWS) {
+    let cursor;
+    do {
+     const page = await env.REVIEWS.list({ prefix: "news_approved:", ...(cursor ? { cursor } : {}) });
+     for (const key of page.keys) {
+      const raw = await env.REVIEWS.get(key.name);
+      if (!raw) continue;
+      const n = JSON.parse(raw);
+      const photos = uniqueFileItems(Array.isArray(n.photos) && n.photos.length ? n.photos : (n.fileId && n.kind !== "video" ? [{ file_id: n.fileId }] : []));
+      const videos = uniqueFileItems(Array.isArray(n.videos) && n.videos.length ? n.videos : (n.kind === "video" && n.fileId ? [{ file_id: n.fileId }] : []));
+      const mediaItems = [
+       ...photos.map((_, idx) => ({ url: `/api/news-media/${n.id}/photo/${idx}`, type: "photo" })),
+       ...videos.map((_, idx) => ({ url: `/api/news-media/${n.id}/video/${idx}`, type: "video" }))
+      ];
+      seenBaseIds.add(String(n.id).replace(/^news_/, "").replace(/^-/, ""));
+      if (n.originalReviewId) seenBaseIds.add(String(n.originalReviewId).replace(/^-/, ""));
+      news.push({
+       id: n.id,
+       kind: videos.length && !photos.length ? "video" : "news",
+       text: cleanCarDisplayCaption(cleanPublicationText(n.text || n.caption || "")),
+       media: mediaItems[0] ? mediaItems[0].url : null,
+       mediaItems,
+       publishedAt: n.publishedAt || n.createdAt || ""
+      });
+     }
+     cursor = page.list_complete ? null : page.cursor;
+    } while (cursor);
+
+    // Also include legacy market/tariff news records still stored under approved:* before cleanup
+    let revCursor;
+    do {
+     const revPage = await env.REVIEWS.list({ prefix: "approved:", ...(revCursor ? { cursor: revCursor } : {}) });
+     for (const key of revPage.keys) {
+      const raw = await env.REVIEWS.get(key.name);
+      if (!raw) continue;
+      const r = JSON.parse(raw);
+      if (!isMarketNewsRecord(r)) continue;
+      const cleanBase = String(r.id || "").replace(/^-/, "");
+      if (seenBaseIds.has(cleanBase)) continue;
+      const photos = uniqueFileItems(Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{ file_id: r.fileId }] : []));
+      const videos = uniqueFileItems(Array.isArray(r.videos) && r.videos.length ? r.videos : (r.kind === "video" && r.fileId ? [{ file_id: r.fileId }] : []));
+      const ordered = publicReviewMediaOrder(r, photos, videos);
+      const mediaItems = ordered.mediaItems.length
+       ? ordered.mediaItems
+       : [
+          ...photos.map((_, idx) => ({ url: `/api/review-media/${r.id}/photo/${idx}`, type: "photo" })),
+          ...videos.map((_, idx) => ({ url: `/api/review-media/${r.id}/video/${idx}`, type: "video" }))
+         ];
+      news.push({
+       id: "news_" + cleanBase,
+       kind: videos.length && !photos.length ? "video" : "news",
+       text: cleanCarDisplayCaption(cleanPublicationText(r.text || "")),
+       media: mediaItems[0] ? mediaItems[0].url : (r.fileId ? `/api/review-media/${r.id}` : null),
+       mediaItems,
+       publishedAt: r.publishedAt || r.createdAt || ""
+      });
+     }
+     revCursor = revPage.list_complete ? null : revPage.cursor;
+    } while (revCursor);
+   }
+   news.sort((a, b) => String(b.publishedAt || "").localeCompare(String(a.publishedAt || "")));
+   return Response.json({ news }, { headers: { "cache-control": "no-store", ...resolveMirrorCorsHeaders(request, env) } });
+  }
+  const newsMediaMatch = url.pathname.match(/^\/api\/news-media\/(news_[A-Za-z0-9_-]+)(?:\/(photo|video)\/(\d+)|\/(\d+))?$/);
+  if (request.method === "GET" && newsMediaMatch) {
+   if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found", { status: 404 });
+   const raw = await env.REVIEWS.get("news_approved:" + newsMediaMatch[1]);
+   if (!raw) return new Response("Not found", { status: 404 });
+   const newsRec = JSON.parse(raw);
+   const mediaType = newsMediaMatch[2] || (newsRec.kind === "video" ? "video" : "photo");
+   const index = Number(newsMediaMatch[3] || newsMediaMatch[4] || 0);
+   const photos = uniqueFileItems(Array.isArray(newsRec.photos) && newsRec.photos.length ? newsRec.photos : (newsRec.fileId && newsRec.kind !== "video" ? [{ file_id: newsRec.fileId }] : []));
+   const videos = uniqueFileItems(Array.isArray(newsRec.videos) && newsRec.videos.length ? newsRec.videos : (newsRec.kind === "video" && newsRec.fileId ? [{ file_id: newsRec.fileId }] : []));
+   const selected = (mediaType === "video" ? videos : photos)[index];
+   const fileId = selected && selected.file_id ? selected.file_id : null;
+   if (!fileId) return new Response("Not found", { status: 404 });
+   const info = await callTelegram(env, "getFile", { file_id: fileId }).catch(() => null);
+   const path = info && info.result && info.result.file_path;
+   if (!path) return new Response("Not found", { status: 404 });
+   const range = request.headers.get("range");
+   const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path, range ? { headers: { range } } : {});
+   if (!upstream.ok && upstream.status !== 206) return new Response("Bad Gateway", { status: 502 });
+   const contentType = mediaType === "video" ? (/\.webm$/i.test(path) ? "video/webm" : "video/mp4") : ((selected && selected.mime_type) || "image/jpeg");
+   const mediaHeaders = { "content-type": contentType, "cache-control": "no-store", "x-content-type-options": "nosniff" };
+   for (const name of ["content-length", "content-range", "accept-ranges"]) { const value = upstream.headers.get(name); if (value) mediaHeaders[name] = value; }
+   return new Response(upstream.body, { status: upstream.status, headers: mediaHeaders });
+  }
   if (request.method === "GET" && url.pathname === "/api/reviews") {
    const reviews = [];
    if (env.REVIEWS) {
@@ -2349,6 +2684,7 @@ export default {
       const raw = await env.REVIEWS.get(key.name);
       if (!raw) continue;
       const r = JSON.parse(raw);
+      if (isMarketNewsRecord(r)) continue;
       const photos = uniqueFileItems(Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{file_id:r.fileId}] : []));
       const videos = uniqueFileItems(Array.isArray(r.videos) && r.videos.length ? r.videos : (r.kind === "video" && r.fileId ? [{file_id:r.fileId}] : []));
       const ordered = publicReviewMediaOrder(r,photos,videos);
@@ -2963,10 +3299,31 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
 .review-story{margin:12px 0 0;color:#d0dae8;font-size:14px;line-height:1.58;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .review-story.is-open{display:block;-webkit-line-clamp:unset}
 .review-more{margin-top:6px;padding:0;border:0;background:none;color:#ff806e;font-size:12px;font-weight:700;cursor:pointer;align-self:flex-start}
+#news{background:transparent!important;color:#f4f7fc!important}
+#news .sub{color:#9fb0c7!important}
+.news-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.news-grid.is-single{grid-template-columns:minmax(0,1fr)}
+.news-card{background:linear-gradient(155deg,#162133,#0e1522)!important;border:1px solid #2b3b55!important;border-radius:22px!important;padding:22px!important;box-shadow:0 18px 48px #0006!important;display:flex;flex-direction:column;gap:16px}
+.news-grid.is-single .news-card.has-media{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:26px;align-items:center}
+.news-media-wrap{position:relative;border-radius:16px;overflow:hidden;background:#070b12;border:1px solid #243248;padding:10px;display:flex;align-items:center;justify-content:center;cursor:zoom-in}
+.news-media-wrap img,.news-media-wrap video{width:100%;height:auto;max-height:460px;object-fit:contain;display:block;border-radius:10px}
+.news-zoom-hint{position:absolute;right:10px;bottom:10px;padding:5px 10px;border-radius:999px;background:#070c14d9;border:1px solid #ffffff26;color:#dbe6f5;font-size:11px;font-weight:700;pointer-events:none}
+.news-content{display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+.news-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;background:#1e3a8a66;border:1px solid #3b82f666;color:#bfdbfe}
+.news-badge.is-urgent{background:#7c2d1266;border-color:#f9731680;color:#fed7aa}
+.news-title{margin:0;font:800 clamp(19px,2vw,25px)/1.25 "Manrope",sans-serif;color:#fff}
+.news-body{display:grid;gap:9px;color:#cbd5e1;font-size:15px;line-height:1.65}
+.news-body p{margin:0}
+.news-cta{margin-top:6px;display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:12px;background:#f12f381f;border:1px solid #f12f3870;color:#fff;font-weight:800;font-size:13.5px;transition:background .16s}
+.news-cta:hover{background:var(--red);color:#fff}
+@media(max-width:900px){
+ .news-grid,.news-grid.is-single .news-card.has-media{grid-template-columns:1fr}
+}
 @media(max-width:780px){
  .catalog-search-row{grid-template-columns:1fr}
  .car-modal-grid{grid-template-columns:1fr}
  .car-actions-row{grid-template-columns:1fr}
+ .news-card{padding:16px!important}
 }
 </style>
 </head>
@@ -2976,7 +3333,7 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
     <img class="brand-logo" src="/assets/logo.jpg" alt="AVTOY KOREA — автомобили из Кореи" width="380" height="148">
   </a>
   <nav class="nav-links" aria-label="Основная навигация">
-    <a class="nav-home" href="#">Главная</a><a href="#cars">Каталог</a><a href="#order">О нас</a><a href="#order">Услуги</a><a href="#reviews">Отзывы</a><a href="#request">Контакты</a>
+    <a class="nav-home" href="#">Главная</a><a href="#cars">Каталог</a><a href="#news">Новости</a><a href="#order">Услуги</a><a href="#reviews">Отзывы</a><a href="#request">Контакты</a>
   </nav>
   <a class="nav-telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener"><span>➤</span><b>Мы в Telegram<small>@avtoYkorea</small></b></a>${env.MAX_BOT_URL && /^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(String(env.MAX_BOT_URL).trim()) ? `<a class="nav-telegram" href="${String(env.MAX_BOT_URL).trim()}" target="_blank" rel="noopener"><span style="background:#7c3aed">M</span><b>Мы в MAX<small>Бот подбора</small></b></a>` : ""}
   <a class="pill" href="#request">Оставить заявку</a>
@@ -3044,6 +3401,13 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
       <li>Условия покупки и сроки доставки</li>
     </ul>
   </div>
+</section>
+
+<section class="wrap section" id="news" style="padding-top:24px" hidden>
+  <div class="eyebrow">Важная информация</div>
+  <h2>Новости и изменения рынка</h2>
+  <p class="sub">Актуальные разборы утильсбора, таможенных правил, курсов валют и условий привоза автомобилей.</p>
+  <div class="news-grid" id="news-list" aria-label="Новости компании и авторынка"></div>
 </section>
 
 <section class="wrap section" id="reviews" style="padding-top:20px">
@@ -3704,6 +4068,87 @@ loadCars();
     searchEl?.addEventListener('input',applyFilters);
     sortEl?.addEventListener('change',applyFilters);
   };
+
+  function openNewsZoom(url){
+    var overlay=document.createElement('div');overlay.className='car-lightbox';
+    var bar=document.createElement('div');bar.className='car-lightbox-bar';
+    var lbl=document.createElement('span');lbl.textContent='Просмотр инфографики / документа';
+    var close=document.createElement('button');close.type='button';close.textContent='×';
+    function remove(){overlay.remove();}
+    close.onclick=remove;overlay.onclick=function(e){if(e.target===overlay)remove();};
+    bar.appendChild(lbl);bar.appendChild(close);
+    var stage=document.createElement('div');stage.className='car-lightbox-stage';
+    var img=document.createElement('img');img.src=url;img.alt='Инфографика к новости';
+    stage.appendChild(img);overlay.appendChild(bar);overlay.appendChild(stage);
+    document.body.appendChild(overlay);
+  }
+
+  fetch('/api/news',{cache:'no-store'}).then(function(r){return r.ok?r.json():{news:[]};}).then(function(data){
+    var sec=document.getElementById('news'),list=document.getElementById('news-list');
+    if(!sec||!list||!Array.isArray(data.news)||!data.news.length)return;
+    sec.hidden=false;
+    list.textContent='';
+    list.classList.toggle('is-single',data.news.length===1);
+    data.news.forEach(function(item){
+      var raw=cleanCaption(item.text||item.caption||'');
+      var prevN=0;
+      var lines=raw.split(NL).map(function(l){
+        var t=l.replace(/\\u00a0/g,' ').replace(/^[\\u2060\\s]+/,'').replace(/\\s+,/g,',').trim();
+        var nm=t.match(/^(\\d+)\\.\\s+/);
+        if(nm){prevN=Number(nm[1]);return t;}
+        if(/^\\.\\s+/.test(t)){if(prevN>0){prevN+=1;return prevN+'. '+t.replace(/^\\.\\s+/,'');}return '• '+t.replace(/^\\.\\s+/,'');}
+        return t;
+      }).filter(Boolean);
+      var headline=(lines[0]||'Новость AVTOY KOREA').replace(/[!?.]+$/,'').trim();
+      var paragraphs=lines.length>1?lines.slice(1):[];
+      var isUrgent=/(?:утильсбор|срочно|подорожан|удорожан|закрыть|таких\\s+цен.*не\\s+будет|индексац)/i.test(raw);
+      var media=(Array.isArray(item.mediaItems)&&item.mediaItems.length?item.mediaItems:(item.media?[{url:item.media,type:'photo'}]:[])).filter(function(m){return m&&(m.url||typeof m==='string');});
+
+      var card=document.createElement('article');
+      card.className='card news-card'+(media.length?' has-media':'');
+
+      if(media.length){
+        var first=typeof media[0]==='string'?{url:media[0],type:'photo'}:media[0];
+        var mWrap=document.createElement('div');mWrap.className='news-media-wrap';
+        if(first.type==='video'||/\\.(mp4|webm|mov)$/i.test(first.url)){
+          var vid=document.createElement('video');vid.src=first.url;vid.controls=true;vid.playsInline=true;vid.preload='metadata';
+          mWrap.style.cursor='default';mWrap.appendChild(vid);
+        }else{
+          var img=document.createElement('img');img.src=first.url;img.alt=headline;img.loading='lazy';
+          var hint=document.createElement('span');hint.className='news-zoom-hint';hint.textContent='🔍 Увеличить таблицу';
+          mWrap.appendChild(img);mWrap.appendChild(hint);
+          mWrap.onclick=function(){openNewsZoom(first.url);};
+        }
+        card.appendChild(mWrap);
+      }
+
+      var content=document.createElement('div');content.className='news-content';
+      var badge=document.createElement('span');badge.className='news-badge'+(isUrgent?' is-urgent':'');
+      badge.textContent=isUrgent?'⚡ Важное изменение рынка':'📰 Новость AVTOY KOREA';
+      content.appendChild(badge);
+
+      var h3=document.createElement('h3');h3.className='news-title';h3.textContent=headline;
+      content.appendChild(h3);
+
+      if(paragraphs.length){
+        var bodyDiv=document.createElement('div');bodyDiv.className='news-body';
+        paragraphs.forEach(function(pText){
+          var p=document.createElement('p');p.textContent=pText;bodyDiv.appendChild(p);
+        });
+        content.appendChild(bodyDiv);
+      }
+
+      var cta=document.createElement('a');cta.className='news-cta';cta.href='#request';
+      cta.textContent='Рассчитать автомобиль по актуальным условиям →';
+      cta.onclick=function(e){
+        var reqSec=document.getElementById('request'),nm=document.getElementById('name');
+        if(reqSec){e.preventDefault();reqSec.scrollIntoView({behavior:'smooth',block:'start'});if(nm)window.setTimeout(function(){nm.focus({preventScroll:true});},350);}
+      };
+      content.appendChild(cta);
+      card.appendChild(content);
+      list.appendChild(card);
+    });
+  }).catch(function(){});
 })();
 </script>
 </body>

@@ -1,5 +1,5 @@
-// AVTOY KOREA Admin Pro — Modern Web Dashboard (/admin) + Interactive Bot Control Panel (/panel).
-import { cleanCarDisplayCaption, parseVehicleCardData } from "./catalog-formatter.js";
+// AVTOY KOREA Admin Pro — Modern Web Dashboard (/admin) + Interactive Bot Control Panel (/panel) with Cars, Reviews, News & Orders.
+import { cleanCarDisplayCaption, isMarketNewsRecord, parseNewsCardData, parseVehicleCardData } from "./catalog-formatter.js";
 
 export const ADMIN_PRO_CSP =
   "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
@@ -33,7 +33,7 @@ textarea{min-height:145px;resize:vertical;line-height:1.5}
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box-shadow:0 0 0 3px #f12f3825}
 .panel{background:linear-gradient(160deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 16px 40px #0004}
 #login{max-width:460px;margin:7vh auto 0}
-.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:18px}
 .stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
 .stat b{display:block;font-size:24px;line-height:1.1;margin-top:4px}
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
@@ -51,6 +51,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box
 .card-title{font-weight:800;font-size:16px;margin:0}
 .badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:800;background:#1e293b;color:#cbd5e1;white-space:nowrap}
 .badge.price{background:#14532d;color:#86efac}
+.badge.news{background:#1e3a8a;color:#bfdbfe}
 .badge.new{background:#7c2d12;color:#fed7aa}
 .badge.work{background:#1e3a8a;color:#bfdbfe}
 .badge.done{background:#1f2937;color:#9ca3af}
@@ -63,12 +64,10 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box
 .thumb-btn.del{background:#991b1b}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto}
 .order-row{display:grid;grid-template-columns:1.2fr 1fr 1.2fr auto;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:10px}
+.composer{margin-bottom:18px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px}
 [hidden]{display:none!important}
-@media(max-width:780px){
-  .stats{grid-template-columns:1fr 1fr}
-  .grid{grid-template-columns:1fr}
-  .order-row{grid-template-columns:1fr}
-}
+@media(max-width:900px){.stats{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:780px){.grid{grid-template-columns:1fr}.order-row{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -78,20 +77,20 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box
       <span class="brand-badge">AVTOY</span>
       <div>
         <h1>Центр управления AVTOY KOREA</h1>
-        <p class="muted">Каталог автомобилей · Отзывы · Модерация · Заявки клиентов</p>
+        <p class="muted">Автомобили · Новости · Отзывы · Модерация · Заявки клиентов</p>
       </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <a href="/" target="_blank" style="color:#93c5fd;text-decoration:none;font-weight:700;font-size:13px;margin-right:8px">Открыть сайт ↗</a>
       <button id="refresh-btn" class="sec" hidden>↻ Обновить</button>
-      <button id="cleanup-btn" class="sec" hidden title="Убрать дубли фото и старые хвосты контактов во всех авто">✨ Автоочистка каталога</button>
+      <button id="cleanup-btn" class="sec" hidden title="Убрать дубли фото, хвосты контактов и перенести новости из отзывов">✨ Автоочистка каталога</button>
       <button id="logout" class="sec" hidden>Выйти</button>
     </div>
   </header>
 
   <section id="login" class="panel">
     <h2 style="margin-top:0">Вход администратора</h2>
-    <p class="muted">Получите одноразовый код в личном чате Telegram-бота командой /adminlink (или нажмите кнопку быстрого входа в/panel).</p>
+    <p class="muted">Получите одноразовый код в личном чате Telegram-бота командой /adminlink (или нажмите кнопку быстрого входа в /panel).</p>
     <form id="login-form" style="margin-top:16px">
       <label for="code" style="display:block;margin-bottom:6px;font-weight:700">Одноразовый код (8 цифр)</label>
       <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" pattern="[0-9]{8}" placeholder="00000000" required>
@@ -105,6 +104,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box
 
     <div class="stats">
       <div class="stat"><span class="muted">Авто на сайте</span><b id="st-cars">0</b></div>
+      <div class="stat"><span class="muted">Новостей на сайте</span><b id="st-news">0</b></div>
       <div class="stat"><span class="muted">Отзывов на сайте</span><b id="st-reviews">0</b></div>
       <div class="stat"><span class="muted">Ждут модерации</span><b id="st-pending">0</b></div>
       <div class="stat"><span class="muted">Заявок с сайта</span><b id="st-orders">0</b></div>
@@ -112,13 +112,21 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box
 
     <div class="tabs">
       <button type="button" class="tab active" data-tab="cars">🚘 Автомобили</button>
+      <button type="button" class="tab" data-tab="news">📰 Новости</button>
       <button type="button" class="tab" data-tab="reviews">⭐ Отзывы</button>
       <button type="button" class="tab" data-tab="pending">⏳ Очередь модерации</button>
       <button type="button" class="tab" data-tab="orders">📋 Заявки клиентов</button>
     </div>
 
+    <div id="news-composer" class="composer" hidden>
+      <h3 style="margin:0 0 8px;font-size:15px">➕ Опубликовать новую новость</h3>
+      <p class="muted" style="margin-bottom:10px">Первая строка станет заголовком новости на сайте. Для новости с фото или видео отправьте фото/видео с текстом напрямую в бот Telegram и нажмите «📰 Опубликовать как НОВОСТЬ».</p>
+      <textarea id="new-news-text" style="min-height:95px" placeholder="Заголовок новости (первая строка)&#10;&#10;Подробности изменений утильсбора, курсов или условий доставки…"></textarea>
+      <div style="margin-top:10px"><button type="button" id="publish-news-btn" class="ok">📰 Опубликовать новость на сайт</button></div>
+    </div>
+
     <div class="toolbar">
-      <input id="search" type="search" placeholder="Поиск по названию, марке, цене, контакту или ID…">
+      <input id="search" type="search" placeholder="Поиск по названию, тексту, цене, контакту или ID…">
       <select id="filter-select" style="max-width:220px" hidden>
         <option value="all">Все заявки</option>
         <option value="new">Новые</option>
@@ -139,6 +147,7 @@ const loginStatus = document.getElementById('login-status');
 const viewRoot = document.getElementById('view-root');
 const searchInput = document.getElementById('search');
 const filterSelect = document.getElementById('filter-select');
+const newsComposer = document.getElementById('news-composer');
 const refreshBtn = document.getElementById('refresh-btn');
 const cleanupBtn = document.getElementById('cleanup-btn');
 const logoutBtn = document.getElementById('logout');
@@ -182,6 +191,7 @@ async function loadAll() {
     state.pending = data.pending || [];
     state.orders = data.orders || [];
     document.getElementById('st-cars').textContent = state.items.filter(i => i.kind === 'car').length;
+    document.getElementById('st-news').textContent = state.items.filter(i => i.kind === 'news').length;
     document.getElementById('st-reviews').textContent = state.items.filter(i => i.kind === 'review').length;
     document.getElementById('st-pending').textContent = state.pending.length;
     document.getElementById('st-orders').textContent = state.orders.length;
@@ -208,6 +218,8 @@ function renderPubCard(item, isPending = false) {
   head.appendChild(left);
   if (item.priceFormatted && item.kind === 'car') {
     head.appendChild(el('span', 'badge price', item.priceFormatted));
+  } else if (item.kind === 'news') {
+    head.appendChild(el('span', 'badge news', '📰 Новость'));
   } else {
     head.appendChild(el('span', 'badge', item.kind === 'car' ? 'Авто' : 'Отзыв'));
   }
@@ -262,12 +274,14 @@ function renderPubCard(item, isPending = false) {
 
   const area = document.createElement('textarea');
   area.value = item.text || '';
-  area.placeholder = item.kind === 'car' ? 'Название модели, год, характеристики, цена под ключ…' : 'Текст отзыва клиента…';
+  area.placeholder = item.kind === 'car'
+    ? 'Название модели, год, характеристики, цена под ключ…'
+    : (item.kind === 'news' ? 'Заголовок новости и текст…' : 'Текст отзыва клиента…');
   card.appendChild(area);
 
   const acts = el('div', 'actions');
   if (isPending) {
-    const pubBtn = el('button', 'ok', '✅ Опубликовать на сайт');
+    const pubBtn = el('button', 'ok', '✅ Опубликовать (' + (item.kind === 'car' ? 'Авто' : item.kind === 'news' ? 'Новость' : 'Отзыв') + ')');
     pubBtn.onclick = async () => {
       try {
         await api('/api/admin/pending/' + encodeURIComponent(item.id) + '/publish', 'POST', { kind: item.kind, text: area.value });
@@ -287,7 +301,7 @@ function renderPubCard(item, isPending = false) {
     acts.appendChild(pubBtn);
     acts.appendChild(rejBtn);
   } else {
-    const saveBtn = el('button', '', '💾 Сохранить текст');
+    const saveBtn = el('button', '', '💾 Сохранить');
     saveBtn.onclick = async () => {
       try {
         await api('/api/admin/items/' + encodeURIComponent(item.id), 'PATCH', { directText: area.value });
@@ -295,7 +309,22 @@ function renderPubCard(item, isPending = false) {
         loadAll();
       } catch (e) { notify(e.message, true); }
     };
-    const unpubBtn = el('button', 'danger', '🗑 Снять с сайта');
+    acts.appendChild(saveBtn);
+
+    if (item.kind === 'review' || item.kind === 'news') {
+      const targetKind = item.kind === 'review' ? 'news' : 'review';
+      const moveBtn = el('button', 'sec', item.kind === 'review' ? '⇄ В Новости' : '⇄ В Отзывы');
+      moveBtn.onclick = async () => {
+        try {
+          await api('/api/admin/items/' + encodeURIComponent(item.id) + '/move', 'POST', { targetKind });
+          notify(targetKind === 'news' ? 'Перенесено в раздел «Новости»' : 'Перенесено в раздел «Отзывы»');
+          loadAll();
+        } catch (e) { notify(e.message, true); }
+      };
+      acts.appendChild(moveBtn);
+    }
+
+    const unpubBtn = el('button', 'danger', '🗑 Снять');
     unpubBtn.onclick = async () => {
       if (!confirm('Снять эту публикацию с сайта? Она переместится во вкладку «Очередь модерации».')) return;
       try {
@@ -304,7 +333,6 @@ function renderPubCard(item, isPending = false) {
         loadAll();
       } catch (e) { notify(e.message, true); }
     };
-    acts.appendChild(saveBtn);
     acts.appendChild(unpubBtn);
   }
   card.appendChild(acts);
@@ -348,6 +376,7 @@ function render() {
   viewRoot.replaceChildren();
   const q = searchInput.value.trim().toLowerCase();
   filterSelect.hidden = state.tab !== 'orders';
+  newsComposer.hidden = state.tab !== 'news';
 
   if (state.tab === 'orders') {
     const f = filterSelect.value;
@@ -370,9 +399,9 @@ function render() {
     return;
   }
 
-  const targetKind = state.tab === 'cars' ? 'car' : 'review';
+  const targetKind = state.tab === 'cars' ? 'car' : (state.tab === 'news' ? 'news' : 'review');
   const list = state.items.filter(i => i.kind === targetKind && (!q || JSON.stringify(i).toLowerCase().includes(q)));
-  if (!list.length) { viewRoot.appendChild(el('p', 'muted', 'В этом разделе ничего не найдено.')); return; }
+  if (!list.length) { viewRoot.appendChild(el('p', 'muted', 'В этом разделе пока нет публикаций.')); return; }
   const grid = el('div', 'grid');
   list.forEach(i => grid.appendChild(renderPubCard(i, false)));
   viewRoot.appendChild(grid);
@@ -389,11 +418,23 @@ document.querySelectorAll('.tab').forEach(btn => {
 searchInput.oninput = render;
 filterSelect.onchange = render;
 refreshBtn.onclick = loadAll;
+
+document.getElementById('publish-news-btn').onclick = async () => {
+  const txt = document.getElementById('new-news-text').value.trim();
+  if (!txt) return notify('Введите текст новости', true);
+  try {
+    await api('/api/admin/news', 'POST', { text: txt });
+    document.getElementById('new-news-text').value = '';
+    notify('Новость опубликована на сайт!');
+    loadAll();
+  } catch (e) { notify(e.message, true); }
+};
+
 cleanupBtn.onclick = async () => {
-  if (!confirm('Очистить дубликаты фото, пустые тестовые записи («исправить») и рекламные хвосты контактов во всех опубликованных авто?')) return;
+  if (!confirm('Очистить дубликаты фото, хвосты контактов и автоматически перенести рыночные новости из отзывов в раздел «Новости»?')) return;
   try {
     const r = await api('/api/admin/cleanup', 'POST', {});
-    notify('Автоочистка выполнена: обновлено авто — ' + r.cleanedCars + ', снято битых — ' + r.removedBroken);
+    notify('Готово: обновлено авто — ' + r.cleanedCars + ', перенесено в Новости — ' + (r.movedToNews || 0) + ', снято битых — ' + r.removedBroken);
     loadAll();
   } catch (e) { notify(e.message, true); }
 };
@@ -414,7 +455,6 @@ logoutBtn.onclick = async () => {
 };
 
 (async () => {
-  // Support 1-click magic link from Telegram/MAX bot: /admin#code=12345678
   const hashMatch = String(location.hash || '').match(/code=(\d{8})/);
   if (hashMatch) {
     history.replaceState(null, '', location.pathname);
@@ -431,22 +471,25 @@ logoutBtn.onclick = async () => {
 </body>
 </html>`;
 
-export function enrichAdminItem(id, record, isCar, siteLabelFn) {
+export function enrichAdminItem(id, record, kind, siteLabelFn) {
+  const isCar = kind === "car";
+  const isNews = kind === "news";
   const photos = Array.isArray(record.photos) ? record.photos : (record.fileId && record.kind !== "video" && record.mediaType !== "video" ? [{ file_id: record.fileId }] : []);
   const videos = Array.isArray(record.videos) ? record.videos : ((record.kind === "video" || record.mediaType === "video") && record.fileId ? [{ file_id: record.fileId }] : []);
-  const basePrefix = isCar ? `/api/car-media/${id}` : `/api/review-media/${id}`;
+  const basePrefix = isCar ? `/api/car-media/${id}` : (isNews ? `/api/news-media/${id}` : `/api/review-media/${id}`);
   const mediaItems = [
     ...photos.map((_, idx) => ({ type: "photo", photoIndex: idx, url: `${basePrefix}/photo/${idx}` })),
     ...videos.map((_, idx) => ({ type: "video", videoIndex: idx, url: `${basePrefix}/video/${idx}` }))
   ];
-  const parsed = isCar ? parseVehicleCardData({ id, caption: record.caption || "", mediaItems }) : null;
+  const parsedCar = isCar ? parseVehicleCardData({ id, caption: record.caption || "", mediaItems }) : null;
+  const parsedNews = isNews ? parseNewsCardData({ id, text: record.text || record.caption || "" }) : null;
   return {
     id,
-    kind: isCar ? "car" : "review",
+    kind,
     label: siteLabelFn(id, record),
-    cleanTitle: parsed ? parsed.title : siteLabelFn(id, record),
-    priceFormatted: parsed ? parsed.priceFormatted : "",
-    text: String(isCar ? record.caption || "" : record.text || ""),
+    cleanTitle: parsedCar ? parsedCar.title : (parsedNews ? parsedNews.title : siteLabelFn(id, record)),
+    priceFormatted: parsedCar ? parsedCar.priceFormatted : "",
+    text: String(isCar ? record.caption || "" : record.text || record.caption || ""),
     mediaCount: photos.length + videos.length,
     mediaItems,
     publishedAt: record.publishedAt || record.createdAt || ""
@@ -456,6 +499,8 @@ export function enrichAdminItem(id, record, isCar, siteLabelFn) {
 export async function runAdminCatalogCleanup(env, adminId, writeLogFn) {
   let cleanedCars = 0;
   let removedBroken = 0;
+  let movedToNews = 0;
+
   const page = await env.REVIEWS.list({ prefix: "car_approved:" });
   for (const key of page.keys) {
     const raw = await env.REVIEWS.get(key.name);
@@ -464,7 +509,6 @@ export async function runAdminCatalogCleanup(env, adminId, writeLogFn) {
     const id = key.name.slice("car_approved:".length);
     const trimmed = String(car.caption || "").trim().toLowerCase();
 
-    // Remove obvious broken placeholder test entry ("исправить")
     if (trimmed === "исправить") {
       await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
       await env.REVIEWS.delete(key.name);
@@ -502,10 +546,39 @@ export async function runAdminCatalogCleanup(env, adminId, writeLogFn) {
       cleanedCars++;
     }
   }
-  if (writeLogFn && (cleanedCars > 0 || removedBroken > 0)) {
-    await writeLogFn(env, String(adminId), `автоочистка: обновлено ${cleanedCars}, снято битых ${removedBroken}`, "каталог", "all", "");
+
+  // Automatically reclassify market/tariff news accidentally stored in approved:* reviews
+  const revPage = await env.REVIEWS.list({ prefix: "approved:" });
+  for (const key of revPage.keys) {
+    const raw = await env.REVIEWS.get(key.name);
+    if (!raw) continue;
+    const rev = JSON.parse(raw);
+    const revId = key.name.slice("approved:".length);
+    if (isMarketNewsRecord(rev)) {
+      const newsId = "news_" + revId.replace(/^-/, "");
+      const newsRec = {
+        ...rev,
+        id: newsId,
+        category: "news",
+        publishedAt: rev.publishedAt || rev.createdAt || new Date().toISOString()
+      };
+      await env.REVIEWS.put("news_approved:" + newsId, JSON.stringify(newsRec));
+      await env.REVIEWS.delete(key.name);
+      movedToNews++;
+    }
   }
-  return { cleanedCars, removedBroken };
+
+  if (writeLogFn && (cleanedCars > 0 || removedBroken > 0 || movedToNews > 0)) {
+    await writeLogFn(
+      env,
+      String(adminId),
+      `автоочистка: авто ${cleanedCars}, в новости ${movedToNews}, битых ${removedBroken}`,
+      "каталог",
+      "all",
+      ""
+    );
+  }
+  return { cleanedCars, removedBroken, movedToNews };
 }
 
 // Interactive single-message Telegram control panel (/panel & panel:* callbacks)
@@ -524,9 +597,7 @@ export async function sendOrEditTelegramPanel(env, chatId, messageId, stateQuery
           text,
           reply_markup: { inline_keyboard }
         });
-      } catch {
-        // Fallback to new message if message cannot be edited
-      }
+      } catch {}
     }
     return callTelegram(env, "sendMessage", {
       chat_id: chatId,
@@ -539,22 +610,28 @@ export async function sendOrEditTelegramPanel(env, chatId, messageId, stateQuery
   const view = parts[0] || "home";
 
   if (view === "home") {
-    const [cars, reviews, carPend, revPend, orders] = await Promise.all([
+    const [cars, news, reviews, carPend, newsPend, revPend, orders] = await Promise.all([
       env.REVIEWS.list({ prefix: "car_approved:" }),
+      env.REVIEWS.list({ prefix: "news_approved:" }),
       env.REVIEWS.list({ prefix: "approved:" }),
       env.REVIEWS.list({ prefix: "car_pending:" }),
+      env.REVIEWS.list({ prefix: "news_pending:" }),
       env.REVIEWS.list({ prefix: "pending:" }),
       env.REVIEWS.list({ prefix: "order:" })
     ]);
+    const totalPending = carPend.keys.length + newsPend.keys.length + revPend.keys.length;
     const text = [
       "🎛 ЦЕНТР УПРАВЛЕНИЯ AVTOY KOREA",
       "",
       `🚘 Автомобилей на сайте: ${cars.keys.length}`,
+      `📰 Новостей на сайте: ${news.keys.length}`,
       `⭐ Отзывов на сайте: ${reviews.keys.length}`,
-      `⏳ Ожидают модерации: ${carPend.keys.length + revPend.keys.length}`,
+      `⏳ Ожидают модерации: ${totalPending}`,
       `📋 Всего заявок клиентов: ${orders.keys.length}`,
       "",
-      "Выберите нужный раздел кнопками ниже (чат не засоряется лишними сообщениями):"
+      "💡 Как быстро добавить материал:",
+      "• Отправьте фото/видео с текстом сюда в бот → выберите «Автомобиль», «Новость» или «Отзыв»",
+      "• Для текстовой новости без фото: /news <текст новости>"
     ].join("\n");
 
     let magicUrl = "https://avtoy-korea-auto.sokfrut.workers.dev/admin";
@@ -570,22 +647,29 @@ export async function sendOrEditTelegramPanel(env, chatId, messageId, stateQuery
     }
 
     return sendOrEdit(text, [
-      [{ text: `🚘 Авто на сайте (${cars.keys.length})`, callback_data: "panel:cars:0" }, { text: `⭐ Отзывы (${reviews.keys.length})`, callback_data: "panel:reviews:0" }],
-      [{ text: `⏳ Модерация (${carPend.keys.length + revPend.keys.length})`, callback_data: "panel:pending:0" }, { text: `📋 Заявки (${orders.keys.length})`, callback_data: "panel:orders:0" }],
-      [{ text: "✨ Автоочистка дублей и хвостов", callback_data: "panel:cleanall" }],
+      [
+        { text: `🚘 Авто (${cars.keys.length})`, callback_data: "panel:cars:0" },
+        { text: `📰 Новости (${news.keys.length})`, callback_data: "panel:news:0" },
+        { text: `⭐ Отзывы (${reviews.keys.length})`, callback_data: "panel:reviews:0" }
+      ],
+      [
+        { text: `⏳ Модерация (${totalPending})`, callback_data: "panel:pending:0" },
+        { text: `📋 Заявки (${orders.keys.length})`, callback_data: "panel:orders:0" }
+      ],
+      [{ text: "✨ Автоочистка (дубли + новости)", callback_data: "panel:cleanall" }],
       [{ text: "🔐 Открыть Веб-Админку в 1 клик", url: magicUrl }]
     ]);
   }
 
-  if (view === "cars" || view === "reviews") {
-    const isCar = view === "cars";
+  if (view === "cars" || view === "reviews" || view === "news") {
+    const prefix = view === "cars" ? "car_approved:" : (view === "news" ? "news_approved:" : "approved:");
     const pageIdx = Math.max(0, Number(parts[1] || 0));
-    const listPage = await env.REVIEWS.list({ prefix: isCar ? "car_approved:" : "approved:" });
+    const listPage = await env.REVIEWS.list({ prefix });
     const records = [];
     for (const k of listPage.keys) {
       const r = await env.REVIEWS.get(k.name);
       if (!r) continue;
-      const id = k.name.replace(/^(car_approved|approved):/, "");
+      const id = k.name.slice(prefix.length);
       records.push({ id, data: JSON.parse(r) });
     }
     records.sort((a, b) => String(b.data.publishedAt || "").localeCompare(String(a.data.publishedAt || "")));
@@ -595,10 +679,16 @@ export async function sendOrEditTelegramPanel(env, chatId, messageId, stateQuery
     const slice = records.slice(safePage * perPage, (safePage + 1) * perPage);
 
     const rows = slice.map(item => {
-      const parsed = isCar ? parseVehicleCardData({ id: item.id, caption: item.data.caption || "" }) : null;
-      const btnText = isCar
-        ? `🚘 ${parsed.title.slice(0, 26)} · ${parsed.priceFormatted}`
-        : `⭐ ${(siteLabel ? siteLabel(item.id, item.data) : item.id).slice(0, 42)}`;
+      let btnText;
+      if (view === "cars") {
+        const parsed = parseVehicleCardData({ id: item.id, caption: item.data.caption || "" });
+        btnText = `🚘 ${parsed.title.slice(0, 26)} · ${parsed.priceFormatted}`;
+      } else if (view === "news") {
+        const parsed = parseNewsCardData({ id: item.id, text: item.data.text || item.data.caption || "" });
+        btnText = `📰 ${parsed.title.slice(0, 38)}`;
+      } else {
+        btnText = `⭐ ${(siteLabel ? siteLabel(item.id, item.data) : item.id).slice(0, 42)}`;
+      }
       return [{ text: btnText, callback_data: `panel:item:${item.id}` }];
     });
 
@@ -609,26 +699,27 @@ export async function sendOrEditTelegramPanel(env, chatId, messageId, stateQuery
     rows.push(nav);
     rows.push([{ text: "🔙 В главное меню", callback_data: "panel:home" }]);
 
-    return sendOrEdit(
-      `${isCar ? "🚘 ОПУБЛИКОВАННЫЕ АВТОМОБИЛИ" : "⭐ ОПУБЛИКОВАННЫЕ ОТЗЫВЫ"} (${records.length})\nНажмите на нужную позицию для редактирования или снятия с сайта:`,
-      rows
-    );
+    const headerLabel = view === "cars" ? "🚘 ОПУБЛИКОВАННЫЕ АВТОМОБИЛИ" : (view === "news" ? "📰 ОПУБЛИКОВАННЫЕ НОВОСТИ" : "⭐ ОПУБЛИКОВАННЫЕ ОТЗЫВЫ");
+    return sendOrEdit(`${headerLabel} (${records.length})\nНажмите на нужную позицию для редактирования или снятия с сайта:`, rows);
   }
 
   if (view === "item") {
     const id = parts.slice(1).join(":");
     const isCar = id.startsWith("car_");
-    const raw = await env.REVIEWS.get((isCar ? "car_approved:" : "approved:") + id);
+    const isNews = id.startsWith("news_");
+    const prefix = isCar ? "car_approved:" : (isNews ? "news_approved:" : "approved:");
+    const raw = await env.REVIEWS.get(prefix + id);
     if (!raw) return sendOrEdit("Публикация не найдена (возможно, уже снята с сайта).", [[{ text: "🔙 Назад", callback_data: "panel:home" }]]);
     const rec = JSON.parse(raw);
     const photos = Array.isArray(rec.photos) ? rec.photos.length : (rec.fileId ? 1 : 0);
     const videos = Array.isArray(rec.videos) ? rec.videos.length : 0;
-    const body = String(isCar ? rec.caption || "" : rec.text || "").slice(0, 1200) || "— без текста —";
+    const body = String(isCar ? rec.caption || "" : rec.text || rec.caption || "").slice(0, 1200) || "— без текста —";
+    const backTab = isCar ? "panel:cars:0" : (isNews ? "panel:news:0" : "panel:reviews:0");
     return sendOrEdit(
-      `${isCar ? "🚘 КАРТОЧКА АВТОМОБИЛЯ" : "⭐ КАРТОЧКА ОТЗЫВА"}\nID: ${id}\nМедиа: фото ${photos}, видео ${videos}\n\n${body}`,
+      `${isCar ? "🚘 КАРТОЧКА АВТОМОБИЛЯ" : (isNews ? "📰 КАРТОЧКА НОВОСТИ" : "⭐ КАРТОЧКА ОТЗЫВА")}\nID: ${id}\nМедиа: фото ${photos}, видео ${videos}\n\n${body}`,
       [
         [{ text: "✏️ Изменить текст", callback_data: `siteedit:${id}` }, { text: "🗑 Снять с сайта", callback_data: `sitedel:${id}` }],
-        [{ text: "🔙 К списку", callback_data: isCar ? "panel:cars:0" : "panel:reviews:0" }, { text: "🏠 Меню", callback_data: "panel:home" }]
+        [{ text: "🔙 К списку", callback_data: backTab }, { text: "🏠 Меню", callback_data: "panel:home" }]
       ]
     );
   }
@@ -670,25 +761,30 @@ export async function sendOrEditTelegramPanel(env, chatId, messageId, stateQuery
   }
 
   if (view === "pending") {
-    const [carPend, revPend] = await Promise.all([
+    const [carPend, newsPend, revPend] = await Promise.all([
       env.REVIEWS.list({ prefix: "car_pending:" }),
+      env.REVIEWS.list({ prefix: "news_pending:" }),
       env.REVIEWS.list({ prefix: "pending:" })
     ]);
     const entries = [
-      ...carPend.keys.map(k => ({ id: k.name.slice("car_pending:".length), isCar: true, key: k.name })),
-      ...revPend.keys.map(k => ({ id: k.name.slice("pending:".length), isCar: false, key: k.name }))
+      ...carPend.keys.map(k => ({ id: k.name.slice("car_pending:".length), kind: "car", key: k.name })),
+      ...newsPend.keys.map(k => ({ id: k.name.slice("news_pending:".length), kind: "news", key: k.name })),
+      ...revPend.keys.map(k => ({ id: k.name.slice("pending:".length), kind: "review", key: k.name }))
     ].slice(0, 6);
     const rows = [];
-    const lines = [`⏳ ОЧЕРЕДЬ МОДЕРАЦИИ (${carPend.keys.length + revPend.keys.length})`, ""];
+    const lines = [`⏳ ОЧЕРЕДЬ МОДЕРАЦИИ (${carPend.keys.length + newsPend.keys.length + revPend.keys.length})`, ""];
     for (const e of entries) {
       const raw = await env.REVIEWS.get(e.key);
       if (!raw) continue;
       const d = JSON.parse(raw);
-      const title = String(e.isCar ? d.caption || "" : d.text || "").split("\n").find(Boolean) || "Без описания";
-      lines.push(`${e.isCar ? "🚘" : "⭐"} ${title.slice(0, 45)}`);
+      const title = String(e.kind === "car" ? d.caption || "" : d.text || d.caption || "").split("\n").find(Boolean) || "Без описания";
+      const icon = e.kind === "car" ? "🚘" : (e.kind === "news" ? "📰" : "⭐");
+      lines.push(`${icon} ${title.slice(0, 45)}`);
+      const pubCb = e.kind === "car" ? `carpubforce:${e.id}` : (e.kind === "news" ? `newspub:${e.id}` : `pubforce:${e.id}`);
+      const rejCb = e.kind === "car" ? `carrej:${e.id}` : (e.kind === "news" ? `newsrej:${e.id}` : `rej:${e.id}`);
       rows.push([
-        { text: `✅ Опубл.: ${title.slice(0, 18)}`, callback_data: (e.isCar ? "carpubforce:" : "pubforce:") + e.id },
-        { text: "❌ Откл.", callback_data: (e.isCar ? "carrej:" : "rej:") + e.id }
+        { text: `✅ Опубл.: ${title.slice(0, 18)}`, callback_data: pubCb },
+        { text: "❌ Откл.", callback_data: rejCb }
       ]);
     }
     if (!entries.length) lines.push("Нет материалов, ожидающих модерации.");

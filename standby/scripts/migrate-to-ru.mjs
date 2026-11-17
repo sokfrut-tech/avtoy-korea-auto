@@ -8,7 +8,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createS3MediaStore } from '../storage/s3-media-store.mjs';
-import { cleanCarDisplayCaption, deduplicateMediaItems } from '../../catalog-formatter.js';
+import { cleanCarDisplayCaption, deduplicateMediaItems, isMarketNewsRecord } from '../../catalog-formatter.js';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const STANDBY_DIR = path.resolve(SCRIPT_DIR, '..');
@@ -120,6 +120,10 @@ async function extractFrontendHtmlFromWorker({ maxBotUrl = process.env.MAX_BOT_U
   // 1) on a dynamic Russian server (Yandex Cloud / standby server: ./api/cars, ./api/reviews, ./api/request)
   // 2) on 100% free cardless static hosting (GitVerse Pages: ./api/cars.json, ./api/reviews.json + direct compact request fallback + 1-click MAX/Telegram buttons)
   html = html.replace(
+    "fetch('/api/news',{cache:'no-store'}).then(function(r){return r.ok?r.json():{news:[]};})",
+    "fetch('./api/news',{cache:'no-store'}).then(function(r){if(r.ok)return r.json();return fetch('./api/news.json',{cache:'no-store'}).then(function(r2){return r2.ok?r2.json():{news:[]};});})"
+  );
+  html = html.replace(
     "fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()})",
     "fetch('./api/reviews',{cache:'no-store'}).then(function(r){if(r.ok)return r.json();return fetch('./api/reviews.json',{cache:'no-store'}).then(function(r2){return r2.json()});})"
   );
@@ -184,15 +188,17 @@ export async function runMigration() {
     totalBytes += check.size;
   }
 
-  // 3. Fetch live catalogue & reviews
-  const [carsRes, reviewsRes] = await Promise.all([
+  // 3. Fetch live catalogue, news & reviews
+  const [carsRes, newsRes, reviewsRes] = await Promise.all([
     fetch(new URL('/api/cars', SOURCE_BASE), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30_000) }),
+    fetch(new URL('/api/news', SOURCE_BASE), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30_000) }).catch(() => null),
     fetch(new URL('/api/reviews', SOURCE_BASE), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30_000) })
   ]);
   if (!carsRes.ok) throw new Error(`Failed to fetch /api/cars: HTTP ${carsRes.status}`);
   if (!reviewsRes.ok) throw new Error(`Failed to fetch /api/reviews: HTTP ${reviewsRes.status}`);
 
   const carsPayload = await carsRes.json();
+  const newsPayload = newsRes && newsRes.ok ? await newsRes.json().catch(() => ({ news: [] })) : { news: [] };
   const reviewsPayload = await reviewsRes.json();
 
   async function mirrorMediaList(recordId, kind, items) {
@@ -276,6 +282,26 @@ export async function runMigration() {
     });
   }
 
+  const migratedNews = [];
+  const seenNewsBaseIds = new Set();
+  for (const nw of newsPayload.news || []) {
+    const rawItems = Array.isArray(nw.mediaItems) && nw.mediaItems.length
+      ? nw.mediaItems
+      : (nw.media ? [{ url: nw.media, type: nw.kind === 'video' ? 'video' : 'photo' }] : []);
+    const mediaItems = await mirrorMediaList(nw.id, 'news', rawItems);
+    const cleaned = cleanCarDisplayCaption(nw.text || nw.caption || '');
+    if (!mediaItems.length && !cleaned) continue;
+    seenNewsBaseIds.add(String(nw.id || '').replace(/^news_/, '').replace(/^-/, ''));
+    migratedNews.push({
+      id: nw.id,
+      kind: 'news',
+      text: cleaned,
+      media: mediaItems[0]?.url || null,
+      mediaItems,
+      publishedAt: nw.publishedAt || ''
+    });
+  }
+
   const migratedReviews = [];
   for (const rv of reviewsPayload.reviews || []) {
     const rawItems = Array.isArray(rv.mediaItems) && rv.mediaItems.length
@@ -283,6 +309,21 @@ export async function runMigration() {
       : (rv.media ? [{ url: rv.media, type: rv.kind === 'video' ? 'video' : 'photo' }] : []);
     const mediaItems = await mirrorMediaList(rv.id, 'review', rawItems);
     if (!mediaItems.length && !String(rv.text || '').trim()) continue;
+    if (isMarketNewsRecord(rv)) {
+      const baseId = String(rv.id || '').replace(/^-/, '');
+      if (!seenNewsBaseIds.has(baseId)) {
+        seenNewsBaseIds.add(baseId);
+        migratedNews.push({
+          id: 'news_' + baseId,
+          kind: 'news',
+          text: cleanCarDisplayCaption(rv.text || ''),
+          media: mediaItems[0]?.url || null,
+          mediaItems,
+          publishedAt: rv.publishedAt || ''
+        });
+      }
+      continue;
+    }
     migratedReviews.push({
       id: rv.id,
       kind: rv.kind || (mediaItems[0]?.type === 'video' ? 'video' : 'text'),
@@ -298,12 +339,14 @@ export async function runMigration() {
     schemaVersion: 2,
     updatedAt,
     cars: migratedCars,
+    news: migratedNews,
     reviews: migratedReviews
   };
 
   // Write server snapshot + static JSON endpoints + integrity manifest
   await writeAndVerifyFile(path.join(DATA_DIR, 'public-snapshot.json'), Buffer.from(JSON.stringify(snapshot, null, 2) + '\n'));
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'cars.json'), Buffer.from(JSON.stringify({ cars: migratedCars, updatedAt }) + '\n'));
+  await writeAndVerifyFile(path.join(API_STATIC_DIR, 'news.json'), Buffer.from(JSON.stringify({ news: migratedNews, updatedAt }) + '\n'));
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'reviews.json'), Buffer.from(JSON.stringify({ reviews: migratedReviews, updatedAt }) + '\n'));
 
   const indexHtml = await extractFrontendHtmlFromWorker({});
@@ -316,6 +359,7 @@ export async function runMigration() {
     carsSourceCount: (carsPayload.cars || []).length,
     carsMigratedCount: migratedCars.length,
     carsSkipped: skippedCars,
+    newsMigratedCount: migratedNews.length,
     reviewsMigratedCount: migratedReviews.length,
     mediaVerifiedCount: manifestEntries.length,
     totalMediaMegabytes: Number((totalBytes / (1024 * 1024)).toFixed(2)),
@@ -341,24 +385,50 @@ export async function rebuildLocalBundle() {
       mediaItems
     };
   });
+  const existingNews = (Array.isArray(snap.news) ? snap.news : []).map(n => ({ ...n, text: cleanCarDisplayCaption(n.text || '') }));
+  const seenBase = new Set(existingNews.map(n => String(n.id || '').replace(/^news_/, '').replace(/^-/, '')));
+  const keptReviews = [];
+  for (const rv of snap.reviews || []) {
+    if (isMarketNewsRecord(rv)) {
+      const baseId = String(rv.id || '').replace(/^-/, '');
+      if (!seenBase.has(baseId)) {
+        seenBase.add(baseId);
+        existingNews.unshift({
+          id: 'news_' + baseId,
+          kind: 'news',
+          text: cleanCarDisplayCaption(rv.text || ''),
+          media: rv.media || rv.mediaItems?.[0]?.url || null,
+          mediaItems: Array.isArray(rv.mediaItems) ? rv.mediaItems : (rv.media ? [{ type: 'photo', url: rv.media }] : []),
+          publishedAt: rv.publishedAt || updatedAt
+        });
+      }
+    } else {
+      keptReviews.push(rv);
+    }
+  }
+  snap.news = existingNews;
+  snap.reviews = keptReviews;
+
   await writeAndVerifyFile(snapPath, Buffer.from(JSON.stringify(snap, null, 2) + '\n'));
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'cars.json'), Buffer.from(JSON.stringify({ cars: snap.cars, updatedAt }) + '\n'));
-  await writeAndVerifyFile(path.join(API_STATIC_DIR, 'reviews.json'), Buffer.from(JSON.stringify({ reviews: snap.reviews || [], updatedAt }) + '\n'));
+  await writeAndVerifyFile(path.join(API_STATIC_DIR, 'news.json'), Buffer.from(JSON.stringify({ news: snap.news, updatedAt }) + '\n'));
+  await writeAndVerifyFile(path.join(API_STATIC_DIR, 'reviews.json'), Buffer.from(JSON.stringify({ reviews: snap.reviews, updatedAt }) + '\n'));
   const indexHtml = await extractFrontendHtmlFromWorker({});
   await writeAndVerifyFile(path.join(PUBLIC_DIR, 'index.html'), Buffer.from(indexHtml, 'utf8'));
-  return { cars: snap.cars.length, reviews: (snap.reviews || []).length };
+  return { cars: snap.cars.length, news: snap.news.length, reviews: snap.reviews.length };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes('--fast-rebuild')) {
     rebuildLocalBundle()
-      .then(r => console.log(`Локальная витрина пересобрана: авто ${r.cars}, отзывов ${r.reviews}`))
+      .then(r => console.log(`Локальная витрина пересобрана: авто ${r.cars}, новостей ${r.news}, отзывов ${r.reviews}`))
       .catch(err => { console.error(err); process.exitCode = 1; });
   } else {
   runMigration()
     .then(report => {
       console.log('=== МИГРАЦИЯ КАТАЛОГА AVTOY KOREA УСПЕШНО ЗАВЕРШЕНА ===');
       console.log(`Автомобилей перенесено: ${report.carsMigratedCount} из ${report.carsSourceCount}`);
+      console.log(`Новостей перенесено:    ${report.newsMigratedCount}`);
       console.log(`Отзывов перенесено:     ${report.reviewsMigratedCount}`);
       console.log(`Файлов скачано и проверено по SHA-256: ${report.mediaVerifiedCount}`);
       console.log(`Общий объём всех фото и видео:         ${report.totalMediaMegabytes} МБ`);

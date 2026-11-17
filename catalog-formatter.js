@@ -1,7 +1,7 @@
 // Smart vehicle & review text cleaner and structured metadata parser for AVTOY KOREA.
 
 export function cleanCarDisplayCaption(raw) {
-  return String(raw || "")
+  const base = String(raw || "")
     .replace(/\r/g, "")
     .replace(/\*+/g, "")
     // Strip leftover Telegram contact tails ("Для заказа автомобиля обращайтесь: Владимир: +")
@@ -10,8 +10,27 @@ export function cleanCarDisplayCaption(raw) {
     .replace(/(?:^|\n)\s*Организуем доставку до Вас!?\s*/gi, "\n")
     .replace(/(?:^|\n)\s*(?:Владимир|Менеджер|Контакт|Продавец)\s*:\s*\+?\s*$/gim, "")
     .replace(/(?:^|\n)\s*\+\s*$/gm, "")
+    .replace(/\s+,/g, ",")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  // Repair orphaned ". " list items left behind when keycap emojis (e.g. "2️⃣. ") were stripped
+  let prevNum = 0;
+  return base.split("\n").map(line => {
+    const trimmed = line.replace(/^[\u2060\s]+/, "");
+    const numMatch = trimmed.match(/^(\d+)\.\s+/);
+    if (numMatch) {
+      prevNum = Number(numMatch[1]);
+      return trimmed;
+    }
+    if (/^\.\s+/.test(trimmed)) {
+      if (prevNum > 0) {
+        prevNum += 1;
+        return `${prevNum}. ${trimmed.replace(/^\.\s+/, "")}`;
+      }
+      return `• ${trimmed.replace(/^\.\s+/, "")}`;
+    }
+    return line;
+  }).join("\n");
 }
 
 const BRAND_ALIASES = [
@@ -224,3 +243,34 @@ export function deduplicateMediaItems(items) {
   }
   return out;
 }
+
+export function isMarketNewsRecord(record) {
+  if (!record || typeof record !== "object") return false;
+  const id = String(record.id || "");
+  if (id.startsWith("news_") || record.category === "news" || record.kind === "news") return true;
+  const text = String(record.text || record.caption || "");
+  if (!text) return false;
+  const hasMarketTopic = /(?:утильсбор|индексаци[яи]|растаможк|параллельн\w+\s+импорт|таможенн\w+\s+пошлин|изменени\w+\s+правил|ставк\w+\s+утиль)/i.test(text);
+  const hasCustomerThanks = /(?:спасибо|благодар|довольного\s+клиента|довольных\s+клиентов|прилетел\s+отзыв|очередной\s+отзыв)/i.test(text);
+  return hasMarketTopic && !hasCustomerThanks;
+}
+
+export function parseNewsCardData(item) {
+  const raw = cleanCarDisplayCaption(item?.text || item?.caption || "");
+  const lines = raw
+    .split("\n")
+    .map(l => l.replace(/\u00a0/g, " ").replace(/^[\u2060\s]+/, "").trim())
+    .filter(Boolean);
+  const title = (lines[0] || "Новость AVTOY KOREA").replace(/[!?.]+$/, "").trim();
+  const bodyLines = lines.length > 1 ? lines.slice(1) : [];
+  const isUrgent = /(?:утильсбор|срочно|подорожан|удорожан|закрыть|таких\s+цен.*не\s+будет|индексац)/i.test(raw);
+  return {
+    id: item?.id || "",
+    title,
+    bodyLines,
+    fullText: raw,
+    isUrgent,
+    badge: isUrgent ? "⚡ Важная новость" : "📰 Новость"
+  };
+}
+
