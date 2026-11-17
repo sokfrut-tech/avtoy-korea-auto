@@ -3388,9 +3388,16 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
  .nav-telegram small,.nav-max small{display:none}
  .nav-telegram{display:flex!important}
 }
+@media(max-width:1060px){
+ .brand-logo{width:152px}
+ .nav-links .nav-home{display:none}
+ .nav-telegram b{display:none}
+ .nav-max{padding:5px 10px 5px 6px;font-size:11.5px}
+ .nav .pill{padding:9px 13px;font-size:12px}
+}
 @media(max-width:900px){
  .news-grid,.news-grid.is-single .news-card.has-media{grid-template-columns:1fr}
- .nav-telegram b{display:none}
+ .nav-links a[href="#order"]{display:none}
 }
 @media(max-width:780px){
  .catalog-search-row{grid-template-columns:1fr}
@@ -4248,8 +4255,9 @@ loadCars();
   }).catch(function(){});
 
   var activeMaxUrl='';
+  function isMaxHref(u){return String(u||'').toLowerCase().indexOf('https://max.ru/')===0;}
   function applyMaxBotLinks(url){
-    if(url&&/^https:\\/\\/max\\.ru\\//i.test(url))activeMaxUrl=url;
+    if(isMaxHref(url))activeMaxUrl=url;
     document.querySelectorAll('[data-max-bot-link]').forEach(function(el){
       if(activeMaxUrl){
         el.href=activeMaxUrl;
@@ -4260,7 +4268,7 @@ loadCars();
   }
   document.querySelectorAll('[data-max-bot-link]').forEach(function(el){
     var initialHref=el.getAttribute('href')||'';
-    if(/^https:\\/\\/max\\.ru\\//i.test(initialHref))activeMaxUrl=initialHref;
+    if(isMaxHref(initialHref))activeMaxUrl=initialHref;
     el.addEventListener('click',function(e){
       if(activeMaxUrl)return;
       e.preventDefault();

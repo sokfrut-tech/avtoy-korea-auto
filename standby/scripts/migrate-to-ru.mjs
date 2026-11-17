@@ -107,7 +107,7 @@ async function extractFrontendHtmlFromWorker({ maxBotUrl = process.env.MAX_BOT_U
   html = html.replaceAll('${maxHrefAttr}', safeMaxHrefAttr);
 
   // Unescape template literal double-backslashes from worker.js (e.g. \\s -> \s, \\d -> \d, \\. -> \.)
-  html = html.replace(/\\\\([bdswBDSW.nrt+?*()[\]{}|^$])/g, '\\$1');
+  html = html.replace(/\\\\([bdswBDSW.nrt+?*()[\]{}|^$/])/g, '\\$1');
 
   // Localize logo and hero slides so zero foreign image CDNs are queried by Russian visitors
   html = html.replace('src="/assets/logo.jpg"', 'src="./assets/logo.jpg"');
