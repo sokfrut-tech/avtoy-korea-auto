@@ -430,6 +430,9 @@ export function resolveMirrorCorsHeaders(request, env) {
     } else if (
       parsed.protocol === "https:" &&
       (parsed.hostname.endsWith(".gitverse.ru") ||
+        parsed.hostname.endsWith(".gitverse.site") ||
+        parsed.hostname === "gitverse.ru" ||
+        parsed.hostname.endsWith(".github.io") ||
         parsed.hostname.endsWith(".yandexcloud.net") ||
         parsed.hostname.endsWith(".avtoykorea.ru"))
     ) {

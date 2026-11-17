@@ -18,12 +18,9 @@ if errorlevel 1 (
 )
 
 echo.
-set /p GV_URL="Укажите ссылку на ваш публичный репозиторий GitVerse (например https://gitverse.ru/ВАШ_ЛОГИН/avtoy-korea.git): "
-if "%GV_URL%"=="" (
-  echo Ссылка не указана. Готовые файлы сайта лежат в папке standby\public
-  pause
-  exit /b 0
-)
+set "GV_URL=https://gitverse.ru/opus_pampus/avtoy-korea.git"
+set /p GV_INPUT="Ссылка на GitVerse [Enter = %GV_URL%]: "
+if not "%GV_INPUT%"=="" set "GV_URL=%GV_INPUT%"
 
 echo.
 echo [2/3] Готовим чистую витрину без секретов...
