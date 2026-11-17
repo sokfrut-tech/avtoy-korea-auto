@@ -95,6 +95,19 @@ test('outbox leases fence stale workers and successful delivery completes once',
   assert.equal(await store.claimDueMaxCommandReplies({now:1800000000200}),[]);
 });
 
+test('expired MAX reply lease is recovered with a new fencing token',async()=>{
+  const fake=fakeSql(); let id=0;
+  const store=createYdbRequestStore({sql:fake.sql,clock:()=>1800000000000,idFactory:()=> 'lease-recovery-'+(++id)});
+  await store.recordMaxWebhookEvent(event());
+  const [first]=await store.claimDueMaxCommandReplies({now:1800000000000,leaseMs:1000});
+  assert.equal(first.leaseToken,'lease-recovery-1');
+  assert.deepEqual(await store.claimDueMaxCommandReplies({now:1800000000999}),[]);
+  const [recovered]=await store.claimDueMaxCommandReplies({now:1800000001000,leaseMs:1000});
+  assert.equal(recovered.leaseToken,'lease-recovery-2');
+  assert.equal(await store.completeMaxCommandReply({eventDigest:first.eventDigest,leaseToken:first.leaseToken,now:1800000001100}),null);
+  assert.equal((await store.completeMaxCommandReply({eventDigest:recovered.eventDigest,leaseToken:recovered.leaseToken,now:1800000001200})).status,'sent');
+});
+
 test('failed delivery is rescheduled with bounded retry and eventually dead-lettered',async()=>{
   const fake=fakeSql(); let id=0;
   const store=createYdbRequestStore({sql:fake.sql,clock:()=>1800000000000,idFactory:()=> 'lease-'+(++id)});
