@@ -278,6 +278,10 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
         text:responseText,
         auditEvent:{ eventId:randomUUID(), targetId:auditTargetId }
       } : null;
+      // Do not durably accept a command whose reply cannot be delivered. Returning
+      // 503 lets MAX retry after outbound credentials are configured instead of
+      // permanently dead-lettering an avoidable max_not_configured response.
+      if (reply && !maxAdapter.configured) return json(res,503,{ ok:false,error:'MAX outbound replies are not configured.' });
       const result = await maxEventStore.recordMaxWebhookEvent({
         digest,eventType:type,eventTimestamp:timestamp,chatId:String(chatId),messageId:messageId || null,senderUserId:senderId || null,reply
       });
