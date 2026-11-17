@@ -217,8 +217,8 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
         results.push({ eventDigest:claim.eventDigest, status:completed?.status || 'stale' });
       } else {
         const reason = ['max_rate_limited','max_server_error','max_network_error','max_request_rejected'].includes(outcome?.reason) ? outcome.reason : 'max_request_rejected';
-        const retryBaseMs = Math.min(15 * 60_000, Math.max(5_000, Number(outcome?.retryAfterMs) || 0));
-        const failed = await requestStore.failMaxCommandReply({ eventDigest:claim.eventDigest, leaseToken:claim.leaseToken, retryable:Boolean(outcome?.retryable), errorCode:reason, now:clock(), retryBaseMs, retryMaxMs:15 * 60_000, maxAttempts:8 });
+        const retryBaseMs = Math.min(RETRY_MAX_MS, Math.max(5_000, Number(outcome?.retryAfterMs) || 0));
+        const failed = await requestStore.failMaxCommandReply({ eventDigest:claim.eventDigest, leaseToken:claim.leaseToken, retryable:Boolean(outcome?.retryable), errorCode:reason, now:clock(), retryBaseMs, retryMaxMs:RETRY_MAX_MS, maxAttempts:8 });
         results.push({ eventDigest:claim.eventDigest, status:failed?.status || 'stale' });
       }
     }
