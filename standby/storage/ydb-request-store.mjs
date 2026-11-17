@@ -187,7 +187,7 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
         WHERE event_digest = ${eventDigest}`;
       await tx`INSERT INTO standby_operator_audit_events
         (event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata)
-        VALUES (${auditEventId}, ${completedAt}, ${row.actor_id}, 'operator', 'max.command.delivery', 'max_command', ${eventDigest}, 'accepted', ${JSON.stringify({status:'sent',command:row.command_kind})})`;
+        VALUES (${auditEventId}, ${completedAt}, ${row.actor_id}, 'operator', 'max.command.delivery', 'max_command', ${eventDigest}, 'accepted', ${JSON.stringify({status:'sent'})})`;
       return { eventDigest, status:'sent' };
     });
   }
@@ -211,7 +211,7 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
         WHERE event_digest = ${eventDigest}`;
       await tx`INSERT INTO standby_operator_audit_events
         (event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata)
-        VALUES (${auditEventId}, ${nowIso}, ${row.actor_id}, 'operator', 'max.command.delivery', 'max_command', ${eventDigest}, 'failed', ${JSON.stringify({reason:errorCode,status:dead?'dead':'queued',command:row.command_kind})})`;
+        VALUES (${auditEventId}, ${nowIso}, ${row.actor_id}, 'operator', 'max.command.delivery', 'max_command', ${eventDigest}, 'failed', ${JSON.stringify({reason:errorCode,status:dead?'dead':'queued'})})`;
       return { eventDigest, status:dead ? 'dead' : 'queued', attempts, nextAttemptAt:next, lastError:errorCode };
     });
   }
