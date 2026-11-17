@@ -426,3 +426,10 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Added a storage regression test that claims a command reply, schedules a six-hour retry, and asserts the exact persisted next-attempt time. Commit `936905ca3e24cf9f48918d33d7587735d7487711`.
 - Test has not yet been executed; source-level change only. Existing local 14/14 evidence remains adapter/auth tests, not YDB storage tests.
 - Official MAX `POST /messages` docs/schema expose `chat_id`, optional `user_id`, and `disable_link_preview`, with a normal create-message response; no idempotency key/request identifier is documented. Therefore the current durable outbox provides at-least-once delivery, not exactly-once: a process crash after MAX accepts a send but before YDB marks it `sent` can produce a duplicate on lease recovery. Do not claim exactly-once delivery. See official API documentation: https://dev.max.ru/docs-api/ and schema reference https://github.com/max-messenger-bot/max-bot-api-schemas/blob/main/schema_2026_07_01.json.
+
+
+## Expired MAX outbox lease recovery regression — 2026-11-17
+- Added a focused storage test for lease recovery: first worker claims; row remains unavailable before lease expiry; after expiry a second worker receives a fresh fencing token; first worker's stale token cannot complete; second worker completes successfully.
+- Test commit: `8c12d8ac1f03f488b60321d2bdb5df9bab45781a`.
+- This is a deterministic fake-SQL state-machine test. It does not prove YDB transaction isolation or concurrent transaction behavior; a real YDB integration/concurrency test remains required before merge/deploy.
+- No production resources, database, migration, or MAX API were touched.
