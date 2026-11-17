@@ -2940,10 +2940,12 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
 .car-Card-pricebox{margin-top:auto;padding-top:14px;border-top:1px solid #222f43;display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:12px}
 .car-price-val{font:900 21px/1.1 "Manrope",sans-serif;color:#fff}
 .car-price-note{font-size:11px;color:#93a4bc;text-align:right}
-.car-actions-row{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center}
-.car-spec-btn{padding:11px 13px;border-radius:11px;border:1px solid #2c3b54;background:#0b121e;color:#dbe4f0;font-weight:700;font-size:13px;cursor:pointer}
+.car-actions-row{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:stretch}
+.car-spec-btn{padding:10px 12px;min-height:42px;border-radius:11px;border:1px solid #2c3b54;background:#0b121e;color:#dbe4f0;font-weight:700;font-size:12.5px;cursor:pointer;white-space:nowrap}
 .car-spec-btn:hover{border-color:#f12f38;color:#fff}
-#cars .car-card .car-link{display:inline-flex;align-items:center;justify-content:center;padding:11px 14px;border-radius:11px;background:var(--red);color:#fff!important;font-weight:800;font-size:13px;width:100%;text-align:center;box-shadow:0 8px 20px #f12f3828}
+#cars .car-card .car-link{display:inline-flex;align-items:center;justify-content:center;padding:10px 12px;min-height:42px;border-radius:11px;background:var(--red);color:#fff!important;font-weight:800;font-size:12.5px;line-height:1.2;width:100%;text-align:center;box-shadow:0 8px 20px #f12f3828}
+@media(min-width:781px) and (max-width:1180px){#cars .cars{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;overflow:visible}}
+@media(min-width:1181px){#cars .cars{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;overflow:visible}}
 #cars .car-card.is-upgraded .car-description{display:none}
 .selected-car-banner{display:none;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;margin-bottom:14px;border-radius:12px;background:#f12f381c;border:1px solid #f12f3866;color:#ffd7d9;font-size:13px;font-weight:700}
 .selected-car-banner.is-visible{display:flex}
@@ -3196,7 +3198,7 @@ fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()}).then
         mediaIndex=(nextIndex+mediaItems.length)%mediaItems.length;
         var item=mediaItems[mediaIndex];stage.textContent='';
         if(item.type==='video'){
-          var video=document.createElement('video');video.className='review-media';video.src=item.url;video.controls=true;video.playsInline=true;video.preload='metadata';video.style.width='100%';video.style.height='100%';video.style.objectFit='contain';video.setAttribute('aria-label','Видео клиента');stage.appendChild(video);
+          var video=document.createElement('video');video.className='review-media';video.src=item.url;video.controls=true;video.playsInline=true;video.preload='none';video.style.width='100%';video.style.height='100%';video.style.objectFit='contain';video.setAttribute('aria-label','Видео клиента');stage.appendChild(video);
         }else{
           var link=document.createElement('a');link.className='review-gallery-photo';link.href=item.url;link.target='_blank';link.rel='noopener';
           var image=document.createElement('img');image.className='review-gallery-image';image.src=item.url;image.loading='eager';image.decoding='async';image.alt='Фотография автомобиля клиента '+(mediaIndex+1);
