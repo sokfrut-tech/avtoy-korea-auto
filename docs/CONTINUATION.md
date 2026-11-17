@@ -452,3 +452,14 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 
 - Follow-up after the concurrency regression: PR head advanced to `f95beb6b7c0b539cc00c66e3c9d9af79ed5cf437`. MAX validation run `44043441712` and Factory Security Baseline run `44043441833` both concluded `failure`; their jobs returned `steps=[]` (validation job `133903283263`, CodeQL `133903283396`, secret scan `133903283696`). No validation or security command is evidenced as having executed.
 - PR #81 remains open and draft. GitHub currently reports `mergeable=true`, but this is only a mergeability calculation, not a validation result. No merge/deployment/migration/live MAX action performed.
+
+
+## MAX command reply delivery audit — 2026-11-17
+- Closed an audit visibility gap: before this change, the atomic audit row recorded command acceptance/enqueue only; it did not record whether the MAX reply was later delivered or failed.
+- `completeMaxCommandReply()` now writes a `max.command.delivery` audit row with outcome `accepted` in the same serializable YDB transaction that marks the outbox row `sent`.
+- `failMaxCommandReply()` now writes a `max.command.delivery` audit row with outcome `failed` and allowlisted normalized reason/status metadata in the same transaction that reschedules or dead-letters the outbox row.
+- Both delivery audit IDs are deterministic per event digest + attempt number. Stale lease tokens return before either the outbox update or audit insert, preventing an obsolete worker from recording a false delivery outcome.
+- Audit metadata stays within the existing strict allowlist (`reason`, `status`); no customer contact data or reply body is copied into audit metadata.
+- Updated `standby/storage/max-command-outbox.test.mjs` to assert successful delivery and retry/dead-letter attempts generate audit outcomes. Tests have been authored but not executed yet; fake SQL is not a YDB integration test.
+- Operational note: delivery audit volume increases with each failed attempt; audit retention remains explicit manual maintenance and must be planned before enabling production traffic.
+- No migration change is required because the existing audit table already supports these fields. No production DB, MAX API, webhook subscription, merge or deployment was touched.
