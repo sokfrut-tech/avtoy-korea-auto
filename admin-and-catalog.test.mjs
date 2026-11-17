@@ -430,3 +430,83 @@ test("News publishing works across Telegram (/news, pubasnews, imp:news), MAX (/
     globalThis.fetch = origFetch;
   }
 });
+
+test("Yandex SEO engine serves robots.txt, sitemap.xml, yandex-feed.xml, car/news landing pages, Schema.org JSON-LD, and /setyandex verification without /гарант/i on homepage", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:car_1002326996766_3573", JSON.stringify({
+    id: "car_1002326996766_3573",
+    caption: "Kia Sorento Prestige\nГод выпуска: 2024\nПробег: 18000 км\nДвигатель: 2.2 дизель\nЦена под ключ до Москвы:\n4.250.000 ₽",
+    photos: [{ file_id: "SOR1" }],
+    publishedAt: "2026-11-12T10:00:00.000Z"
+  }));
+  await kv.put("car_approved:car_1002326996766_3482", JSON.stringify({
+    id: "car_1002326996766_3482",
+    caption: "исправить",
+    photos: [{ file_id: "BAD1" }]
+  }));
+  await kv.put("news_approved:news_1002326996766_3581", JSON.stringify({
+    id: "news_1002326996766_3581",
+    category: "news",
+    text: "После нового года таких цен 100 % не будет!\nИндексация утильсбора.",
+    photos: [{ file_id: "TAR1" }],
+    publishedAt: "2026-11-10T09:00:00.000Z"
+  }));
+
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("api.telegram.org")) return Response.json({ ok: true, result: {} });
+    return origFetch(url, init);
+  };
+
+  try {
+    // 1. /setyandex sets both homepage meta tag and verification HTML file
+    await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "wh-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        message: { chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "/setyandex abcd1234ef567890" }
+      })
+    }), baseEnv(kv));
+
+    const verifyFile = await worker.fetch(new Request("https://worker.test/yandex_abcd1234ef567890.html"), baseEnv(kv));
+    assert.equal(verifyFile.status, 200);
+    assert.match(await verifyFile.text(), /Verification: abcd1234ef567890/);
+
+    // 2. Homepage renders SSR preview, FAQ, Schema.org JSON-LD, yandex-verification meta, and zero /гарант/i
+    const home = await (await worker.fetch(new Request("https://worker.test/"), baseEnv(kv))).text();
+    assert.doesNotMatch(home, /гарант/i);
+    assert.match(home, /<meta name="yandex-verification" content="abcd1234ef567890">/);
+    assert.match(home, /application\/ld\+json/);
+    assert.match(home, /Kia Sorento Prestige/);
+    assert.match(home, /Частые вопросы|Покупка и доставка авто из Кореи и Китая/);
+
+    // 3. robots.txt, sitemap.xml, yandex-feed.xml exclude placeholder "исправить"
+    const robots = await (await worker.fetch(new Request("https://worker.test/robots.txt"), baseEnv(kv))).text();
+    assert.match(robots, /User-agent: Yandex/);
+    assert.match(robots, /Sitemap: https:\/\/worker\.test\/sitemap\.xml/);
+
+    const sitemap = await (await worker.fetch(new Request("https://worker.test/sitemap.xml"), baseEnv(kv))).text();
+    assert.match(sitemap, /https:\/\/worker\.test\/cars\/car_1002326996766_3573/);
+    assert.match(sitemap, /https:\/\/worker\.test\/news\/news_1002326996766_3581/);
+    assert.ok(!sitemap.includes("3482"));
+
+    const yml = await (await worker.fetch(new Request("https://worker.test/yandex-feed.xml"), baseEnv(kv))).text();
+    assert.match(yml, /<yml_catalog/);
+    assert.match(yml, /<price>4250000<\/price>/);
+    assert.match(yml, /<vendor>Kia<\/vendor>/);
+    assert.ok(!yml.includes("3482"));
+
+    // 4. Individual car & news landing pages return HTTP 200 with canonical + Product/NewsArticle schema
+    const carPage = await worker.fetch(new Request("https://worker.test/cars/car_1002326996766_3573"), baseEnv(kv));
+    assert.equal(carPage.status, 200);
+    const carHtml = await carPage.text();
+    assert.match(carHtml, /Kia Sorento Prestige/);
+    assert.match(carHtml, /"@type":"Product"/);
+
+    const newsPage = await worker.fetch(new Request("https://worker.test/news/news_1002326996766_3581"), baseEnv(kv));
+    assert.equal(newsPage.status, 200);
+    assert.match(await newsPage.text(), /Индексация утильсбора/);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});

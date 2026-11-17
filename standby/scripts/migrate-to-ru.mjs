@@ -9,12 +9,14 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createS3MediaStore } from '../storage/s3-media-store.mjs';
 import { cleanCarDisplayCaption, deduplicateMediaItems, isMarketNewsRecord } from '../../catalog-formatter.js';
+import { buildHomepageJsonLd, buildRobotsTxt, buildSitemapXml, buildYandexMarketYml, renderCarLandingHtml, renderFaqAndDirectoryHtml, renderNewsLandingHtml, renderServerCatalogPreviewHtml } from '../../seo-engine.js';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const STANDBY_DIR = path.resolve(SCRIPT_DIR, '..');
 const REPO_ROOT = path.resolve(STANDBY_DIR, '..');
 
 const SOURCE_BASE = new URL(process.env.SOURCE_WORKER_URL || 'https://avtoy-korea-auto.sokfrut.workers.dev/');
+const PUBLIC_MIRROR_URL = (process.env.PUBLIC_MIRROR_URL || 'https://opus-pampus.gitverse.site/avtoy-korea').replace(/\/+$/, '');
 const PUBLIC_DIR = path.join(STANDBY_DIR, 'public');
 const DATA_DIR = path.join(STANDBY_DIR, 'data');
 const MEDIA_DIR = path.join(PUBLIC_DIR, 'media');
@@ -90,7 +92,14 @@ async function downloadBuffer(url, maxBytes = MAX_MEDIA_BYTES, timeoutMs = 60_00
   return { buf, mime };
 }
 
-async function extractFrontendHtmlFromWorker({ maxBotUrl = process.env.MAX_BOT_URL || '', workerApiOrigin = SOURCE_BASE.origin }) {
+async function extractFrontendHtmlFromWorker({
+  maxBotUrl = process.env.MAX_BOT_URL || '',
+  yandexVerification = process.env.YANDEX_VERIFICATION || '',
+  workerApiOrigin = SOURCE_BASE.origin,
+  mirrorBaseUrl = PUBLIC_MIRROR_URL,
+  cars = [],
+  news = []
+} = {}) {
   const workerSource = await fs.readFile(path.join(REPO_ROOT, 'worker.js'), 'utf8');
   const startMarker = 'const html = `<!doctype html>';
   const endMarker = '</html>`;';
@@ -108,6 +117,17 @@ async function extractFrontendHtmlFromWorker({ maxBotUrl = process.env.MAX_BOT_U
 
   // Unescape template literal double-backslashes from worker.js (e.g. \\s -> \s, \\d -> \d, \\. -> \.)
   html = html.replace(/\\\\([bdswBDSW.nrt+?*()[\]{}|^$/])/g, '\\$1');
+
+  // Inject Russian mirror SEO metadata, Schema.org JSON-LD, SSR car cards, and FAQ directory
+  const cleanMirror = mirrorBaseUrl.replace(/\/+$/, '');
+  const yandexMeta = /^[A-Za-z0-9_-]{8,64}$/.test(String(yandexVerification || '').trim())
+    ? `\n<meta name="yandex-verification" content="${String(yandexVerification).trim()}">`
+    : '';
+  html = html.replaceAll('${canonicalUrl}', `${cleanMirror}/`);
+  html = html.replaceAll('${yandexVerifyMeta}', yandexMeta);
+  html = html.replaceAll('${seoJsonLd}', () => buildHomepageJsonLd({ baseUrl: cleanMirror, cars, news }));
+  html = html.replaceAll('${ssrCarsHtml}', () => renderServerCatalogPreviewHtml(cars, { useHtmlExt: true }));
+  html = html.replaceAll('${ssrFaqAndLinksHtml}', () => renderFaqAndDirectoryHtml(cars, news, { useHtmlExt: true }));
 
   // Localize logo and hero slides so zero foreign image CDNs are queried by Russian visitors
   html = html.replace('src="/assets/logo.jpg"', 'src="./assets/logo.jpg"');
@@ -353,8 +373,7 @@ export async function runMigration() {
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'news.json'), Buffer.from(JSON.stringify({ news: migratedNews, updatedAt }) + '\n'));
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'reviews.json'), Buffer.from(JSON.stringify({ reviews: migratedReviews, updatedAt }) + '\n'));
 
-  const indexHtml = await extractFrontendHtmlFromWorker({});
-  await writeAndVerifyFile(path.join(PUBLIC_DIR, 'index.html'), Buffer.from(indexHtml, 'utf8'));
+  await writeStaticSeoBundle({ cars: migratedCars, news: migratedNews, updatedAt, maxBotUrl: '', mirrorBaseUrl: PUBLIC_MIRROR_URL });
   await writeAndVerifyFile(path.join(PUBLIC_DIR, '.nojekyll'), Buffer.from(''));
 
   const report = {
@@ -373,6 +392,32 @@ export async function runMigration() {
   await writeAndVerifyFile(path.join(DATA_DIR, 'migration-report.json'), Buffer.from(JSON.stringify(report, null, 2) + '\n'));
 
   return report;
+}
+
+async function writeStaticSeoBundle({ cars = [], news = [], updatedAt, maxBotUrl = '', mirrorBaseUrl = PUBLIC_MIRROR_URL }) {
+  const indexHtml = await extractFrontendHtmlFromWorker({ maxBotUrl, cars, news, mirrorBaseUrl });
+  await writeAndVerifyFile(path.join(PUBLIC_DIR, 'index.html'), Buffer.from(indexHtml, 'utf8'));
+  await writeAndVerifyFile(path.join(PUBLIC_DIR, 'robots.txt'), Buffer.from(buildRobotsTxt({ baseUrl: mirrorBaseUrl }), 'utf8'));
+  await writeAndVerifyFile(path.join(PUBLIC_DIR, 'sitemap.xml'), Buffer.from(buildSitemapXml({ baseUrl: mirrorBaseUrl, cars, news, useHtmlExt: true, updatedAt }), 'utf8'));
+  await writeAndVerifyFile(path.join(PUBLIC_DIR, 'yandex-feed.xml'), Buffer.from(buildYandexMarketYml({ baseUrl: mirrorBaseUrl, cars, useHtmlExt: true, updatedAt }), 'utf8'));
+
+  const carsOutDir = path.join(PUBLIC_DIR, 'cars');
+  const newsOutDir = path.join(PUBLIC_DIR, 'news');
+  await fs.rm(carsOutDir, { recursive: true, force: true });
+  await fs.rm(newsOutDir, { recursive: true, force: true });
+  await fs.mkdir(carsOutDir, { recursive: true });
+  await fs.mkdir(newsOutDir, { recursive: true });
+
+  for (const car of cars) {
+    if (!car || !car.id || String(car.caption || '').trim().toLowerCase() === 'исправить') continue;
+    const html = renderCarLandingHtml(car, { baseUrl: mirrorBaseUrl, isStaticMirror: true, maxBotUrl });
+    await writeAndVerifyFile(path.join(carsOutDir, `${car.id}.html`), Buffer.from(html, 'utf8'));
+  }
+  for (const item of news) {
+    if (!item || !item.id) continue;
+    const html = renderNewsLandingHtml(item, { baseUrl: mirrorBaseUrl, isStaticMirror: true, maxBotUrl });
+    await writeAndVerifyFile(path.join(newsOutDir, `${item.id}.html`), Buffer.from(html, 'utf8'));
+  }
 }
 
 export async function rebuildLocalBundle() {
@@ -417,8 +462,7 @@ export async function rebuildLocalBundle() {
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'cars.json'), Buffer.from(JSON.stringify({ cars: snap.cars, updatedAt }) + '\n'));
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'news.json'), Buffer.from(JSON.stringify({ news: snap.news, updatedAt }) + '\n'));
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'reviews.json'), Buffer.from(JSON.stringify({ reviews: snap.reviews, updatedAt }) + '\n'));
-  const indexHtml = await extractFrontendHtmlFromWorker({});
-  await writeAndVerifyFile(path.join(PUBLIC_DIR, 'index.html'), Buffer.from(indexHtml, 'utf8'));
+  await writeStaticSeoBundle({ cars: snap.cars, news: snap.news, updatedAt, maxBotUrl: snap.maxBotUrl || '', mirrorBaseUrl: PUBLIC_MIRROR_URL });
   return { cars: snap.cars.length, news: snap.news.length, reviews: snap.reviews.length };
 }
 

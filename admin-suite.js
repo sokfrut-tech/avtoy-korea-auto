@@ -112,8 +112,14 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box
 
     <div class="composer" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px">
       <span style="font-weight:800;white-space:nowrap">💬 Кнопка «Бот в MAX» на сайте:</span>
-      <input id="max-bot-url" type="url" style="flex:1;min-width:240px;padding:9px 12px" placeholder="https://max.ru/ваш_бот (если пусто — кнопки MAX на сайте ведут к форме связи в MAX)">
+      <input id="max-bot-url" type="url" style="flex:1;min-width:220px;padding:9px 12px" placeholder="https://max.ru/ваш_бот (если пусто — кнопки MAX на сайте ведут к форме связи в MAX)">
       <button type="button" id="save-max-url-btn" class="sec sm" style="padding:9px 14px">💾 Сохранить ссылку MAX</button>
+    </div>
+
+    <div class="composer" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px">
+      <span style="font-weight:800;white-space:nowrap">🔍 Яндекс.Вебмастер (код):</span>
+      <input id="yandex-verify-code" type="text" style="flex:1;min-width:220px;padding:9px 12px" placeholder="Код подтверждения из meta-тега yandex-verification (пример: a1b2c3d4e5f6)">
+      <button type="button" id="save-yandex-btn" class="sec sm" style="padding:9px 14px">💾 Сохранить код Яндекса</button>
     </div>
 
     <div class="tabs">
@@ -203,6 +209,8 @@ async function loadAll() {
     document.getElementById('st-orders').textContent = state.orders.length;
     const maxInput = document.getElementById('max-bot-url');
     if (maxInput && document.activeElement !== maxInput) maxInput.value = data.maxBotUrl || '';
+    const yandexInput = document.getElementById('yandex-verify-code');
+    if (yandexInput && document.activeElement !== yandexInput) yandexInput.value = data.yandexVerification || '';
     render();
   } catch (e) {
     if (e.message === 'Unauthorized') return showLogin('Сессия истекла. Получите новый код командой /adminlink в боте.');
@@ -432,6 +440,15 @@ document.getElementById('save-max-url-btn').onclick = async () => {
   try {
     const r = await api('/api/admin/settings', 'POST', { maxBotUrl: val });
     notify(r.maxBotUrl ? ('Ссылка на бот MAX сохранена: ' + r.maxBotUrl) : 'Прямая ссылка MAX очищена (включён режим формы связи в MAX)');
+    loadAll();
+  } catch (e) { notify(e.message, true); }
+};
+
+document.getElementById('save-yandex-btn').onclick = async () => {
+  const val = document.getElementById('yandex-verify-code').value.trim();
+  try {
+    const r = await api('/api/admin/settings', 'POST', { yandexVerification: val });
+    notify(r.yandexVerification ? ('Код Яндекс.Вебмастер сохранён: ' + r.yandexVerification) : 'Код Яндекс.Вебмастер очищен');
     loadAll();
   } catch (e) { notify(e.message, true); }
 };

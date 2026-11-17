@@ -2,6 +2,7 @@ import { mergeOrderedMediaItems, orderedMediaFromRecord } from "./media-order.js
 import { MAX_TELEGRAM_BOT_VIDEO_BYTES, deliverOrderToMax, handleMaxBotWebhook, resolveMirrorCorsHeaders } from "./max-worker-bridge.js";
 import { cleanCarDisplayCaption, isMarketNewsRecord } from "./catalog-formatter.js";
 import { ADMIN_PRO_CSP, ADMIN_PRO_HTML, enrichAdminItem, runAdminCatalogCleanup, sendOrEditTelegramPanel } from "./admin-suite.js";
+import { buildHomepageJsonLd, buildRobotsTxt, buildSitemapXml, buildYandexMarketYml, renderCarLandingHtml, renderFaqAndDirectoryHtml, renderNewsLandingHtml, renderServerCatalogPreviewHtml } from "./seo-engine.js";
 
 async function beginModerationEdit(callback, env, type, id, answer) {
  const adminId = String((callback.from && callback.from.id) || "");
@@ -177,6 +178,7 @@ async function setAdminCommands(env, adminId) {
    { command: "panel", description: "Центр управления (авто, новости, отзывы, заявки)" },
    { command: "news", description: "Опубликовать новость: /news текст" },
    { command: "setmax", description: "Указать ссылку на бота MAX: /setmax https://max.ru/..." },
+   { command: "setyandex", description: "Подтвердить Яндекс Вебмастер: /setyandex код" },
    { command: "adminlink", description: "Вход в веб-панель в 1 клик" },
    { command: "admin", description: "Меню и подсказка администратора" },
    { command: "site", description: "Полный список карточек с фото" },
@@ -1777,6 +1779,111 @@ async function resolveMaxBotUrl(env) {
  return /^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(candidate) ? candidate : "";
 }
 
+async function resolveYandexVerification(env) {
+ let code = "";
+ if (env.REVIEWS) {
+  try { code = String((await env.REVIEWS.get("site_config:yandex_verification")) || "").trim(); } catch {}
+ }
+ if (!code) code = String(env.YANDEX_VERIFICATION || "").trim();
+ return /^[A-Za-z0-9_-]{8,64}$/.test(code) ? code : "";
+}
+
+async function loadApprovedCarsForPublic(env) {
+ if (!env.REVIEWS) return [];
+ const cars = [];
+ let cursor;
+ do {
+  const page = await env.REVIEWS.list({ prefix: "car_approved:", ...(cursor ? { cursor } : {}) });
+  for (const key of page.keys) {
+   const raw = await env.REVIEWS.get(key.name);
+   if (!raw) continue;
+   const car = JSON.parse(raw);
+   if (String(car.caption || "").trim().toLowerCase() === "исправить") continue;
+   const photoItems = catalogPhotoItems(car);
+   const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{ file_id: car.fileId }] : []));
+   const ordered = publicCarMediaOrder(car, photoItems, videoItems);
+   const mediaItems = ordered.mediaItems;
+   cars.push({
+    id: car.id,
+    caption: publicCarCaption(car.caption),
+    media: mediaItems[0] ? mediaItems[0].url : null,
+    mediaItems,
+    mediaOrderKnown: ordered.mediaOrderKnown,
+    mediaType: car.mediaType || "photo",
+    publishedAt: car.publishedAt || ""
+   });
+  }
+  cursor = page.list_complete ? null : page.cursor;
+ } while (cursor);
+ cars.sort((a, b) => String(b.publishedAt || "").localeCompare(String(a.publishedAt || "")));
+ return cars;
+}
+
+async function loadApprovedNewsForPublic(env) {
+ if (!env.REVIEWS) return [];
+ const news = [];
+ const seenBaseIds = new Set();
+ let cursor;
+ do {
+  const page = await env.REVIEWS.list({ prefix: "news_approved:", ...(cursor ? { cursor } : {}) });
+  for (const key of page.keys) {
+   const raw = await env.REVIEWS.get(key.name);
+   if (!raw) continue;
+   const n = JSON.parse(raw);
+   const photos = uniqueFileItems(Array.isArray(n.photos) && n.photos.length ? n.photos : (n.fileId && n.kind !== "video" ? [{ file_id: n.fileId }] : []));
+   const videos = uniqueFileItems(Array.isArray(n.videos) && n.videos.length ? n.videos : (n.kind === "video" && n.fileId ? [{ file_id: n.fileId }] : []));
+   const mediaItems = [
+    ...photos.map((_, idx) => ({ url: `/api/news-media/${n.id}/photo/${idx}`, type: "photo" })),
+    ...videos.map((_, idx) => ({ url: `/api/news-media/${n.id}/video/${idx}`, type: "video" }))
+   ];
+   seenBaseIds.add(String(n.id).replace(/^news_/, "").replace(/^-/, ""));
+   if (n.originalReviewId) seenBaseIds.add(String(n.originalReviewId).replace(/^-/, ""));
+   news.push({
+    id: n.id,
+    kind: videos.length && !photos.length ? "video" : "news",
+    text: cleanCarDisplayCaption(cleanPublicationText(n.text || n.caption || "")),
+    media: mediaItems[0] ? mediaItems[0].url : null,
+    mediaItems,
+    publishedAt: n.publishedAt || n.createdAt || ""
+   });
+  }
+  cursor = page.list_complete ? null : page.cursor;
+ } while (cursor);
+
+ let revCursor;
+ do {
+  const revPage = await env.REVIEWS.list({ prefix: "approved:", ...(revCursor ? { cursor: revCursor } : {}) });
+  for (const key of revPage.keys) {
+   const raw = await env.REVIEWS.get(key.name);
+   if (!raw) continue;
+   const r = JSON.parse(raw);
+   if (!isMarketNewsRecord(r)) continue;
+   const cleanBase = String(r.id || "").replace(/^-/, "");
+   if (seenBaseIds.has(cleanBase)) continue;
+   const photos = uniqueFileItems(Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{ file_id: r.fileId }] : []));
+   const videos = uniqueFileItems(Array.isArray(r.videos) && r.videos.length ? r.videos : (r.kind === "video" && r.fileId ? [{ file_id: r.fileId }] : []));
+   const ordered = publicReviewMediaOrder(r, photos, videos);
+   const mediaItems = ordered.mediaItems.length
+    ? ordered.mediaItems
+    : [
+       ...photos.map((_, idx) => ({ url: `/api/review-media/${r.id}/photo/${idx}`, type: "photo" })),
+       ...videos.map((_, idx) => ({ url: `/api/review-media/${r.id}/video/${idx}`, type: "video" }))
+      ];
+   news.push({
+    id: "news_" + cleanBase,
+    kind: videos.length && !photos.length ? "video" : "news",
+    text: cleanCarDisplayCaption(cleanPublicationText(r.text || "")),
+    media: mediaItems[0] ? mediaItems[0].url : (r.fileId ? `/api/review-media/${r.id}` : null),
+    mediaItems,
+    publishedAt: r.publishedAt || r.createdAt || ""
+   });
+  }
+  revCursor = revPage.list_complete ? null : revPage.cursor;
+ } while (revCursor);
+ news.sort((a, b) => String(b.publishedAt || "").localeCompare(String(a.publishedAt || "")));
+ return news;
+}
+
 async function getWebAdminSession(request, env, adminIds) {
  if (!env.REVIEWS) return null;
  const token = cookieValue(request, "avtoy_admin");
@@ -1934,22 +2041,37 @@ async function handleWebAdminApi(request, url, env, adminIds) {
    try { orders.push(JSON.parse(raw)); } catch {}
   }
   orders.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
-  const maxBotUrl = await resolveMaxBotUrl(env);
-  return json({ items, pending, orders, maxBotUrl });
+  const [maxBotUrl, yandexVerification] = await Promise.all([resolveMaxBotUrl(env), resolveYandexVerification(env)]);
+  return json({ items, pending, orders, maxBotUrl, yandexVerification });
  }
 
  if (path === "/api/admin/settings" && request.method === "POST") {
   if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
   let body = {};
   try { body = await request.json(); } catch { return json({ error: "Invalid request" }, 400); }
-  const rawUrl = String(body?.maxBotUrl || "").trim();
-  if (rawUrl && !/^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(rawUrl)) {
-   return json({ error: "Укажите ссылку вида https://max.ru/..." }, 400);
+  if (Object.hasOwn(body || {}, "maxBotUrl")) {
+   const rawUrl = String(body.maxBotUrl || "").trim();
+   if (rawUrl && !/^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(rawUrl)) {
+    return json({ error: "Укажите ссылку вида https://max.ru/..." }, 400);
+   }
+   if (rawUrl) await env.REVIEWS.put("site_config:max_bot_url", rawUrl);
+   else await env.REVIEWS.delete("site_config:max_bot_url");
+   await writeLog(env, session.adminId, "обновлена ссылка MAX", "настройки", "max_bot_url", rawUrl || "очищено");
   }
-  if (rawUrl) await env.REVIEWS.put("site_config:max_bot_url", rawUrl);
-  else await env.REVIEWS.delete("site_config:max_bot_url");
-  await writeLog(env, session.adminId, "обновлена ссылка MAX", "настройки", "max_bot_url", rawUrl || "очищено");
-  return json({ ok: true, maxBotUrl: await resolveMaxBotUrl(env) });
+  if (Object.hasOwn(body || {}, "yandexVerification")) {
+   const rawYandex = String(body.yandexVerification || "").trim();
+   if (rawYandex && !/^[A-Za-z0-9_-]{8,64}$/.test(rawYandex)) {
+    return json({ error: "Код Яндекс.Вебмастер должен состоять из 8–64 латинских букв/цифр" }, 400);
+   }
+   if (rawYandex) await env.REVIEWS.put("site_config:yandex_verification", rawYandex);
+   else await env.REVIEWS.delete("site_config:yandex_verification");
+   await writeLog(env, session.adminId, "обновлён код Яндекс.Вебмастер", "настройки", "yandex_verification", rawYandex || "очищено");
+  }
+  return json({
+   ok: true,
+   maxBotUrl: await resolveMaxBotUrl(env),
+   yandexVerification: await resolveYandexVerification(env)
+  });
  }
 
  if (path === "/api/admin/news" && request.method === "POST") {
@@ -2432,6 +2554,21 @@ export default {
        reply_markup: { inline_keyboard: [[{ text: "✏️ Изменить", callback_data: "siteedit:" + newsId }, { text: "🗑 Снять с сайта", callback_data: "sitedel:" + newsId }], [{ text: "🎛 Панель", callback_data: "panel:home" }]] }
       });
      }
+    } else if (/^\/setyandex(?:@\w+)?(?:\s+([\s\S]+))?$/i.test(text) && adminIds.includes(chatId)) {
+     const m = text.match(/^\/setyandex(?:@\w+)?(?:\s+([\s\S]+))?$/i);
+     const rawCode = m && m[1] ? m[1].trim().replace(/^yandex_|\.html$/gi, "") : "";
+     if (!rawCode) {
+      const current = await resolveYandexVerification(env);
+      await send(chatId, "🔍 Подтверждение прав в Яндекс Вебмастере:\nТекущий код: " + (current || "пока не задан") + "\n\nСкопируйте код из meta-тега Яндекс Вебмастера (или имя файла без yandex_ и .html) и отправьте:\n/setyandex ВАШ_КОД");
+     } else if (!/^[A-Za-z0-9_-]{8,64}$/.test(rawCode)) {
+      await send(chatId, "❌ Код должен содержать 8–64 латинских букв и цифр (пример: /setyandex a1b2c3d4e5f67890)");
+     } else if (!env.REVIEWS) {
+      await send(chatId, "Хранилище REVIEWS не настроено.");
+     } else {
+      await env.REVIEWS.put("site_config:yandex_verification", rawCode);
+      await writeLog(env, chatId, "установлен код Яндекс.Вебмастер", "настройки", "yandex_verification", rawCode);
+      await send(chatId, "✅ Код Яндекс Вебмастера сохранён!\nТеперь на сайте автоматически работают оба способа проверки: мета-тег на главной и файл /yandex_" + rawCode + ".html");
+     }
     } else if (/^\/setmax(?:@\w+)?(?:\s+([\s\S]+))?$/i.test(text) && adminIds.includes(chatId)) {
      const m = text.match(/^\/setmax(?:@\w+)?(?:\s+([\s\S]+))?$/i);
      const rawUrl = m && m[1] ? m[1].trim() : "";
@@ -2597,16 +2734,7 @@ export default {
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
    if (!env.REVIEWS) return Response.json({error:"Catalogue storage unavailable"},{status:503,headers:{"cache-control":"no-store","x-content-type-options":"nosniff"}});
-   const cars = [];
-   if (env.REVIEWS) {
-    let cursor;
-    do {
-     const page = await env.REVIEWS.list({prefix:"car_approved:", ...(cursor ? {cursor} : {})});
-     for (const key of page.keys) { const raw = await env.REVIEWS.get(key.name); if (!raw) continue; const car = JSON.parse(raw); if (String(car.caption || "").trim().toLowerCase() === "исправить") continue; const photoItems = catalogPhotoItems(car); const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : [])); const ordered = publicCarMediaOrder(car,photoItems,videoItems); const mediaItems = ordered.mediaItems; cars.push({id:car.id,caption:publicCarCaption(car.caption),media:mediaItems[0] ? mediaItems[0].url : null,mediaItems,mediaOrderKnown:ordered.mediaOrderKnown,mediaType:car.mediaType || "photo",publishedAt:car.publishedAt}); }
-     cursor = page.list_complete ? null : page.cursor;
-    } while (cursor);
-   }
-   cars.sort((a,b)=>String(b.publishedAt||"").localeCompare(String(a.publishedAt||"")));
+   const cars = await loadApprovedCarsForPublic(env);
    return Response.json({cars},{headers:{"cache-control":"no-store",...resolveMirrorCorsHeaders(request,env)}});
   }
   const carMediaPath = url.pathname.startsWith("/api/car-media/") ? url.pathname.slice("/api/car-media/".length) : "";
@@ -2629,69 +2757,7 @@ export default {
    return new Response(upstream.body,{status:upstream.status,headers:mediaHeaders});
   }
   if (request.method === "GET" && url.pathname === "/api/news") {
-   const news = [];
-   const seenBaseIds = new Set();
-   if (env.REVIEWS) {
-    let cursor;
-    do {
-     const page = await env.REVIEWS.list({ prefix: "news_approved:", ...(cursor ? { cursor } : {}) });
-     for (const key of page.keys) {
-      const raw = await env.REVIEWS.get(key.name);
-      if (!raw) continue;
-      const n = JSON.parse(raw);
-      const photos = uniqueFileItems(Array.isArray(n.photos) && n.photos.length ? n.photos : (n.fileId && n.kind !== "video" ? [{ file_id: n.fileId }] : []));
-      const videos = uniqueFileItems(Array.isArray(n.videos) && n.videos.length ? n.videos : (n.kind === "video" && n.fileId ? [{ file_id: n.fileId }] : []));
-      const mediaItems = [
-       ...photos.map((_, idx) => ({ url: `/api/news-media/${n.id}/photo/${idx}`, type: "photo" })),
-       ...videos.map((_, idx) => ({ url: `/api/news-media/${n.id}/video/${idx}`, type: "video" }))
-      ];
-      seenBaseIds.add(String(n.id).replace(/^news_/, "").replace(/^-/, ""));
-      if (n.originalReviewId) seenBaseIds.add(String(n.originalReviewId).replace(/^-/, ""));
-      news.push({
-       id: n.id,
-       kind: videos.length && !photos.length ? "video" : "news",
-       text: cleanCarDisplayCaption(cleanPublicationText(n.text || n.caption || "")),
-       media: mediaItems[0] ? mediaItems[0].url : null,
-       mediaItems,
-       publishedAt: n.publishedAt || n.createdAt || ""
-      });
-     }
-     cursor = page.list_complete ? null : page.cursor;
-    } while (cursor);
-
-    // Also include legacy market/tariff news records still stored under approved:* before cleanup
-    let revCursor;
-    do {
-     const revPage = await env.REVIEWS.list({ prefix: "approved:", ...(revCursor ? { cursor: revCursor } : {}) });
-     for (const key of revPage.keys) {
-      const raw = await env.REVIEWS.get(key.name);
-      if (!raw) continue;
-      const r = JSON.parse(raw);
-      if (!isMarketNewsRecord(r)) continue;
-      const cleanBase = String(r.id || "").replace(/^-/, "");
-      if (seenBaseIds.has(cleanBase)) continue;
-      const photos = uniqueFileItems(Array.isArray(r.photos) && r.photos.length ? r.photos : (r.fileId && r.kind !== "video" ? [{ file_id: r.fileId }] : []));
-      const videos = uniqueFileItems(Array.isArray(r.videos) && r.videos.length ? r.videos : (r.kind === "video" && r.fileId ? [{ file_id: r.fileId }] : []));
-      const ordered = publicReviewMediaOrder(r, photos, videos);
-      const mediaItems = ordered.mediaItems.length
-       ? ordered.mediaItems
-       : [
-          ...photos.map((_, idx) => ({ url: `/api/review-media/${r.id}/photo/${idx}`, type: "photo" })),
-          ...videos.map((_, idx) => ({ url: `/api/review-media/${r.id}/video/${idx}`, type: "video" }))
-         ];
-      news.push({
-       id: "news_" + cleanBase,
-       kind: videos.length && !photos.length ? "video" : "news",
-       text: cleanCarDisplayCaption(cleanPublicationText(r.text || "")),
-       media: mediaItems[0] ? mediaItems[0].url : (r.fileId ? `/api/review-media/${r.id}` : null),
-       mediaItems,
-       publishedAt: r.publishedAt || r.createdAt || ""
-      });
-     }
-     revCursor = revPage.list_complete ? null : revPage.cursor;
-    } while (revCursor);
-   }
-   news.sort((a, b) => String(b.publishedAt || "").localeCompare(String(a.publishedAt || "")));
+   const news = await loadApprovedNewsForPublic(env);
    return Response.json({ news }, { headers: { "cache-control": "no-store", ...resolveMirrorCorsHeaders(request, env) } });
   }
   const newsMediaMatch = url.pathname.match(/^\/api\/news-media\/(news_[A-Za-z0-9_-]+)(?:\/(photo|video)\/(\d+)|\/(\d+))?$/);
@@ -2766,17 +2832,94 @@ export default {
    const contentType = mediaType === "video" ? "video/mp4" : (imageType || "image/jpeg");
    return new Response(upstream.body, { headers: { "content-type": contentType, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
   }
+  const yandexFileMatch = url.pathname.match(/^\/yandex_([A-Za-z0-9_-]{8,64})\.html$/);
+  if (request.method === "GET" && yandexFileMatch) {
+   const expectedCode = await resolveYandexVerification(env);
+   if (expectedCode && yandexFileMatch[1] === expectedCode) {
+    return new Response(`<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"></head><body>Verification: ${expectedCode}</body></html>`, {
+     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }
+    });
+   }
+   return new Response("Not found", { status: 404 });
+  }
+  if (request.method === "GET" && url.pathname === "/robots.txt") {
+   return new Response(buildRobotsTxt({ baseUrl: url.origin }), {
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" }
+   });
+  }
+  if (request.method === "GET" && url.pathname === "/sitemap.xml") {
+   const [cars, news] = await Promise.all([loadApprovedCarsForPublic(env), loadApprovedNewsForPublic(env)]);
+   return new Response(buildSitemapXml({ baseUrl: url.origin, cars, news, useHtmlExt: false }), {
+    headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "no-store" }
+   });
+  }
+  if (request.method === "GET" && url.pathname === "/yandex-feed.xml") {
+   const cars = await loadApprovedCarsForPublic(env);
+   return new Response(buildYandexMarketYml({ baseUrl: url.origin, cars, useHtmlExt: false }), {
+    headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "no-store" }
+   });
+  }
+  if (request.method === "GET" && url.pathname.startsWith("/cars/")) {
+   const carId = decodeURIComponent(url.pathname.slice(6)).replace(/\.html$/i, "");
+   if (!env.REVIEWS || !carId) return new Response("Not found", { status: 404 });
+   const raw = await env.REVIEWS.get("car_approved:" + carId);
+   if (!raw) return new Response("Not found", { status: 404 });
+   const car = JSON.parse(raw);
+   if (String(car.caption || "").trim().toLowerCase() === "исправить") return new Response("Not found", { status: 404 });
+   const photoItems = catalogPhotoItems(car);
+   const videoItems = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{ file_id: car.fileId }] : []));
+   const ordered = publicCarMediaOrder(car, photoItems, videoItems);
+   const maxUrl = await resolveMaxBotUrl(env);
+   return new Response(renderCarLandingHtml({
+    id: car.id,
+    caption: publicCarCaption(car.caption),
+    media: ordered.mediaItems[0] ? ordered.mediaItems[0].url : null,
+    mediaItems: ordered.mediaItems,
+    mediaType: car.mediaType || "photo",
+    publishedAt: car.publishedAt
+   }, { baseUrl: url.origin, isStaticMirror: false, maxBotUrl: maxUrl }), {
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }
+   });
+  }
+  if (request.method === "GET" && url.pathname.startsWith("/news/")) {
+   const newsId = decodeURIComponent(url.pathname.slice(6)).replace(/\.html$/i, "");
+   if (!env.REVIEWS || !newsId) return new Response("Not found", { status: 404 });
+   const [allNews, maxUrl] = await Promise.all([loadApprovedNewsForPublic(env), resolveMaxBotUrl(env)]);
+   const item = allNews.find(n => n.id === newsId);
+   if (!item) return new Response("Not found", { status: 404 });
+   return new Response(renderNewsLandingHtml(item, { baseUrl: url.origin, isStaticMirror: false, maxBotUrl: maxUrl }), {
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }
+   });
+  }
   if(url.pathname==="/favicon.ico") return new Response(null,{status:204});
-  const resolvedMaxUrl = await resolveMaxBotUrl(env);
+  const [resolvedMaxUrl, resolvedYandexCode, ssrCars, ssrNews] = await Promise.all([
+   resolveMaxBotUrl(env),
+   resolveYandexVerification(env),
+   loadApprovedCarsForPublic(env).catch(() => []),
+   loadApprovedNewsForPublic(env).catch(() => [])
+  ]);
   const maxHrefAttr = resolvedMaxUrl ? `href="${resolvedMaxUrl}" target="_blank" rel="noopener"` : `href="#max-bot"`;
+  const yandexVerifyMeta = resolvedYandexCode ? `\n<meta name="yandex-verification" content="${resolvedYandexCode}">` : "";
+  const canonicalUrl = `${url.origin}/`;
+  const seoJsonLd = buildHomepageJsonLd({ baseUrl: url.origin, cars: ssrCars, news: ssrNews });
+  const ssrCarsHtml = renderServerCatalogPreviewHtml(ssrCars, { useHtmlExt: false });
+  const ssrFaqAndLinksHtml = renderFaqAndDirectoryHtml(ssrCars, ssrNews, { useHtmlExt: false });
   const html = `<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#08090b">
-<meta name="description" content="Подбор автомобилей из Кореи, Китая и ОАЭ под ваш бюджет">
-<title>AVTOY KOREA: автомобили под заказ</title>
+<meta name="description" content="Купить автомобиль из Южной Кореи, Китая и ОАЭ под заказ под ключ в Россию. Проверка пробега и истории, честный расчёт цены, доставка до Москвы и регионов | AVTOY KOREA">
+<meta name="keywords" content="купить авто из Кореи, автомобили из Кореи под заказ, пригон авто из Китая, авто из ОАЭ под ключ, утильсбор авто, AVTOY KOREA">
+<title>AVTOY KOREA — Купить автомобиль из Кореи, Китая и ОАЭ под заказ под ключ</title>
+<link rel="canonical" href="${canonicalUrl}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AVTOY KOREA — Автомобили из Кореи, Китая и ОАЭ под заказ">
+<meta property="og:description" content="Подбор, техническая проверка и доставка проверенных автомобилей под ключ в Россию.">
+<meta property="og:url" content="${canonicalUrl}">
+<meta property="og:image" content="${canonicalUrl}assets/logo.jpg">${yandexVerifyMeta}
+<script type="application/ld+json">${seoJsonLd}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -3384,6 +3527,17 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
 .footer-links{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
 .footer-max{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;background:#7c3aed28;border:1px solid #8b5cf666;color:#ddd6fe;font-weight:700}
 .footer-max:hover{background:#7c3aed;color:#fff}
+.faq-list{display:grid;gap:10px;margin-bottom:24px}
+.faq-item{background:linear-gradient(155deg,#151f30,#0e1521);border:1px solid #26344b;border-radius:16px;padding:15px 18px}
+.faq-item summary{font-weight:800;font-size:15.5px;color:#fff;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.faq-item summary::after{content:"+";font-size:20px;color:var(--red);font-weight:700}
+.faq-item[open] summary::after{content:"−"}
+.faq-item p{margin:10px 0 0;color:#b8c4d6;font-size:14px;line-height:1.6}
+.seo-links-box{background:#0b111c;border:1px solid #223047;border-radius:16px;padding:16px 18px}
+.seo-links-box h3{margin:0 0 10px;font-size:14px;color:#9fb0c7;text-transform:uppercase;letter-spacing:.08em}
+.seo-links-nav{display:flex;flex-wrap:wrap;gap:8px}
+.seo-links-nav a{font-size:12.5px;color:#d6e0ef;background:#131d2d;border:1px solid #26364f;border-radius:999px;padding:6px 12px}
+.seo-links-nav a:hover{border-color:var(--red);color:#fff}
 @media(max-width:1180px){
  .nav-telegram small,.nav-max small{display:none}
  .nav-telegram{display:flex!important}
@@ -3470,7 +3624,7 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
     </div>
     <div class="catalog-brands" id="cars-brands" role="tablist" aria-label="Фильтр по маркам"></div>
   </div>
-  <div class="cars" id="cars-list"><article class="card dashed"><div class="car-body">Загружаем актуальные предложения…</div></article></div>
+  <div class="cars" id="cars-list">${ssrCarsHtml}</div>
   <p class="cars-hint" id="cars-empty-filter" hidden>По выбранному фильтру ничего не найдено — попробуйте сбросить фильтр.</p>
 </section>
 <section class="wrap section" id="order" style="padding-top:40px">
@@ -3518,6 +3672,8 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
   </div>
 </section>
 
+
+${ssrFaqAndLinksHtml}
 
 <section class="wrap section" id="request" style="padding-top:20px">
   <div class="form-card">
@@ -4067,6 +4223,12 @@ loadCars();
     var orderBtn=document.createElement('button');orderBtn.type='button';orderBtn.className='btn btn-red';orderBtn.style.width='100%';orderBtn.textContent='Заказать расчёт по этому авто →';
     orderBtn.onclick=function(){close();selectCarIntoForm(meta);};
     right.appendChild(orderBtn);
+    if(car&&car.id){
+      var pageLink=document.createElement('a');pageLink.className='car-spec-btn';pageLink.style.marginTop='10px';pageLink.style.display='inline-flex';pageLink.style.width='100%';pageLink.style.justifyContent='center';
+      pageLink.href=/[.](?:gitverse[.]site|gitverse[.]ru|github[.]io)$/i.test(location.hostname)?('./cars/'+encodeURIComponent(car.id)+'.html'):('/cars/'+encodeURIComponent(car.id));
+      pageLink.textContent='Открыть отдельную страницу авто ↗';
+      right.appendChild(pageLink);
+    }
 
     grid.appendChild(left);grid.appendChild(right);dlg.appendChild(grid);overlay.appendChild(dlg);document.body.appendChild(overlay);
   }
