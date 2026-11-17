@@ -53,7 +53,12 @@ function fakeSql() {
     }
     return [];
   }
-  execute.begin=async(_options,callback)=>callback(execute);
+  let transactionChain=Promise.resolve();
+  execute.begin=async(_options,callback)=>{
+    const transaction=transactionChain.then(()=>callback(execute));
+    transactionChain=transaction.catch(()=>{});
+    return transaction;
+  };
   return {sql:execute,receipts,replies,audit,calls};
 }
 const event=(digest='a'.repeat(64),reply={})=>({digest,eventType:'message_created',eventTimestamp:1800000000000,chatId:'987654321',messageId:'mid-1',senderUserId:'12345',reply:{commandKind:'help',actorId:'12345',text:'Help without private data',auditEvent:{eventId:'audit-event-0001',targetId:'group'},...reply}});
@@ -93,6 +98,20 @@ test('outbox leases fence stale workers and successful delivery completes once',
   assert.equal((await store.completeMaxCommandReply({eventDigest:first.eventDigest,leaseToken:first.leaseToken,now:1800000000100})).status,'sent');
   assert.equal(fake.replies.get(first.eventDigest).status,'sent');
   assert.equal(await store.claimDueMaxCommandReplies({now:1800000000200}),[]);
+});
+
+test('concurrent MAX reply claimers cannot both own the same outbox row',async()=>{
+  const fake=fakeSql(); let id=0;
+  const store=createYdbRequestStore({sql:fake.sql,clock:()=>1800000000000,idFactory:()=> 'parallel-'+(++id)});
+  await store.recordMaxWebhookEvent(event());
+  const [workerA,workerB]=await Promise.all([
+    store.claimDueMaxCommandReplies({now:1800000000000,limit:1,leaseMs:60_000}),
+    store.claimDueMaxCommandReplies({now:1800000000000,limit:1,leaseMs:60_000})
+  ]);
+  const claims=[...workerA,...workerB];
+  assert.equal(claims.length,1);
+  assert.equal(new Set(claims.map(item=>item.leaseToken)).size,1);
+  assert.equal(fake.replies.get('a'.repeat(64)).status,'sending');
 });
 
 test('expired MAX reply lease is recovered with a new fencing token',async()=>{
