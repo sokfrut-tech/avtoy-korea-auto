@@ -463,3 +463,6 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Updated `standby/storage/max-command-outbox.test.mjs` to assert successful delivery and retry/dead-letter attempts generate audit outcomes. Tests have been authored but not executed yet; fake SQL is not a YDB integration test.
 - Operational note: delivery audit volume increases with each failed attempt; audit retention remains explicit manual maintenance and must be planned before enabling production traffic.
 - No migration change is required because the existing audit table already supports these fields. No production DB, MAX API, webhook subscription, merge or deployment was touched.
+
+- Exact-head workflow check after delivery-audit change: MAX validation run `44043881436` failed with job `133904710023`, `steps=[]`; Factory Security Baseline run `44043881601` failed with CodeQL job `133904710747` and Secret scanning job `133904710241`, both `steps=[]`. No tests, CodeQL analysis, or secret scan commands executed.
+- Current PR #81 head after docs update is tracked separately by the PR API; PR remains draft/open. The latest source commits are `02163de1` (atomic delivery audit), `ce278d84` (regressions), and `0138039f` (metadata allowlist correction); docs commit records the work. No successful validation is claimed.
