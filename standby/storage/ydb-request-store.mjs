@@ -179,10 +179,15 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     if (!/^[a-f0-9]{64}$/.test(String(eventDigest || '')) || !leaseToken) throw new TypeError('eventDigest and leaseToken are required');
     const completedAt = iso(now);
     return sql.begin({ isolation:'serializableReadWrite', idempotent:true }, async tx => {
-      const row = firstRow(await tx`SELECT status, lease_token FROM standby_max_command_replies WHERE event_digest = ${eventDigest}`);
+      const row = firstRow(await tx`SELECT status, lease_token, attempts, actor_id, command_kind FROM standby_max_command_replies WHERE event_digest = ${eventDigest}`);
       if (!row || row.status !== 'sending' || row.lease_token !== leaseToken) return null;
+      const auditAttempt = Number(row.attempts || 0) + 1;
+      const auditEventId = `maxsend_${eventDigest.slice(0,38)}_${auditAttempt}`;
       await tx`UPDATE standby_max_command_replies SET status = 'sent', next_attempt_at = ${completedAt}, lock_until = '', lease_token = '', last_error = ''
         WHERE event_digest = ${eventDigest}`;
+      await tx`INSERT INTO standby_operator_audit_events
+        (event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata)
+        VALUES (${auditEventId}, ${completedAt}, ${row.actor_id}, 'operator', 'max.command.delivery', 'max_command', ${eventDigest}, 'accepted', ${JSON.stringify({status:'sent',command:row.command_kind})})`;
       return { eventDigest, status:'sent' };
     });
   }
@@ -194,15 +199,19 @@ export function createYdbRequestStore({ sql, clock = () => Date.now(), idFactory
     if (!Number.isFinite(retryBaseMs) || retryBaseMs < 100 || retryBaseMs > 6 * 60 * 60_000 || !Number.isFinite(retryMaxMs) || retryMaxMs < retryBaseMs || retryMaxMs > 24 * 60 * 60_000) throw new TypeError('Retry delays are outside the allowed bounds');
     const nowIso = iso(now);
     return sql.begin({ isolation:'serializableReadWrite', idempotent:true }, async tx => {
-      const row = firstRow(await tx`SELECT status, lease_token, attempts FROM standby_max_command_replies WHERE event_digest = ${eventDigest}`);
+      const row = firstRow(await tx`SELECT status, lease_token, attempts, actor_id, command_kind FROM standby_max_command_replies WHERE event_digest = ${eventDigest}`);
       if (!row || row.status !== 'sending' || row.lease_token !== leaseToken) return null;
       const attempts = Number(row.attempts || 0) + 1;
       const dead = !retryable || attempts >= maxAttempts;
       const delay = Math.min(retryBaseMs * (2 ** Math.min(attempts - 1, 8)), retryMaxMs);
       const next = dead ? nowIso : new Date(Number(new Date(nowIso)) + delay).toISOString();
+      const auditEventId = `maxfail_${eventDigest.slice(0,37)}_${attempts}`;
       await tx`UPDATE standby_max_command_replies SET status = ${dead ? 'dead' : 'queued'}, attempts = ${attempts},
         next_attempt_at = ${next}, lock_until = '', lease_token = '', last_error = ${errorCode}
         WHERE event_digest = ${eventDigest}`;
+      await tx`INSERT INTO standby_operator_audit_events
+        (event_id, occurred_at, actor_id, actor_role, action, target_type, target_id, outcome, metadata)
+        VALUES (${auditEventId}, ${nowIso}, ${row.actor_id}, 'operator', 'max.command.delivery', 'max_command', ${eventDigest}, 'failed', ${JSON.stringify({reason:errorCode,status:dead?'dead':'queued',command:row.command_kind})})`;
       return { eventDigest, status:dead ? 'dead' : 'queued', attempts, nextAttemptAt:next, lastError:errorCode };
     });
   }
