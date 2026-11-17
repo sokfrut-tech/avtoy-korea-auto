@@ -390,3 +390,13 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Inspected `.github/workflows/max-command-outbox-validation.yml`: it uses `ubuntu-latest`, checkout v4, setup-node v4 / Node 22, then `node --check` and `node --test` over standby tests. Workflow definition itself looks structurally straightforward; hosted execution is the blocker.
 - Added PR #81 comment ID `6927078272` asking repository/org owner to check Actions hosted runner availability, quota/billing/usage limits, and service status. No changes to workflow permissions or production settings.
 - PR #81 remains draft; tests are not verified. Next: wait for runner availability or use an authorized local runner/CI environment; do not interpret the failure as code tests failing.
+
+
+## Executor-led local verification and MAX Retry-After correction — 2026-11-17
+- The assistant performed local execution rather than treating GitHub Actions as the executor. Exact current PR-branch copies of `standby/channels/max-adapter.mjs`, `standby/channels/max-adapter.test.mjs`, `standby/security/operator-auth.mjs`, and `standby/security/operator-auth.test.mjs` were retrieved from GitHub and staged in an isolated Node.js v22 runtime under `/tmp/avtoy-check`.
+- Local checks: `node --check` passed for both runtime modules; MAX adapter tests passed 8/8; operator-auth tests passed 6/6. Total 14/14 focused tests passed. These were exact source/test contents from the PR branch at retrieval time, not the complete standby suite.
+- Static audit found a real retry-policy defect: adapter correctly parsed `Retry-After` up to six hours, but server dispatcher clamped it to 15 minutes and set `retryMaxMs` to 15 minutes. That could cause a retry earlier than MAX's requested delay for long 429 responses.
+- Fixed `standby/server.mjs` to clamp `retryBaseMs` against the existing six-hour `RETRY_MAX_MS` and pass the same six-hour bound to durable retry scheduling. Commit: `70329a3e1983d37e5a3a77d2c1a203743abbdfc3`.
+- Updated the dispatcher regression test to use `Retry-After: 3600` and assert a one-hour initial delay plus six-hour maximum. Commit: `d00b2f1565e913437e040a48bf2a5399ccb88ed5`.
+- The new dispatcher regression test and full storage/server test suites have not yet been executed locally. No live MAX request, YDB migration/parser, target database, CodeQL, or secret scan was run. Production unchanged; PR remains draft.
+- Next: obtain and execute the full standby test set in the isolated local runtime, then continue server/webhook/YDB audit and update this file with concrete evidence.
