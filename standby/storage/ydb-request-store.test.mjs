@@ -288,6 +288,8 @@ test('YDB schema verification checks queue indexes as well as required tables', 
   const queries=fake.calls;
   assert.ok(queries.some(q=>q.includes('VIEW idx_due_queue')));
   assert.ok(queries.some(q=>q.includes('VIEW idx_expired_lease')));
+  assert.ok(queries.some(q=>q.includes('VIEW idx_max_reply_due')));
+  assert.ok(queries.some(q=>q.includes('VIEW idx_max_reply_lease')));
 });
 
 
@@ -295,9 +297,13 @@ test('runtime schema helper definitions use NOT NULL columns consistently with r
   const fake=fakeSql();
   const store=createYdbRequestStore({sql:fake.sql});
   await store.ensureMaxWebhookSchema();
+  await store.ensureMaxCommandReplySchema();
   await store.ensureOperatorAuditSchema();
   const ddl=fake.calls.filter(q=>q.includes('CREATE TABLE')).join('\n');
   assert.match(ddl,/event_digest Utf8 NOT NULL/);
   assert.match(ddl,/event_id Utf8 NOT NULL/);
   assert.match(ddl,/metadata Utf8 NOT NULL/);
+  assert.match(ddl,/event_digest Utf8 NOT NULL/);
+  assert.match(ddl,/INDEX idx_max_reply_due GLOBAL SYNC ON/);
+  assert.match(ddl,/INDEX idx_max_reply_lease GLOBAL SYNC ON/);
 });

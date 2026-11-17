@@ -66,6 +66,9 @@ export function assertDurableAdminRuntime({ operatorsConfigured = false, maxWebh
   if (missingEnquiryCapabilities.length) {
     throw new Error('Russian standby requires durable enquiry persistence and delivery queue capabilities: ' + missingEnquiryCapabilities.join(', '));
   }
+  if (maxWebhookConfigured && typeof requestStore.ensureMaxCommandReplySchema !== 'function') throw new Error('MAX webhook requires durable command reply outbox schema support');
+  const outboxCapabilities = ['claimDueMaxCommandReplies','completeMaxCommandReply','failMaxCommandReply'];
+  if (maxWebhookConfigured && outboxCapabilities.some(name => typeof requestStore[name] !== 'function')) throw new Error('MAX webhook requires a durable retryable command reply outbox');
   if (maxWebhookConfigured && typeof requestStore.recordMaxWebhookEvent !== 'function') {
     throw new Error('MAX webhook requires durable idempotent webhook receipt storage');
   }
@@ -201,6 +204,26 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
       reason:configured ? 'notification_delivery_failed' : 'notification_channels_not_configured'
     };
   }
+  async function retryMaxCommandReplies() {
+    if (!requestStore || typeof requestStore.claimDueMaxCommandReplies !== 'function') return [];
+    const claims = await requestStore.claimDueMaxCommandReplies({ now:clock(), limit:5, leaseMs:120_000 });
+    const results = [];
+    for (const claim of claims) {
+      let outcome;
+      try { outcome = await maxAdapter.sendOperatorMessage(claim.text); }
+      catch { outcome = { ok:false, retryable:true, reason:'max_network_error' }; }
+      if (outcome?.ok) {
+        const completed = await requestStore.completeMaxCommandReply({ eventDigest:claim.eventDigest, leaseToken:claim.leaseToken, now:clock() });
+        results.push({ eventDigest:claim.eventDigest, status:completed?.status || 'stale' });
+      } else {
+        const reason = ['max_rate_limited','max_server_error','max_network_error','max_request_rejected'].includes(outcome?.reason) ? outcome.reason : 'max_request_rejected';
+        const retryBaseMs = Math.min(RETRY_MAX_MS, Math.max(5_000, Number(outcome?.retryAfterMs) || 0));
+        const failed = await requestStore.failMaxCommandReply({ eventDigest:claim.eventDigest, leaseToken:claim.leaseToken, retryable:Boolean(outcome?.retryable), errorCode:reason, now:clock(), retryBaseMs, retryMaxMs:RETRY_MAX_MS, maxAttempts:8 });
+        results.push({ eventDigest:claim.eventDigest, status:failed?.status || 'stale' });
+      }
+    }
+    return results;
+  }
   async function receiveMaxWebhook(req, res) {
     if (!/^[A-Za-z0-9_-]{5,256}$/.test(String(env.MAX_WEBHOOK_SECRET || '')) || ! /^-?\d{1,20}$/.test(String(env.MAX_OPERATOR_CHAT_ID || ''))) return json(res,503,{ ok:false,error:'MAX webhook is not configured.' });
     const allowedOperatorIds = new Set(String(env.MAX_OPERATOR_USER_IDS || '').split(/[\s,]+/).filter(id => /^-?\d{1,20}$/.test(id)));
@@ -213,9 +236,11 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     const type = cleanText(update?.update_type,64);
     const timestamp = Number(update?.timestamp);
     const message = update?.message;
-    const recipient = message?.recipient || update?.callback?.message?.recipient || {};
-    const chatId = update?.chat_id ?? recipient.chat_id;
-    const chatType = recipient.chat_type || (update?.chat_id != null ? 'chat' : '');
+    // MAX Update carries the destination in the top-level message.recipient.
+    // Do not accept legacy/top-level chat_id or callback.message fallbacks.
+    const recipient = message?.recipient || {};
+    const chatId = recipient.chat_id;
+    const chatType = recipient.chat_type || '';
     if (!['message_created','message_callback'].includes(type) || !Number.isSafeInteger(timestamp) || timestamp <= 0) return json(res,400,{ ok:false,error:'Unsupported or malformed MAX update.' });
     if (String(chatId ?? '') !== String(env.MAX_OPERATOR_CHAT_ID) || chatType !== 'chat') return json(res,403,{ ok:false,error:'Event is outside the configured operator group.' });
     if (type === 'message_created' && message?.sender?.is_bot === true) return json(res,200,{ ok:true,ignored:true });
@@ -225,10 +250,9 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
     if (!senderId || !allowedOperatorIds.has(senderId)) return json(res,403,{ ok:false,error:'Sender is not an authorized operator.' });
     const digest = createHash('sha256').update(JSON.stringify(update)).digest('hex');
     try {
-      const result = await maxEventStore.recordMaxWebhookEvent({ digest,eventType:type,eventTimestamp:timestamp,chatId:String(chatId),messageId:messageId || null,senderUserId:senderId || null });
-      if (result?.duplicate) return json(res,200,{ ok:true,duplicate:true });
       let command = null;
       let responseText = null;
+      let auditTargetId = 'group';
       if (type === 'message_created') {
         const text = cleanText(message?.body?.text || '', 500);
         if (/^!help$/i.test(text)) {
@@ -238,9 +262,11 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
           const match = /^!status\s+([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(text);
           if (match) {
             command = 'status';
+            auditTargetId = match[1];
             const enquiry = await requestStore.getEnquiry(match[1]);
+            const safeStatus = ['queued','sending','delivered'].includes(String(enquiry?.status || '')) ? enquiry.status : 'неизвестно';
             responseText = enquiry
-              ? `Заявка ${String(enquiry.id).slice(0,8)}: ${cleanText(enquiry.status,24) || 'неизвестно'}. Контактные данные доступны только в защищённой панели.`
+              ? `Заявка ${match[1].slice(0,8)}: ${safeStatus}. Контактные данные доступны только в защищённой панели.`
               : 'Заявка не найдена. Проверьте UUID.';
           } else if (text.startsWith('!')) {
             command = 'invalid';
@@ -248,17 +274,22 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
           }
         }
       }
-      if (command && responseText) {
-        try {
-          if (typeof auditStore?.recordOperatorAuditEvent !== 'function') throw new Error('Audit store unavailable');
-          await auditOperatorAction({ id:senderId, role:'operator' }, `max.command.${command}`, 'request', command === 'status' ? String(messageId || 'status') : 'group', { reason:'max_group_command' });
-          const sent = await maxAdapter.sendOperatorMessage(responseText);
-          if (!sent.ok) return json(res,503,{ ok:false,error:'Could not send MAX command response.' });
-        } catch {
-          return json(res,503,{ ok:false,error:'MAX command could not be processed safely.' });
-        }
-      }
-      return json(res,200,{ ok:true,duplicate:false,command:command || 'ignored' });
+      const reply = command && responseText ? {
+        commandKind:command,
+        actorId:senderId,
+        text:responseText,
+        auditEvent:{ eventId:randomUUID(), targetId:auditTargetId }
+      } : null;
+      // Do not durably accept a command whose reply cannot be delivered. Returning
+      // 503 lets MAX retry after outbound credentials are configured instead of
+      // permanently dead-lettering an avoidable max_not_configured response.
+      if (reply && !maxAdapter.configured) return json(res,503,{ ok:false,error:'MAX outbound replies are not configured.' });
+      const result = await maxEventStore.recordMaxWebhookEvent({
+        digest,eventType:type,eventTimestamp:timestamp,chatId:String(chatId),messageId:messageId || null,senderUserId:senderId || null,reply
+      });
+      if (result?.duplicate) return json(res,200,{ ok:true,duplicate:true });
+      if (reply) retryMaxCommandReplies().catch(() => {});
+      return json(res,200,{ ok:true,duplicate:false,command:command || 'ignored',queuedReply:Boolean(reply) });
     } catch {
       return json(res,503,{ ok:false,error:'Could not persist MAX event.' });
     }
@@ -451,6 +482,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
   }
   const handler = async (req,res) => { try { await handle(req,res); } catch { if (!res.headersSent) json(res,500,{ error:'Внутренняя ошибка резервного сайта.' }); else res.destroy(); } };
   handler.retryDue = retryDue;
+  handler.retryMaxCommandReplies = retryMaxCommandReplies;
   return handler;
 }
 function escapeHtml(value) { return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -484,7 +516,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       await driver.ready();
       requestStore = createYdbRequestStore({ sql:query(driver), schemaManagedExternally });
       if (schemaManagedExternally) await requestStore.verifySchema();
-      else await requestStore.ensureMaxWebhookSchema();
+      else { await requestStore.ensureMaxWebhookSchema(); await requestStore.ensureMaxCommandReplySchema(); }
       process.stdout.write('YDB request-oriented inbox v2 enabled\\n');
     } else if (process.env.YDB_CONNECTION_STRING) {
       const [{ Driver }, { query }, { MetadataCredentialsProvider }, { createYdbInboxStore }] = await Promise.all([
@@ -504,13 +536,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       maxWebhookConfigured:Boolean(process.env.MAX_WEBHOOK_SECRET),
       requestStore
     });
-    if (process.env.STANDBY_OPERATORS_JSON) {
+    if (process.env.STANDBY_OPERATORS_JSON || process.env.MAX_WEBHOOK_SECRET) {
       await requestStore.ensureOperatorAuditSchema();
       process.stdout.write('YDB operator audit storage enabled\\n');
     }
     const app = createStandbyApp({ inboxStore, requestStore });
     server = http.createServer(app);
-    retryTimer = setInterval(() => { app.retryDue().catch(error => process.stderr.write('Retry cycle failed: ' + error.message + '\n')); }, 30_000);
+    retryTimer = setInterval(() => {
+      app.retryDue().catch(error => process.stderr.write('Retry cycle failed: ' + error.message + '\n'));
+      app.retryMaxCommandReplies().catch(error => process.stderr.write('MAX reply retry cycle failed: ' + error.message + '\n'));
+    }, 15_000);
     retryTimer.unref();
     server.listen(port,'0.0.0.0',()=>process.stdout.write('AVTOY KOREA standby listening on ' + port + '\n'));
     process.once('SIGINT', () => shutdown().finally(() => process.exit(0)));

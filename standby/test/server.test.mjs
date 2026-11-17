@@ -510,10 +510,14 @@ test('MAX webhook persists allowlisted operator-group event metadata before HTTP
   const stored = [];
   const maxEventStore = { async recordMaxWebhookEvent(event) { stored.push(event); return { duplicate:false }; } };
   const { base } = await fixture(t, { maxEventStore, env:{ MAX_WEBHOOK_SECRET:'test_secret-123', MAX_OPERATOR_CHAT_ID:'987654321', MAX_OPERATOR_USER_IDS:'12345' } });
-  const update = { update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'msg-001',text:'!status 12345678'}} };
+  const update = { update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'msg-001',text:'обычное сообщение без команды'}} };
   const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'test_secret-123'},body:JSON.stringify(update)});
   assert.equal(response.status,200);
-  assert.deepEqual(await response.json(),{ok:true,duplicate:false});
+  const body=await response.json();
+  assert.equal(body.ok,true);
+  assert.equal(body.duplicate,false);
+  assert.equal(body.command,'ignored');
+  assert.equal(body.queuedReply,false);
   assert.equal(stored.length,1);
   assert.equal(stored[0].eventType,'message_created');
   assert.equal(stored[0].chatId,'987654321');
@@ -542,8 +546,14 @@ test('MAX webhook rejects events outside the configured operator group', async t
 });
 
 test('MAX webhook does not acknowledge without durable storage or when persistence fails', async t => {
-  const payload={update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'m1'}}};
+  let writes=0;
   const headers={'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'};
+  const payload={update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'m1'}}};
+  const missingType=await fixture(t,{env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},maxEventStore:{async recordMaxWebhookEvent(){writes++;}}});
+  const forgedFallback=await fetch(missingType.base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify({update_type:'message_created',timestamp:1794740000000,chat_id:987654321,message:{sender:{user_id:12345},body:{mid:'missing-type'}}})});
+  assert.equal(forgedFallback.status,403);
+  assert.equal(writes,0);
+
   const noStore=await fixture(t,{env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'}});
   assert.equal((await fetch(noStore.base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify(payload)})).status,503);
   const failed=await fixture(t,{env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},maxEventStore:{async recordMaxWebhookEvent(){throw new Error('db down');}}});
@@ -597,6 +607,24 @@ test('operator panel keeps admin token in memory and provides phone contact acti
   assert.doesNotMatch(html,/localStorage/);
 });
 
+
+test('MAX webhook does not persist commands when outbound bot credentials are missing', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{
+    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},
+    maxEventStore:{async recordMaxWebhookEvent(){writes++;return {duplicate:false};}}
+  });
+  const response=await fetch(base+'/api/max/webhook',{
+    method:'POST',
+    headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},
+    body:JSON.stringify({
+      update_type:'message_created',timestamp:1794740000000,
+      message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'help-no-outbound',text:'!help'}}
+    })
+  });
+  assert.equal(response.status,503);
+  assert.equal(writes,0);
+});
 
 test('MAX webhook rejects a non-allowlisted group member', async t => {
   let writes=0;
@@ -742,7 +770,7 @@ test('production admin and MAX webhook require complete durable YDB request, aud
   assert.equal(assertDurableAdminRuntime(),true);
   assert.throws(() => assertDurableAdminRuntime({ operatorsConfigured:true }), /durable YDB/);
   assert.throws(() => assertDurableAdminRuntime({ maxWebhookConfigured:true }), /durable YDB/);
-  const base={ensureMaxWebhookSchema(){},verifySchema(){}};
+  const base={ensureMaxWebhookSchema(){},ensureMaxCommandReplySchema(){},verifySchema(){}};
   assert.throws(() => assertDurableAdminRuntime({operatorsConfigured:true,requestStore:base}), /durable enquiry persistence/);
   assert.throws(() => assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:base}), /durable enquiry persistence/);
   const store={
@@ -750,10 +778,12 @@ test('production admin and MAX webhook require complete durable YDB request, aud
     verifySchema(){},
     createEnquiry(){},getEnquiry(){},claimEnquiry(){},claimDueEnquiries(){},listPrivateEnquiries(){},completeDelivery(){},
     ensureOperatorAuditSchema(){},consumeOperatorAuthFailure(){},recordOperatorAuditEvent(){},listOperatorAuditEvents(){},
-    recordMaxWebhookEvent(){}
+    recordMaxWebhookEvent(){},claimDueMaxCommandReplies(){},completeMaxCommandReply(){},failMaxCommandReply(){}
   };
   assert.equal(assertDurableAdminRuntime({operatorsConfigured:true,requestStore:store}),true);
   assert.equal(assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:store}),true);
+  const noOutbox={...store,claimDueMaxCommandReplies:undefined};
+  assert.throws(()=>assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:noOutbox}),/durable retryable command reply outbox/);
   const noMaxReceipts={...store,recordMaxWebhookEvent:undefined};
   assert.throws(()=>assertDurableAdminRuntime({maxWebhookConfigured:true,requestStore:noMaxReceipts}),/idempotent webhook receipt storage/);
   const noAudit={...store,recordOperatorAuditEvent:undefined};
@@ -796,47 +826,148 @@ test('production Russian standby cannot start with local JSON or a partial YDB r
 
 test('MAX !help command replies only to the configured operator group and audits the action', async t => {
   const stored=[];
-  const audited=[];
-  const outbound=[];
   const maxEventStore={async recordMaxWebhookEvent(event){stored.push(event);return {duplicate:false};}};
-  const auditStore={async recordOperatorAuditEvent(event){audited.push(event);}};
   const {base}=await fixture(t,{
-    maxEventStore,auditStore,
+    maxEventStore,
     env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345',MAX_BOT_TOKEN:'max-token'}
-    ,fetchImpl:async(url,options)=>{outbound.push({url:String(url),body:JSON.parse(options.body)});return new Response(JSON.stringify({success:true}),{status:200});}
   });
   const update={update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'help-001',text:'!help'}}};
   const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify(update)});
   assert.equal(response.status,200);
   assert.equal((await response.json()).command,'help');
   assert.equal(stored.length,1);
-  assert.equal(audited.length,1);
-  assert.equal(audited[0].action,'max.command.help');
-  assert.deepEqual(audited[0].metadata,{reason:'max_group_command'});
-  assert.equal(outbound.length,1);
-  assert.equal(outbound[0].url,'https://platform-api2.max.ru/messages?chat_id=987654321');
-  assert.match(outbound[0].body.text,/!status/);
-  assert.doesNotMatch(outbound[0].body.text,/телефон|контакт клиента/i);
+  assert.equal(stored[0].reply.commandKind,'help');
+  assert.equal(stored[0].reply.actorId,'12345');
+  assert.match(stored[0].reply.text,/!status/);
+  assert.deepEqual(stored[0].reply.auditEvent,{eventId:stored[0].reply.auditEvent.eventId,targetId:'group'});
+  assert.equal(Object.hasOwn(stored[0].reply,'chatId'),false);
 });
 
 test('MAX !status command returns only enquiry state and never customer contact details', async t => {
-  const audited=[];
-  const outbound=[];
+  const stored=[];
   const id='abcd1234-1234-4234-8234-123456789abc';
   const requestStore={async getEnquiry(value){assert.equal(value,id);return {id,status:'queued',name:'Секретное имя',contact:'+7 999 123-45-67',model:'Kia Sportage'};}};
-  const maxEventStore={async recordMaxWebhookEvent(){return {duplicate:false};}};
-  const auditStore={async recordOperatorAuditEvent(event){audited.push(event);}};
+  const maxEventStore={async recordMaxWebhookEvent(event){stored.push(event);return {duplicate:false};}};
   const {base}=await fixture(t,{
-    requestStore,maxEventStore,auditStore,
-    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345',MAX_BOT_TOKEN:'max-token'},
-    fetchImpl:async(url,options)=>{outbound.push(JSON.parse(options.body).text);return new Response(JSON.stringify({success:true}),{status:200});}
+    requestStore,maxEventStore,
+    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345',MAX_BOT_TOKEN:'max-token'}
   });
   const update={update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'status-001',text:'!status '+id}}};
   const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify(update)});
   assert.equal(response.status,200);
   assert.equal((await response.json()).command,'status');
-  assert.equal(audited[0].action,'max.command.status');
-  assert.deepEqual(audited[0].metadata,{reason:'max_group_command'});
-  assert.match(outbound[0],/Заявка abcd1234: queued/);
-  assert.doesNotMatch(outbound[0],/Секретное имя|999 123|Sportage/);
+  assert.equal(stored[0].reply.commandKind,'status');
+  assert.match(stored[0].reply.text,/Заявка abcd1234: queued/);
+  assert.doesNotMatch(stored[0].reply.text,/Секретное имя|999 123|Sportage/);
+  assert.equal(stored[0].reply.auditEvent.targetId,id);
+});
+
+
+test('MAX outbox dispatcher sends a leased reply and completes it with the same fencing token', async t => {
+  const completed=[];
+  const sent=[];
+  const requestStore={
+    async claimDueMaxCommandReplies(){return [{eventDigest:'d'.repeat(64),commandKind:'help',actorId:'12345',text:'Безопасный ответ',leaseToken:'lease-1'}];},
+    async completeMaxCommandReply(input){completed.push(input);return {status:'sent'};},
+    async failMaxCommandReply(){assert.fail('successful MAX send must not be failed');}
+  };
+  const {app}=await fixture(t,{
+    requestStore,
+    env:{MAX_OPERATOR_CHAT_ID:'987654321',MAX_BOT_TOKEN:'max-token'},
+    fetchImpl:async(url,options)=>{sent.push({url:String(url),body:JSON.parse(options.body)});return new Response(JSON.stringify({success:true}),{status:200});}
+  });
+  const result=await app.retryMaxCommandReplies();
+  assert.equal(result[0].status,'sent');
+  assert.equal(sent.length,1);
+  assert.equal(sent[0].url,'https://platform-api2.max.ru/messages?chat_id=987654321');
+  assert.equal(sent[0].body.text,'Безопасный ответ');
+  assert.equal(completed[0].leaseToken,'lease-1');
+});
+
+test('MAX outbox dispatcher schedules retry for rate-limited API responses', async t => {
+  const failures=[];
+  const requestStore={
+    async claimDueMaxCommandReplies(){return [{eventDigest:'e'.repeat(64),text:'safe',leaseToken:'lease-2'}];},
+    async completeMaxCommandReply(){assert.fail('429 must not complete delivery');},
+    async failMaxCommandReply(input){failures.push(input);return {status:'queued'};}
+  };
+  const {app}=await fixture(t,{
+    requestStore,
+    env:{MAX_OPERATOR_CHAT_ID:'987654321',MAX_BOT_TOKEN:'max-token'},
+    fetchImpl:async()=>new Response(JSON.stringify({success:false}),{status:429,headers:{'retry-after':'3600'}})
+  });
+  const result=await app.retryMaxCommandReplies();
+  assert.equal(result[0].status,'queued');
+  assert.equal(failures[0].retryable,true);
+  assert.equal(failures[0].errorCode,'max_rate_limited');
+  assert.equal(failures[0].retryBaseMs,60 * 60_000);
+  assert.equal(failures[0].retryMaxMs,6 * 60 * 60_000);
+});
+
+
+test('MAX status reply allowlists state values even if stored status is corrupted', async t => {
+  const stored=[];
+  const id='abcd1234-1234-4234-8234-123456789abc';
+  const requestStore={async getEnquiry(){return {id,status:'+7 999 123-45-67',contact:'private'};}};
+  const maxEventStore={async recordMaxWebhookEvent(event){stored.push(event);return {duplicate:false};}};
+  const {base}=await fixture(t,{requestStore,maxEventStore,env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'}});
+  const update={update_type:'message_created',timestamp:1794740000000,message:{sender:{user_id:12345},recipient:{chat_id:987654321,chat_type:'chat'},body:{mid:'status-002',text:'!status '+id}}};
+  const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify(update)});
+  assert.equal(response.status,200);
+  assert.match(stored[0].reply.text,/неизвестно/);
+  assert.doesNotMatch(stored[0].reply.text,/999 123|private/);
+});
+
+
+test('MAX callback fails closed when the original message and recipient context are absent', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{
+    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},
+    maxEventStore:{async recordMaxWebhookEvent(){writes++;}}
+  });
+  const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify({
+    update_type:'message_callback',timestamp:1794740000000,
+    callback:{user:{user_id:12345},callback_id:'cb-no-message',payload:'safe'},
+    message:null
+  })});
+  assert.equal(response.status,403);
+  assert.equal(writes,0);
+});
+
+test('MAX webhook ignores non-canonical chat-id and callback recipient fallbacks', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{
+    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},
+    maxEventStore:{async recordMaxWebhookEvent(){writes++;}}
+  });
+  const headers={'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'};
+  const fallbackOnly={
+    update_type:'message_callback',timestamp:1794740000000,chat_id:987654321,
+    callback:{user:{user_id:12345},message:{recipient:{chat_id:987654321,chat_type:'chat'}}},
+    message:null
+  };
+  const conflicting={
+    update_type:'message_created',timestamp:1794740000001,chat_id:987654321,
+    message:{sender:{user_id:12345},recipient:{chat_id:111111111,chat_type:'chat'},body:{mid:'conflicting-chat'}}
+  };
+  const first=await fetch(base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify(fallbackOnly)});
+  const second=await fetch(base+'/api/max/webhook',{method:'POST',headers,body:JSON.stringify(conflicting)});
+  assert.equal(first.status,403);
+  assert.equal(second.status,403);
+  assert.equal(writes,0);
+});
+
+test('MAX callback rejects a channel recipient even when the clicking operator is allowlisted', async t => {
+  let writes=0;
+  const {base}=await fixture(t,{
+    env:{MAX_WEBHOOK_SECRET:'valid-secret-123',MAX_OPERATOR_CHAT_ID:'987654321',MAX_OPERATOR_USER_IDS:'12345'},
+    maxEventStore:{async recordMaxWebhookEvent(){writes++;}}
+  });
+  const response=await fetch(base+'/api/max/webhook',{method:'POST',headers:{'content-type':'application/json','x-max-bot-api-secret':'valid-secret-123'},body:JSON.stringify({
+    update_type:'message_callback',timestamp:1794740000000,
+    callback:{user:{user_id:12345},callback_id:'cb-channel',payload:'safe'},
+    message:{sender:{user_id:55555,is_bot:true},recipient:{chat_id:987654321,chat_type:'channel'},body:{mid:'channel-message'}}
+  })});
+  assert.equal(response.status,403);
+  assert.equal(writes,0);
 });

@@ -55,3 +55,44 @@ test('MAX rejects malformed request IDs without calling the API', async () => {
   assert.equal(result.reason, 'max_request_invalid');
   assert.equal(calls, 0);
 });
+
+
+test('MAX operator replies sanitize control characters and use only the configured group', async () => {
+  let request;
+  const adapter = createMaxAdapter({
+    token: 't', operatorChatId: '987654321',
+    fetchImpl: async (url, options) => { request = { url, options }; return new Response('{}', { status: 200 }); }
+  });
+  const result = await adapter.sendOperatorMessage('Статус\u0001 заявки\u007f готов');
+  assert.equal(result.ok, true);
+  assert.equal(request.url, MAX_API_BASE + '/messages?chat_id=987654321');
+  assert.equal(JSON.parse(request.options.body).text, 'Статус  заявки  готов');
+});
+
+
+test('MAX serializes concurrent sends at a safe per-chat interval', async () => {
+  let now = 1000;
+  const starts = [];
+  const adapter = createMaxAdapter({
+    token: 't', operatorChatId: '123', clock: () => now,
+    sleepImpl: async ms => { now += ms; }, minIntervalMs: 550,
+    fetchImpl: async () => { starts.push(now); return new Response('{}', { status: 200 }); }
+  });
+  const results = await Promise.all([
+    adapter.sendOperatorMessage('one'),
+    adapter.sendOperatorNotification(item),
+    adapter.sendOperatorMessage('three')
+  ]);
+  assert.deepEqual(starts, [1000, 1550, 2100]);
+  assert.equal(results.every(result => result.ok), true);
+});
+
+test('MAX returns Retry-After for 429 so the durable outbox can defer its retry', async () => {
+  const adapter = createMaxAdapter({
+    token: 't', operatorChatId: '123',
+    fetchImpl: async () => new Response('{}', { status: 429, headers: { 'retry-after': '12' } })
+  });
+  assert.deepEqual(await adapter.sendOperatorMessage('safe reply'), {
+    ok: false, retryable: true, reason: 'max_rate_limited', retryAfterMs: 12000
+  });
+});

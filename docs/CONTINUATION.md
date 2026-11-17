@@ -277,3 +277,192 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Source-level work is committed on the feature branch. Exact-head CI, runtime Telegram round-trip, real photo fidelity, and phone visual verification are pending. Do not merge or deploy without explicit owner approval.
 - Remaining media-quality investigation: trace actual published car image URL/rendition end-to-end; distinguish Telegram-compressed photo uploads from source images that were already blurry; implement duplicate suppression at the vehicle-post scope without deleting intentional repeated images across different vehicles; verify site renders full media and not an accidental thumbnail URL.
 - Next action: open PR and run full Worker/Cloudflare/Factory checks; inspect actual code/test results before any merge.
+
+
+## MAX operator outbox follow-up — 2026-11-16
+
+- Active branch: `feature/max-command-reply-outbox-implementation-2026-11-16` (PR #81, draft).
+- Current changes in this continuation slice:
+  - `standby/channels/max-adapter.mjs`: all outbound messages share a serialized per-chat queue with a 550 ms minimum interval; this enforces the official MAX limit of at most two messages/second in one group with a safety margin. Added parsing of numeric/HTTP-date `Retry-After` on 429 responses.
+  - `standby/server.mjs`: the durable reply outbox uses the API-provided retry delay, bounded to 5 seconds–15 minutes.
+  - `standby/channels/max-adapter.test.mjs`: concurrent mixed send paths and Retry-After regression tests.
+  - `standby/test/server.test.mjs`: verifies a 12-second Retry-After becomes the persisted retry base.
+  - `docs/MAX_COMMAND_REPLY_OUTBOX_IMPLEMENTATION_STATUS_2026-11-16.md`: detailed status and official API rate-limit source.
+- Official contract checked: https://dev.max.ru/docs-api/methods/POST/messages — maximum two messages/second per dialog/group/channel; queue or delay sends.
+- Latest source changes include commits `1603b7bc8d92417c6c2380a16fc096a63ef86611`, `6b6e65ee6cd2c6da10b499dc39881c30c8c112a2`, `7f37527dc3c37724e46ed4c81db73b7ef77caef4`, `0bd89c6397c6233fa9ebd429286e26b2ac66f86a`, `b2f8b61c05d65b20ec7a2dcbcd1cbd85f9e09d0c`, and sanitizer escaping correction `48ea8670c748262c4d22f5ddf0358e3bc0fcb3bf`.
+- Verification: tests are authored but not executed. The GitHub Actions runner blocker remains; do not mark CI green or merge. No YDB migration, live MAX bot/group test, Worker deploy, webhook change, or customer traffic was performed.
+- Next: inspect current source/diff for rate-limit queue correctness, inspect newest Actions run for actual runner assignment, then continue review of duplicate-send/crash recovery and YDB migration compatibility. Keep PR #81 draft and production untouched.
+
+
+## Focused local test result — 2026-11-16
+
+- Exact PR adapter source and adapter test file were copied into an isolated temporary directory under Node v22.16.0.
+- `node --check max-adapter.mjs`: passed.
+- `node --test max-adapter.test.mjs`: 8/8 passed, 0 failed. Coverage includes fixed operator destination/privacy, configuration rejection, status classification, network errors, invalid request IDs, control-character sanitization, concurrent mixed-path pacing at 550 ms, and numeric Retry-After.
+- This is focused adapter evidence only; server dispatcher test, YDB storage tests, full standby suite, hosted security scans, live MAX test bot/group and YDB migration remain unverified. Hosted jobs still show runner_id=0 and no steps.
+- No production or live customer system changed. Keep PR #81 draft.
+
+
+## Latest CI status after local adapter verification — 2026-11-16
+
+- Latest tested source head: `3327871eb8fc5a7f18e047a36fcfb14778c843eb`.
+- Focused local adapter checks passed: `node --check` and `node --test` (8/8) in an isolated Node v22.16.0 temporary directory using the exact PR adapter module and test file.
+- Latest dedicated GitHub Actions run `43929159173`, job `133516625508`, again failed before runner allocation (`runner_id=0`, no runner name, `steps=[]`). No hosted validation commands executed.
+- MAX API docs contain no documented idempotency-key parameter for `POST /messages`; delivery guarantee remains at-least-once with a possible duplicate after remote acceptance and before YDB completion.
+- No server dispatcher/YDB/full suite, security scan, live MAX test, schema migration, production deploy, webhook or customer traffic has been verified or changed. PR #81 remains draft.
+
+
+## MAX webhook payload validation hardening — 2026-11-16
+
+- Confirmed official MAX Update schema defines `message.recipient.chat_type` as `chat`, `channel`, or `dialog` (https://dev.max.ru/docs-api/objects/Update/).
+- Removed fallback that inferred group type from a top-level chat_id when recipient.chat_type was missing. The webhook now fails closed unless the explicit recipient type is `chat` and the recipient chat ID matches the configured operator group.
+- Added server regression coverage for a payload that supplies only the top-level chat_id and omits recipient.chat_type; expected result is HTTP 403 with no persistence.
+- Source commit: `b59f74da8528c8979f87520e22566ddbdd6f6e6c`; test commit: `e09abad6437c7656f44972da4f07041f1e6f4e77`.
+- Test not yet executed: GitHub hosted runner allocation is still failing; local focused adapter tests do not cover this server change.
+
+
+## Test-fixture review correction — 2026-11-16
+
+- A source inspection of the new strict MAX group-type regression test found that its first draft referenced `writes` and `headers` before declaration. Corrected by moving all fixture state and headers to the start of the test block.
+- Commit: `3cf8d86cea9a9df566048acb612a5d4d3ff44010`.
+- This is a test-source correction only; it has not run because hosted runner allocation continues to fail before any step.
+
+
+## 2026-11-16 — MAX outbox review continuation
+- Active branch: `feature/max-command-reply-outbox-implementation-2026-11-16`.
+- PR #81 remains open and draft; no merge, production deploy, YDB migration, live MAX webhook change, or customer traffic test was performed.
+- Reviewed exact prior head `a37540c4fdde4392496a1fd7f59614bd88442c7e`. Found a mismatch in `standby/test/server.test.mjs`: the metadata-only webhook test sent malformed `!status 12345678`, which is intentionally classified as an invalid command and queues a reply, but expected the old minimal response object.
+- Fixed the test to send an ordinary non-command message and assert the current response contract: `ok=true`, `duplicate=false`, `command='ignored'`, `queuedReply=false`. This keeps the test focused on metadata persistence without inadvertently testing invalid-command behavior.
+- Change commit: `bce4a70c89f219a443d30a45e5972838484b5572`; changed file: `standby/test/server.test.mjs`.
+- Verification: source/test change was inspected before commit. No local full suite was run in this turn. Previous GitHub Actions attempts failed before any steps ran (empty steps and missing logs/BlobNotFound); the new commit must receive a fresh workflow run before any test-pass claim.
+- Next: inspect fresh Actions results for this exact commit; then continue review of MAX callback schema/authentication, YDB DDL/index compatibility, outbox retention/deduplication horizon, and live test-bot validation. Keep PR #81 draft until full tests, security review, and target-YDB migration validation pass.
+
+
+## 2026-11-16 — exact-head validation retry and replay-retention review
+- MAX webhook metadata test corrected in commit `bce4a70c89f219a443d30a45e5972838484b5572`: now sends a non-command message and asserts `command='ignored'` and `queuedReply=false`; the test no longer accidentally queues an invalid-command reply.
+- Fresh run `43933216572` on head `38aba1051a7c251fa108294002e102cd86b03d6c` failed before execution. Manual retry attempt 2 also failed before runner allocation; job `133531207668` has no steps. No full-suite test result exists.
+- Static review found the deduplication horizon is finite: receipt row and sent outbox row both act as replay fences, but if both are pruned for the same event digest, a sufficiently old replay can enqueue again. Before enabling pruning, align retention windows and decide whether compact deduplication tombstones are required. This is documented in `docs/MAX_COMMAND_REPLY_OUTBOX_IMPLEMENTATION_STATUS_2026-11-16.md`.
+- Current next step: secure a functioning authorized runner, run the full standby suite, then validate the YDB migration and MAX API with a dedicated test bot/group. No merge or production change.
+
+
+## 2026-11-16 — retention scheduler finding
+- Exact source head reviewed: `38aba1051a7c251fa108294002e102cd86b03d6c`.
+- Fresh Actions: MAX validation run `43933216572` and Factory Security Baseline run `43933216532` both concluded failure. Every returned job had an empty step list; no test or security command is evidenced as having run.
+- Confirmed corrected webhook test now exercises a non-command message and checks the current response contract and metadata persistence.
+- Additional static finding: `pruneMaxCommandReplies()` and `pruneMaxWebhookEvents()` are exported from the YDB store but have no callers in `standby/server.mjs`. Startup schedules only delivery retries every 15 seconds. Therefore bounded retention is not automatically executed by this runtime and rows can accumulate indefinitely absent an external/manual caller. Comment added to PR #81. Resolve by adding a controlled retention job with explicit retention period/batch cap, or document that retention is manual and remove claims of automatic pruning. Do not prune queued/dead rows; align receipt and outbox retention to avoid reopening replay deduplication.
+- No full local test suite, live YDB, MAX test bot, migration, merge, or production deploy has been performed.
+
+
+## 2026-11-16 — exact-head runner and retention policy handoff
+- Exact PR #81 head checked: `fff0ce32c32d259c817dc03c5ee891ced2de0515`.
+- Dedicated validation run `43940568229` and Factory Security Baseline run `43940568369` both failed with empty job step lists. Job-log retrieval returned `BlobNotFound`; no validation, CodeQL or secret-scan commands are evidenced as having executed. Do not call this a code failure or a passing check.
+- Retention functions `pruneMaxCommandReplies()` and `pruneMaxWebhookEvents()` are exported/callable but have no runtime callers. The server's 15-second timer only retries notification delivery and MAX outbox replies. Retention is manual-only at present.
+- No retention period or replay horizon was approved. No automatic cleanup was added: choosing a period without owner approval risks deleting audit/replay evidence. Before automation, align receipt/outbox retention and consider durable deduplication tombstones. Never prune queued/dead command replies.
+- PR #81 stays draft; no merge, YDB migration, webhook activation, production deployment or customer traffic test. Focused local MAX adapter verification remains 8/8 only; full standby suite, server tests, YDB tests, security scans, callback live test and target-DB migration remain unverified.
+- Next: unblock a real runner or authorized local execution for the complete workflow command; independently inspect callback payload contract and add explicit tests for callback shape/authorization, then validate YDB migration in a non-production database.
+
+
+## MAX callback schema regression coverage (2026-11-16)
+
+- Rechecked the current official MAX Update schema. For `message_callback`, the actor is `callback.user.user_id`; the original `message` is nullable and, when present, contains the recipient (`chat_id`, `chat_type`). The callback event is delivered through Webhook. Source: https://dev.max.ru/docs-api/objects/Update/.
+- Added two server regression tests in commit `09fc97c06d21e6bcdcdb9cebd71dacbc5c0371ab`: (1) callback with `message: null` / no recipient context must return 403 and persist nothing; (2) allowlisted operator callback addressed to `chat_type: channel` must return 403 and persist nothing. This supplements the existing valid callback test and strict group-type checks.
+- The tests are authored but not executed. A commit-associated workflow run was not yet visible when checked. Do not report these tests as passing until a runner executes the full standby test command.
+- PR #81 remains open/draft. No live webhook or MAX group was contacted.
+
+
+## Latest exact-head Actions result — 2026-11-16 19:37 UTC
+- Current PR #81 head: `9d43396e0e18c0a68ac62f6354ca68158e010249`.
+- MAX validation run `43941164250` was created for that exact head and immediately concluded `failure`; job `133558712447` returned an empty step list (`steps=[]`). No test commands ran. This repeats the runner-allocation failure; do not classify as a code regression or passing test.
+- Commit `09fc97c06d21e6bcdcdb9cebd71dacbc5c0371ab` added two callback fail-closed tests: null original message/recipient context, and channel recipient despite an allowlisted operator. Documentation commits record the official MAX Update schema and manual-only retention decision.
+- PR #81 remains open and draft. No merge, YDB migration, live MAX webhook, production deploy or customer traffic.
+
+
+## Follow-up source review — manual retention wording (2026-11-16)
+- Static review of `standby/storage/ydb-request-store.mjs` confirmed the migration DDL and runtime `ensureMaxCommandReplySchema()` declare the same outbox columns, primary key and two GLOBAL SYNC indexes. This is source-level comparison only; no YDB parser/target database executed the DDL.
+- Corrected the `pruneMaxWebhookEvents()` source comment to say this is a manual bounded maintenance operation and has no runtime scheduler. Commit: `cd603a58d7316d5cbd4e247f7ac2e58331bf8c54`.
+- Rechecked callback tests against the existing test fixture and handler: fixture accepts `maxEventStore`; callback uses top-level `message.recipient`; missing message and `chat_type: channel` are rejected before persistence. Existing valid callback test still covers allowlisting the clicking operator rather than the bot message sender. These are source inspections only, not executed tests.
+- No live YDB/MAX test, migration, merge or deployment. Hosted validation continues to fail before any steps are recorded.
+
+
+## CI retry and runner escalation — 2026-11-16
+- Retried failed validation job `133558712447` for PR #81 head `054514c5b4ea92a6c12c92863cb91ecc08e9cab9`; retry returned success as an API action, but the resulting runs `43941386340` (MAX validation) and `43941386200` (Factory Security Baseline) both completed with failure before any steps.
+- Jobs `133559498141`, `133559498341`, `133559499012` each returned `steps=[]`; log retrieval returned `BlobNotFound`. No Node syntax checks, Node tests, CodeQL, or secret scan ran.
+- Inspected `.github/workflows/max-command-outbox-validation.yml`: it uses `ubuntu-latest`, checkout v4, setup-node v4 / Node 22, then `node --check` and `node --test` over standby tests. Workflow definition itself looks structurally straightforward; hosted execution is the blocker.
+- Added PR #81 comment ID `6927078272` asking repository/org owner to check Actions hosted runner availability, quota/billing/usage limits, and service status. No changes to workflow permissions or production settings.
+- PR #81 remains draft; tests are not verified. Next: wait for runner availability or use an authorized local runner/CI environment; do not interpret the failure as code tests failing.
+
+
+## Executor-led local verification and MAX Retry-After correction — 2026-11-17
+- The assistant performed local execution rather than treating GitHub Actions as the executor. Exact current PR-branch copies of `standby/channels/max-adapter.mjs`, `standby/channels/max-adapter.test.mjs`, `standby/security/operator-auth.mjs`, and `standby/security/operator-auth.test.mjs` were retrieved from GitHub and staged in an isolated Node.js v22 runtime under `/tmp/avtoy-check`.
+- Local checks: `node --check` passed for both runtime modules; MAX adapter tests passed 8/8; operator-auth tests passed 6/6. Total 14/14 focused tests passed. These were exact source/test contents from the PR branch at retrieval time, not the complete standby suite.
+- Static audit found a real retry-policy defect: adapter correctly parsed `Retry-After` up to six hours, but server dispatcher clamped it to 15 minutes and set `retryMaxMs` to 15 minutes. That could cause a retry earlier than MAX's requested delay for long 429 responses.
+- Fixed `standby/server.mjs` to clamp `retryBaseMs` against the existing six-hour `RETRY_MAX_MS` and pass the same six-hour bound to durable retry scheduling. Commit: `70329a3e1983d37e5a3a77d2c1a203743abbdfc3`.
+- Updated the dispatcher regression test to use `Retry-After: 3600` and assert a one-hour initial delay plus six-hour maximum. Commit: `d00b2f1565e913437e040a48bf2a5399ccb88ed5`.
+- The new dispatcher regression test and full storage/server test suites have not yet been executed locally. No live MAX request, YDB migration/parser, target database, CodeQL, or secret scan was run. Production unchanged; PR remains draft.
+- Next: obtain and execute the full standby test set in the isolated local runtime, then continue server/webhook/YDB audit and update this file with concrete evidence.
+
+
+## MAX webhook outbound-credential guard — 2026-11-17
+- Further server-flow audit found a second real defect: an authorized `!help`/`!status` command could be durably accepted and queued even when `MAX_BOT_TOKEN` was absent. The dispatcher would then receive `max_not_configured` (non-retryable) and dead-letter the reply, although the webhook had already returned HTTP 200.
+- Fixed `standby/server.mjs`: if a recognized command needs a reply but the configured MAX adapter is not ready, return HTTP 503 before persisting the webhook event. This allows provider retry after outbound credentials are corrected and avoids accepting an undeliverable command. Commit `4536581870377305307017d1d9c5a379ba668630`.
+- Added regression test asserting HTTP 503 and zero event-store writes when `MAX_BOT_TOKEN` is missing. Commit `836fcbaf7ba69858f2acb7970541c3bac4a04e85`.
+- This server integration regression test has not yet been executed locally; the previously reported 14/14 local tests cover only MAX adapter and operator-auth modules. No live MAX webhook/provider retry has been tested.
+
+
+## MAX webhook canonical recipient hardening — 2026-11-17
+- Additional security review found the handler still accepted non-canonical destination fallbacks (`update.chat_id` and `update.callback.message.recipient`) even though MAX Update schema supplies recipient context on the top-level `update.message.recipient`. This unnecessarily broadened the accepted webhook payload shape.
+- Changed `standby/server.mjs` to derive both chat ID and chat type only from `update.message.recipient`; missing or mismatched canonical recipient now fails closed. Commit `5681808629e22e523f6c04f0507e536fd5f63153`.
+- Added regression coverage for (a) `message:null` plus forged top-level `chat_id` and nested callback recipient, and (b) a top-level chat ID that conflicts with the actual message recipient. Both must return 403 without persistence. Commit `338bb0649acbb5ab8fca73cddccc0dab19709d5b`.
+- These newly added server tests have not yet been executed; they are source-level changes only pending local full-suite execution.
+
+
+## Latest Actions observation — 2026-11-17
+- Latest head `87e97aca68fc38401c965e3c6d68caa297c8b43a` triggered MAX validation run `44012659596`; job `133803099296` failed with `steps=[]`. No test command executed. This repeats the runner-before-steps failure; local focused test evidence remains 14/14 adapter/auth tests only.
+
+
+## Six-hour Retry-After storage bound correction — 2026-11-17
+- Follow-up end-to-end audit found the previous server fix was incomplete: `retryMaxCommandReplies()` now passes `retryBaseMs` up to six hours, but `failMaxCommandReply()` still rejected any `retryBaseMs` above one hour. A valid MAX `Retry-After: 3600+` could therefore throw before durable rescheduling, leaving the row leased until timeout and potentially retrying too early.
+- Raised the storage validator's `retryBaseMs` ceiling from one hour to six hours, matching adapter parsing and server policy. Commit `789becc9f956f682f9a95899461dcb37c8c20c32`.
+- Added a storage regression test that claims a command reply, schedules a six-hour retry, and asserts the exact persisted next-attempt time. Commit `936905ca3e24cf9f48918d33d7587735d7487711`.
+- Test has not yet been executed; source-level change only. Existing local 14/14 evidence remains adapter/auth tests, not YDB storage tests.
+- Official MAX `POST /messages` docs/schema expose `chat_id`, optional `user_id`, and `disable_link_preview`, with a normal create-message response; no idempotency key/request identifier is documented. Therefore the current durable outbox provides at-least-once delivery, not exactly-once: a process crash after MAX accepts a send but before YDB marks it `sent` can produce a duplicate on lease recovery. Do not claim exactly-once delivery. See official API documentation: https://dev.max.ru/docs-api/ and schema reference https://github.com/max-messenger-bot/max-bot-api-schemas/blob/main/schema_2026_07_01.json.
+
+
+## Expired MAX outbox lease recovery regression — 2026-11-17
+- Added a focused storage test for lease recovery: first worker claims; row remains unavailable before lease expiry; after expiry a second worker receives a fresh fencing token; first worker's stale token cannot complete; second worker completes successfully.
+- Test commit: `8c12d8ac1f03f488b60321d2bdb5df9bab45781a`.
+- This is a deterministic fake-SQL state-machine test. It does not prove YDB transaction isolation or concurrent transaction behavior; a real YDB integration/concurrency test remains required before merge/deploy.
+- No production resources, database, migration, or MAX API were touched.
+
+
+## Concurrent MAX outbox claimant regression — 2026-11-17
+- Added a deterministic concurrent-claim regression. The fake SQL transaction boundary now serializes `begin()` callbacks, and two workers race to claim the same due row; the assertion requires exactly one lease owner.
+- Test commit: `8cfb379749b9e1dbdc7db8f5194a7641d34583f0`.
+- Scope limitation: this validates application-level re-checking after the candidate scan under serialized transactions, but the fake is not YDB and does not prove YDB serializable-read-write conflict/retry behavior or cross-process concurrency. Those still require an integration test against the target YDB engine/version.
+- Static audit of MAX command audit rows: sender ID is retained as actor_id, actor_role is explicitly `operator`, command/action and target are allowlisted (`help`, `status`, `invalid`; status target is request UUID). MAX allowlist currently grants only these low-impact group commands, not panel permissions; panel role tokens remain separately authenticated. No role escalation path was identified in these paths.
+- No production database, MAX endpoint, migration, or deployment was touched.
+
+
+## MAX webhook delivery-window and subscription-loss risk — 2026-11-17
+- Official MAX webhook documentation states delivery retries use exponential backoff and stop after up to 8 hours without HTTP 200; MAX then automatically unsubscribes the bot from that webhook. A non-200 response is treated as failed delivery. Source: https://dev.max.ru/docs-api/methods/POST/subscriptions (checked 2026-11-17).
+- The current standby `/healthz` is only a static liveness response (`ok:true`); it does not verify YDB readiness, MAX outbound credentials, webhook subscription registration, or subscription health. Do not treat it as proof that the MAX standby channel is operational.
+- Operational requirement before enabling the MAX standby: add an external monitor/alert for endpoint availability and verify the active MAX subscription through an authorized read-only account/API workflow. If webhook delivery is failing, recover it before the 8-hour retry window expires. Do not auto-call subscription mutation methods from health checks.
+- The current handler's durable receipt + outbox + audit transaction still returns HTTP 200 only after successful persistence; on missing outbound credentials or storage failure it returns 503 so MAX retries. This is correct for transient recovery but makes the documented 8-hour unsubscribe window an operational risk during prolonged outages.
+- No webhook subscription was created/modified, no live MAX API was called, and no production service was changed.
+
+- Follow-up after the concurrency regression: PR head advanced to `f95beb6b7c0b539cc00c66e3c9d9af79ed5cf437`. MAX validation run `44043441712` and Factory Security Baseline run `44043441833` both concluded `failure`; their jobs returned `steps=[]` (validation job `133903283263`, CodeQL `133903283396`, secret scan `133903283696`). No validation or security command is evidenced as having executed.
+- PR #81 remains open and draft. GitHub currently reports `mergeable=true`, but this is only a mergeability calculation, not a validation result. No merge/deployment/migration/live MAX action performed.
+
+
+## MAX command reply delivery audit — 2026-11-17
+- Closed an audit visibility gap: before this change, the atomic audit row recorded command acceptance/enqueue only; it did not record whether the MAX reply was later delivered or failed.
+- `completeMaxCommandReply()` now writes a `max.command.delivery` audit row with outcome `accepted` in the same serializable YDB transaction that marks the outbox row `sent`.
+- `failMaxCommandReply()` now writes a `max.command.delivery` audit row with outcome `failed` and allowlisted normalized reason/status metadata in the same transaction that reschedules or dead-letters the outbox row.
+- Both delivery audit IDs are deterministic per event digest + attempt number. Stale lease tokens return before either the outbox update or audit insert, preventing an obsolete worker from recording a false delivery outcome.
+- Audit metadata stays within the existing strict allowlist (`reason`, `status`); no customer contact data or reply body is copied into audit metadata.
+- Updated `standby/storage/max-command-outbox.test.mjs` to assert successful delivery and retry/dead-letter attempts generate audit outcomes. Tests have been authored but not executed yet; fake SQL is not a YDB integration test.
+- Operational note: delivery audit volume increases with each failed attempt; audit retention remains explicit manual maintenance and must be planned before enabling production traffic.
+- No migration change is required because the existing audit table already supports these fields. No production DB, MAX API, webhook subscription, merge or deployment was touched.
+
+- Exact-head workflow check after delivery-audit change: MAX validation run `44043881436` failed with job `133904710023`, `steps=[]`; Factory Security Baseline run `44043881601` failed with CodeQL job `133904710747` and Secret scanning job `133904710241`, both `steps=[]`. No tests, CodeQL analysis, or secret scan commands executed.
+- Current PR #81 head after docs update is tracked separately by the PR API; PR remains draft/open. The latest source commits are `02163de1` (atomic delivery audit), `ce278d84` (regressions), and `0138039f` (metadata allowlist correction); docs commit records the work. No successful validation is claimed.
