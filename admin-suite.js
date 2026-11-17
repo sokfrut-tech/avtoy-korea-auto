@@ -110,6 +110,12 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box
       <div class="stat"><span class="muted">Заявок с сайта</span><b id="st-orders">0</b></div>
     </div>
 
+    <div class="composer" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px">
+      <span style="font-weight:800;white-space:nowrap">💬 Кнопка «Бот в MAX» на сайте:</span>
+      <input id="max-bot-url" type="url" style="flex:1;min-width:240px;padding:9px 12px" placeholder="https://max.ru/ваш_бот (если пусто — кнопки MAX на сайте ведут к форме связи в MAX)">
+      <button type="button" id="save-max-url-btn" class="sec sm" style="padding:9px 14px">💾 Сохранить ссылку MAX</button>
+    </div>
+
     <div class="tabs">
       <button type="button" class="tab active" data-tab="cars">🚘 Автомобили</button>
       <button type="button" class="tab" data-tab="news">📰 Новости</button>
@@ -195,6 +201,8 @@ async function loadAll() {
     document.getElementById('st-reviews').textContent = state.items.filter(i => i.kind === 'review').length;
     document.getElementById('st-pending').textContent = state.pending.length;
     document.getElementById('st-orders').textContent = state.orders.length;
+    const maxInput = document.getElementById('max-bot-url');
+    if (maxInput && document.activeElement !== maxInput) maxInput.value = data.maxBotUrl || '';
     render();
   } catch (e) {
     if (e.message === 'Unauthorized') return showLogin('Сессия истекла. Получите новый код командой /adminlink в боте.');
@@ -418,6 +426,15 @@ document.querySelectorAll('.tab').forEach(btn => {
 searchInput.oninput = render;
 filterSelect.onchange = render;
 refreshBtn.onclick = loadAll;
+
+document.getElementById('save-max-url-btn').onclick = async () => {
+  const val = document.getElementById('max-bot-url').value.trim();
+  try {
+    const r = await api('/api/admin/settings', 'POST', { maxBotUrl: val });
+    notify(r.maxBotUrl ? ('Ссылка на бот MAX сохранена: ' + r.maxBotUrl) : 'Прямая ссылка MAX очищена (включён режим формы связи в MAX)');
+    loadAll();
+  } catch (e) { notify(e.message, true); }
+};
 
 document.getElementById('publish-news-btn').onclick = async () => {
   const txt = document.getElementById('new-news-text').value.trim();

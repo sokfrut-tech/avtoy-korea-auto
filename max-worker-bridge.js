@@ -135,6 +135,7 @@ const MAX_ADMIN_HELP = [
   "Команды администратора:",
   "• /adminlink — войти в веб-панель управления сайтом в 1 клик",
   "• /news <текст> — опубликовать новость на сайт",
+  "• /setmax <https://max.ru/...> — привязать ссылку на этого бота к кнопкам MAX на сайте",
   "• /site (или !site) — список опубликованных авто, новостей и отзывов",
   "• /orders (или !orders) — последние заявки клиентов (контакты видны только в личке)",
   "• !status <номер_или_id> — проверить статус заявки",
@@ -270,6 +271,18 @@ export async function handleMaxBotWebhook(request, env, helpers = {}) {
       const res = await cleanupCatalog();
       await replyToDialog(`✨ Автоочистка выполнена!\nОбновлено авто: ${res.cleanedCars}\nПеренесено в Новости: ${res.movedToNews || 0}\nСнято битых: ${res.removedBroken}`);
       return Response.json({ ok: true, command: "clean" });
+    }
+
+    const setMaxMatch = text.match(/^[!/]setmax\s+(\S+)$/i);
+    if (setMaxMatch && env.REVIEWS) {
+      const rawUrl = setMaxMatch[1].trim();
+      if (!/^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(rawUrl)) {
+        await replyToDialog("❌ Укажите ссылку вида https://max.ru/ваш_бот");
+        return Response.json({ ok: false, error: "invalid_max_url" });
+      }
+      await env.REVIEWS.put("site_config:max_bot_url", rawUrl);
+      await replyToDialog(`✅ Все кнопки «Бот в MAX» на сайте теперь открывают:\n${rawUrl}`);
+      return Response.json({ ok: true, command: "setmax", maxBotUrl: rawUrl });
     }
 
     const newsCmdMatch = text.match(/^[!/]news\s+([\s\S]+)$/i);

@@ -188,9 +188,10 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
         cars:Array.isArray(data.cars) ? data.cars.filter(c => c && c.id && typeof c.caption === 'string' && Array.isArray(c.mediaItems)) : [],
         news:Array.isArray(data.news) ? data.news.filter(n => n && n.id && (n.text || (Array.isArray(n.mediaItems) && n.mediaItems.length > 0))) : [],
         reviews:Array.isArray(data.reviews) ? data.reviews.filter(r => r && r.id && Array.isArray(r.mediaItems) && (r.text || r.mediaItems.length > 0)) : [],
+        maxBotUrl:typeof data.maxBotUrl === 'string' && /^https:\/\/max\.ru\//.test(data.maxBotUrl) ? data.maxBotUrl : null,
         updatedAt:data.updatedAt || null
       };
-    } catch (e) { if (e.code === 'ENOENT') return { cars:[], news:[], reviews:[], updatedAt:null }; throw e; }
+    } catch (e) { if (e.code === 'ENOENT') return { cars:[], news:[], reviews:[], maxBotUrl:null, updatedAt:null }; throw e; }
   }
   async function deliver(item) {
     const token = env.TELEGRAM_BOT_TOKEN;
@@ -453,6 +454,16 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
   async function handle(req, res) {
     const url = new URL(req.url, 'http://standby.local');
     if (req.method === 'GET' && url.pathname === '/healthz') return json(res,200,{ ok:true, service:'avtoy-korea-standby' });
+    if (req.method === 'GET' && url.pathname === '/api/public-config') {
+      try {
+        const snapshot = await readSnapshot();
+        const envUrl = String(env.MAX_BOT_URL || '').trim();
+        const maxBotUrl = snapshot.maxBotUrl || (/^https:\/\/max\.ru\//.test(envUrl) ? envUrl : null);
+        return json(res, 200, { maxBotUrl });
+      } catch {
+        return json(res, 200, { maxBotUrl: null });
+      }
+    }
     if (req.method === 'GET' && url.pathname === '/api/cars') {
       try { const snapshot = await readSnapshot(); return json(res,200,{ cars:snapshot.cars, updatedAt:snapshot.updatedAt }); }
       catch { return json(res,500,{ error:'Каталог временно недоступен.' }); }

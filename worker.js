@@ -176,6 +176,7 @@ async function setAdminCommands(env, adminId) {
   commands: [
    { command: "panel", description: "Центр управления (авто, новости, отзывы, заявки)" },
    { command: "news", description: "Опубликовать новость: /news текст" },
+   { command: "setmax", description: "Указать ссылку на бота MAX: /setmax https://max.ru/..." },
    { command: "adminlink", description: "Вход в веб-панель в 1 клик" },
    { command: "admin", description: "Меню и подсказка администратора" },
    { command: "site", description: "Полный список карточек с фото" },
@@ -1767,6 +1768,15 @@ function hasSameOrigin(request) {
  return Boolean(origin && origin === new URL(request.url).origin);
 }
 
+async function resolveMaxBotUrl(env) {
+ let candidate = "";
+ if (env.REVIEWS) {
+  try { candidate = String((await env.REVIEWS.get("site_config:max_bot_url")) || "").trim(); } catch {}
+ }
+ if (!candidate) candidate = String(env.MAX_BOT_URL || "").trim();
+ return /^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(candidate) ? candidate : "";
+}
+
 async function getWebAdminSession(request, env, adminIds) {
  if (!env.REVIEWS) return null;
  const token = cookieValue(request, "avtoy_admin");
@@ -1924,7 +1934,22 @@ async function handleWebAdminApi(request, url, env, adminIds) {
    try { orders.push(JSON.parse(raw)); } catch {}
   }
   orders.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
-  return json({ items, pending, orders });
+  const maxBotUrl = await resolveMaxBotUrl(env);
+  return json({ items, pending, orders, maxBotUrl });
+ }
+
+ if (path === "/api/admin/settings" && request.method === "POST") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  let body = {};
+  try { body = await request.json(); } catch { return json({ error: "Invalid request" }, 400); }
+  const rawUrl = String(body?.maxBotUrl || "").trim();
+  if (rawUrl && !/^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(rawUrl)) {
+   return json({ error: "Укажите ссылку вида https://max.ru/..." }, 400);
+  }
+  if (rawUrl) await env.REVIEWS.put("site_config:max_bot_url", rawUrl);
+  else await env.REVIEWS.delete("site_config:max_bot_url");
+  await writeLog(env, session.adminId, "обновлена ссылка MAX", "настройки", "max_bot_url", rawUrl || "очищено");
+  return json({ ok: true, maxBotUrl: await resolveMaxBotUrl(env) });
  }
 
  if (path === "/api/admin/news" && request.method === "POST") {
@@ -2151,7 +2176,7 @@ export default {
     cleanupCatalog: () => runAdminCatalogCleanup(env, adminIds[0] || "max_admin", writeLog)
    });
   }
-  if (request.method === "OPTIONS" && (url.pathname === "/api/request" || url.pathname === "/api/cars" || url.pathname === "/api/reviews" || url.pathname === "/api/news")) {
+  if (request.method === "OPTIONS" && (url.pathname === "/api/request" || url.pathname === "/api/cars" || url.pathname === "/api/reviews" || url.pathname === "/api/news" || url.pathname === "/api/public-config")) {
    return new Response(null, { status: 204, headers: resolveMirrorCorsHeaders(request, env) });
   }
 
@@ -2407,6 +2432,21 @@ export default {
        reply_markup: { inline_keyboard: [[{ text: "✏️ Изменить", callback_data: "siteedit:" + newsId }, { text: "🗑 Снять с сайта", callback_data: "sitedel:" + newsId }], [{ text: "🎛 Панель", callback_data: "panel:home" }]] }
       });
      }
+    } else if (/^\/setmax(?:@\w+)?(?:\s+([\s\S]+))?$/i.test(text) && adminIds.includes(chatId)) {
+     const m = text.match(/^\/setmax(?:@\w+)?(?:\s+([\s\S]+))?$/i);
+     const rawUrl = m && m[1] ? m[1].trim() : "";
+     if (!rawUrl) {
+      const current = await resolveMaxBotUrl(env);
+      await send(chatId, "💬 Ссылка на бота MAX на сайте:\nТекущая: " + (current || "пока не задана (кнопки MAX на сайте переводят к форме связи в MAX)") + "\n\nЧтобы привязать прямую ссылку на вашего бота в MAX, отправьте:\n/setmax https://max.ru/ваш_бот");
+     } else if (!/^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(rawUrl)) {
+      await send(chatId, "❌ Ссылка должна начинаться с https://max.ru/ (например: /setmax https://max.ru/avtoykorea_bot)");
+     } else if (!env.REVIEWS) {
+      await send(chatId, "Хранилище REVIEWS не настроено.");
+     } else {
+      await env.REVIEWS.put("site_config:max_bot_url", rawUrl);
+      await writeLog(env, chatId, "установлена ссылка MAX", "настройки", "max_bot_url", rawUrl);
+      await send(chatId, "✅ Ссылка на бота MAX сохранена! Все кнопки MAX на сайте теперь ведут на:\n" + rawUrl);
+     }
     } else if (text === "/panel" && adminIds.includes(chatId)) {
      await setAdminCommands(env, chatId).catch(() => {});
      await sendOrEditTelegramPanel(env, chatId, null, "home", { callTelegram, siteLabel, sha256Hex });
@@ -2548,8 +2588,12 @@ export default {
    if(tgConfigured && !tgComplete && !maxComplete)return fail(503,"Заявка №"+orderNumber+" сохранена. Уведомление доставлено не всем администраторам. Нажмите «Отправить заявку» ещё раз — повторно отправим только недоставленные уведомления.");
    if(!tgConfigured && maxDelivery.configured && !maxComplete)return fail(503,"Заявка №"+orderNumber+" сохранена. Уведомление в MAX временно не доставлено, попробуйте ещё раз.");
    const botUser=String(env.TELEGRAM_BOT_USERNAME||"").replace(/^@/,"");
-   const maxBotUrl=String(env.MAX_BOT_URL||"").trim()||null;
+   const maxBotUrl=(await resolveMaxBotUrl(env))||null;
    return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+bindToken:null,maxBotUrl},{headers});
+  }
+  if (request.method === "GET" && url.pathname === "/api/public-config") {
+   const maxBotUrl = (await resolveMaxBotUrl(env)) || null;
+   return Response.json({ maxBotUrl }, { headers: { "cache-control": "no-store", ...resolveMirrorCorsHeaders(request, env) } });
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
    if (!env.REVIEWS) return Response.json({error:"Catalogue storage unavailable"},{status:503,headers:{"cache-control":"no-store","x-content-type-options":"nosniff"}});
@@ -2723,6 +2767,8 @@ export default {
    return new Response(upstream.body, { headers: { "content-type": contentType, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
   }
   if(url.pathname==="/favicon.ico") return new Response(null,{status:204});
+  const resolvedMaxUrl = await resolveMaxBotUrl(env);
+  const maxHrefAttr = resolvedMaxUrl ? `href="${resolvedMaxUrl}" target="_blank" rel="noopener"` : `href="#max-bot"`;
   const html = `<!doctype html>
 <html lang="ru">
 <head>
@@ -3316,14 +3362,46 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
 .news-body p{margin:0}
 .news-cta{margin-top:6px;display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:12px;background:#f12f381f;border:1px solid #f12f3870;color:#fff;font-weight:800;font-size:13.5px;transition:background .16s}
 .news-cta:hover{background:var(--red);color:#fff}
+.nav-messengers{display:flex;align-items:center;gap:10px}
+.nav-max{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;padding:6px 12px 6px 7px;border-radius:999px;background:linear-gradient(135deg,#5b21b638,#2563eb30);border:1px solid #8b5cf670;color:#f5f3ff;transition:transform .16s,border-color .16s}
+.nav-max:hover{transform:translateY(-1px);border-color:#a78bfa;background:linear-gradient(135deg,#6d28d966,#2563eb55)}
+.nav-max>span{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#2563eb);color:#fff;font-weight:900;font-size:13px;box-shadow:0 4px 12px #7c3aed55}
+.nav-max small{display:block;color:#c4b5fd;font-size:10px;margin-top:1px;font-weight:600}
+.hero-actions-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:24px}
+.hero-actions-row .btn{margin-top:0!important}
+.btn-max{display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:28px;padding:14px 24px;font-weight:800;font-size:15px;background:linear-gradient(135deg,#6d28d9e6,#2563ebe6);border:1px solid #a78bfa88;color:#fff!important;box-shadow:0 10px 28px #6d28d945;backdrop-filter:blur(8px);transition:transform .18s,box-shadow .18s}
+.btn-max:hover{transform:translateY(-2px);box-shadow:0 14px 34px #6d28d970}
+.btn-max-badge{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#ffffff24;font-size:12px;font-weight:900}
+.direct-channels{display:grid;gap:10px;margin-top:18px}
+.channel-btn{display:flex;align-items:center;gap:12px;padding:12px 15px;border-radius:14px;background:#0a101b;border:1px solid #28364f;color:#f4f7fc;transition:border-color .16s,transform .16s}
+.channel-btn:hover{transform:translateY(-2px);border-color:#60a5fa}
+.channel-btn.is-max{background:linear-gradient(135deg,#2e106555,#1e3a8a40);border-color:#7c3aed80}
+.channel-btn.is-max:hover{border-color:#a78bfa}
+.channel-icon{flex:0 0 38px;height:38px;border-radius:11px;display:grid;place-items:center;font-weight:900;font-size:16px;color:#fff;background:#229ed9}
+.channel-btn.is-max .channel-icon{background:linear-gradient(135deg,#7c3aed,#2563eb)}
+.channel-btn b{display:block;font-size:14px;line-height:1.25}
+.channel-btn small{display:block;color:#9fb0c7;font-size:12px;margin-top:2px}
+.footer-links{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.footer-max{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;background:#7c3aed28;border:1px solid #8b5cf666;color:#ddd6fe;font-weight:700}
+.footer-max:hover{background:#7c3aed;color:#fff}
+@media(max-width:1180px){
+ .nav-telegram small,.nav-max small{display:none}
+ .nav-telegram{display:flex!important}
+}
 @media(max-width:900px){
  .news-grid,.news-grid.is-single .news-card.has-media{grid-template-columns:1fr}
+ .nav-telegram b{display:none}
 }
 @media(max-width:780px){
  .catalog-search-row{grid-template-columns:1fr}
  .car-modal-grid{grid-template-columns:1fr}
  .car-actions-row{grid-template-columns:1fr}
  .news-card{padding:16px!important}
+ .nav-telegram{display:none!important}
+ .nav-max{padding:6px 10px;font-size:11px}
+ .hero-standard{height:430px}
+ .hero-actions-row{gap:8px;margin-top:16px}
+ .btn-max{padding:12px 18px;font-size:13.5px}
 }
 </style>
 </head>
@@ -3335,7 +3413,10 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
   <nav class="nav-links" aria-label="Основная навигация">
     <a class="nav-home" href="#">Главная</a><a href="#cars">Каталог</a><a href="#news">Новости</a><a href="#order">Услуги</a><a href="#reviews">Отзывы</a><a href="#request">Контакты</a>
   </nav>
-  <a class="nav-telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener"><span>➤</span><b>Мы в Telegram<small>@avtoYkorea</small></b></a>${env.MAX_BOT_URL && /^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(String(env.MAX_BOT_URL).trim()) ? `<a class="nav-telegram" href="${String(env.MAX_BOT_URL).trim()}" target="_blank" rel="noopener"><span style="background:#7c3aed">M</span><b>Мы в MAX<small>Бот подбора</small></b></a>` : ""}
+  <div class="nav-messengers">
+    <a class="nav-telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener"><span>➤</span><b>Telegram<small>@avtoYkorea</small></b></a>
+    <a class="nav-max" ${maxHrefAttr} data-max-bot-link="1"><span>M</span><b>Бот в MAX<small>Подбор в РФ</small></b></a>
+  </div>
   <a class="pill" href="#request">Оставить заявку</a>
 </div></header>
 
@@ -3351,7 +3432,10 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
     <div class="eyebrow">ПРЯМЫЕ ПОСТАВКИ ИЗ КОРЕИ</div>
     <h1>Автомобили<br><span>из Кореи</span></h1>
     <p class="intro">Подбор автомобиля и доставка из Кореи<br>с учётом ваших требований.</p>
-    <a class="btn btn-red" href="#cars">Перейти в каталог <b>→</b></a>
+    <div class="hero-actions-row">
+      <a class="btn btn-red" href="#cars">Перейти в каталог <b>→</b></a>
+      <a class="btn-max" ${maxHrefAttr} data-max-bot-link="1"><span class="btn-max-badge">M</span>Бот подбора в MAX</a>
+    </div>
     <div class="hero-dots"><button class="hero-dot active" type="button" aria-label="Kia Sportage" aria-current="true"></button><button class="hero-dot" type="button" aria-label="Kia K5" aria-current="false"></button><button class="hero-dot" type="button" aria-label="Toyota RAV4" aria-current="false"></button></div>
   </div>
   <div class="hero-model-name" aria-live="polite">Kia Sportage</div>
@@ -3433,15 +3517,25 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
     <div>
       <div class="eyebrow">Бесплатный подбор</div>
       <h2>Какой автомобиль вы ищете?</h2>
-      <p class="form-intro">Оставьте параметры автомобиля и удобный контакт. Мы свяжемся с вами по указанному телефону или другому контакту.</p>
-      <p class="hint">Можно обратиться и по вопросам рекламы, партнёрства или размещения предложений.</p>
+      <p class="form-intro">Оставьте параметры автомобиля и удобный контакт. Заявка мгновенно поступает менеджерам одновременно в <b>MAX</b> и <b>Telegram</b>.</p>
+      <div class="direct-channels">
+        <a class="channel-btn is-max" ${maxHrefAttr} data-max-bot-link="1">
+          <span class="channel-icon">M</span>
+          <span><b>Написать в бот MAX</b><small>Быстрая связь в России без ограничений</small></span>
+        </a>
+        <a class="channel-btn" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">
+          <span class="channel-icon">➤</span>
+          <span><b>Канал в Telegram (@avtoYkorea)</b><small>Свежие поступления, обзоры и цены</small></span>
+        </a>
+      </div>
+      <p class="hint" style="margin-top:14px">Можно обратиться и по вопросам рекламы, партнёрства или размещения предложений.</p>
     </div>
     <div>
       <div class="selected-car-banner" id="selected-car-banner"><span id="selected-car-label"></span><button type="button" id="selected-car-clear" aria-label="Сбросить выбранный автомобиль">×</button></div>
       <form id="request-form" novalidate>
         <div class="form-grid">
           <div class="field"><label for="name">Ваше имя *</label><input id="name" name="name" required maxlength="100" autocomplete="name" placeholder="Как к вам обращаться"></div>
-          <div class="field"><label for="contact">Telegram или телефон *</label><input id="contact" name="contact" required maxlength="150" autocomplete="tel" placeholder="@username или номер"></div>
+          <div class="field"><label for="contact">Телефон, MAX или Telegram *</label><input id="contact" name="contact" required maxlength="150" autocomplete="tel" placeholder="Номер телефона, MAX или @username"></div>
           <div class="field"><label for="model">Марка / модель</label><input id="model" name="model" maxlength="150" placeholder="Например, Kia Sorento"></div>
           <div class="field"><label for="budget">Бюджет</label><input id="budget" name="budget" maxlength="100" placeholder="Например, 3 000 000 ₽"></div>
           <div class="field"><label for="country">Страна покупки</label><select id="country" name="country"><option value="">Пока не решил(а)</option><option>Южная Корея</option><option>Китай</option><option>ОАЭ</option></select></div>
@@ -3463,7 +3557,10 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
 <footer><div class="wrap footer-row">
   <a class="brand" href="#">AVTO<em>Y</em> KOREA</a>
   <span>Автомобили под заказ · Корея · Китай · ОАЭ</span>
-  <a class="telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">Telegram ↗</a>
+  <div class="footer-links">
+    <a class="footer-max" ${maxHrefAttr} data-max-bot-link="1"><span>M</span> Бот в MAX ↗</a>
+    <a class="telegram" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">Telegram ↗</a>
+  </div>
 </div></footer>
 
 <script>
@@ -4148,6 +4245,42 @@ loadCars();
       card.appendChild(content);
       list.appendChild(card);
     });
+  }).catch(function(){});
+
+  var activeMaxUrl='';
+  function applyMaxBotLinks(url){
+    if(url&&/^https:\\/\\/max\\.ru\\//i.test(url))activeMaxUrl=url;
+    document.querySelectorAll('[data-max-bot-link]').forEach(function(el){
+      if(activeMaxUrl){
+        el.href=activeMaxUrl;
+        el.target='_blank';
+        el.rel='noopener';
+      }
+    });
+  }
+  document.querySelectorAll('[data-max-bot-link]').forEach(function(el){
+    var initialHref=el.getAttribute('href')||'';
+    if(/^https:\\/\\/max\\.ru\\//i.test(initialHref))activeMaxUrl=initialHref;
+    el.addEventListener('click',function(e){
+      if(activeMaxUrl)return;
+      e.preventDefault();
+      var banner=document.getElementById('selected-car-banner');
+      var label=document.getElementById('selected-car-label');
+      var contact=document.getElementById('contact');
+      var details=document.getElementById('details');
+      if(banner&&label){
+        label.textContent='💬 Связь через мессенджер MAX: укажите ваш номер телефона или контакт в MAX — бот и менеджер напишут вам в MAX';
+        banner.classList.add('is-visible');
+      }
+      if(contact)contact.placeholder='Ваш номер телефона в MAX';
+      if(details&&details.value.indexOf('MAX')<0)details.value=(details.value?details.value+NL:'')+'Предпочтительная связь: мессенджер MAX';
+      var sec=document.getElementById('request'),nm=document.getElementById('name');
+      if(sec)sec.scrollIntoView({behavior:'smooth',block:'start'});
+      if(nm)window.setTimeout(function(){(nm.value?contact:nm)?.focus({preventScroll:true});},350);
+    });
+  });
+  fetch('/api/public-config',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(cfg){
+    if(cfg&&cfg.maxBotUrl)applyMaxBotLinks(cfg.maxBotUrl);
   }).catch(function(){});
 })();
 </script>

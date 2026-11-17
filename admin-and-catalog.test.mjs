@@ -406,6 +406,26 @@ test("News publishing works across Telegram (/news, pubasnews, imp:news), MAX (/
 
     const allNews = await (await worker.fetch(new Request("https://worker.test/api/news"), envWithMax)).json();
     assert.equal(allNews.news.length, 6);
+
+    // 6. MAX Bot buttons are visible on homepage by default and bind dynamically via /setmax & /api/public-config
+    const defaultHtml = await (await worker.fetch(new Request("https://worker.test/"), envWithMax)).text();
+    assert.match(defaultHtml, /Бот в MAX/);
+    assert.match(defaultHtml, /Бот подбора в MAX/);
+    assert.match(defaultHtml, /Написать в бот MAX/);
+
+    await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "wh-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        message: { chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "/setmax https://max.ru/avtoykorea_bot" }
+      })
+    }), envWithMax);
+
+    const pubCfg = await (await worker.fetch(new Request("https://worker.test/api/public-config"), envWithMax)).json();
+    assert.equal(pubCfg.maxBotUrl, "https://max.ru/avtoykorea_bot");
+
+    const updatedHtml = await (await worker.fetch(new Request("https://worker.test/"), envWithMax)).text();
+    assert.match(updatedHtml, /href="https:\/\/max\.ru\/avtoykorea_bot"/);
   } finally {
     globalThis.fetch = origFetch;
   }

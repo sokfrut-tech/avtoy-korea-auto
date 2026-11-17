@@ -101,11 +101,10 @@ async function extractFrontendHtmlFromWorker({ maxBotUrl = process.env.MAX_BOT_U
   }
   let html = workerSource.slice(startIdx + 'const html = `'.length, endIdx + '</html>'.length);
 
-  // Replace dynamic template interpolation for MAX button in header
-  const safeMaxBtn = maxBotUrl && /^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(maxBotUrl.trim())
-    ? `<a class="nav-telegram" href="${maxBotUrl.trim()}" target="_blank" rel="noopener"><span style="background:#7c3aed">M</span><b>Мы в MAX<small>Бот подбора</small></b></a>`
-    : '';
-  html = html.replace(/\$\{env\.MAX_BOT_URL[\s\S]*?\}\s*(?=\r?\n\s*<a class="pill")/, safeMaxBtn);
+  // Replace dynamic template interpolation for MAX buttons
+  const validMax = maxBotUrl && /^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(maxBotUrl.trim()) ? maxBotUrl.trim() : '';
+  const safeMaxHrefAttr = validMax ? `href="${validMax}" target="_blank" rel="noopener"` : 'href="#max-bot"';
+  html = html.replaceAll('${maxHrefAttr}', safeMaxHrefAttr);
 
   // Unescape template literal double-backslashes from worker.js (e.g. \\s -> \s, \\d -> \d, \\. -> \.)
   html = html.replace(/\\\\([bdswBDSW.nrt+?*()[\]{}|^$])/g, '\\$1');
@@ -119,6 +118,10 @@ async function extractFrontendHtmlFromWorker({ maxBotUrl = process.env.MAX_BOT_U
   // Upgrade API calls in the Russian build so it works seamlessly BOTH:
   // 1) on a dynamic Russian server (Yandex Cloud / standby server: ./api/cars, ./api/reviews, ./api/request)
   // 2) on 100% free cardless static hosting (GitVerse Pages: ./api/cars.json, ./api/reviews.json + direct compact request fallback + 1-click MAX/Telegram buttons)
+  html = html.replace(
+    "fetch('/api/public-config',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;})",
+    `fetch('./api/public-config',{cache:'no-store'}).then(function(r){if(r.ok)return r.json();return fetch('${workerApiOrigin}/api/public-config',{cache:'no-store'}).then(function(r2){return r2.ok?r2.json():null;});})`
+  );
   html = html.replace(
     "fetch('/api/news',{cache:'no-store'}).then(function(r){return r.ok?r.json():{news:[]};})",
     "fetch('./api/news',{cache:'no-store'}).then(function(r){if(r.ok)return r.json();return fetch('./api/news.json',{cache:'no-store'}).then(function(r2){return r2.ok?r2.json():{news:[]};});})"
