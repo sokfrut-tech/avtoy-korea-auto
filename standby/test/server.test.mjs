@@ -876,14 +876,14 @@ test('MAX outbox dispatcher schedules retry for rate-limited API responses', asy
   const {app}=await fixture(t,{
     requestStore,
     env:{MAX_OPERATOR_CHAT_ID:'987654321',MAX_BOT_TOKEN:'max-token'},
-    fetchImpl:async()=>new Response(JSON.stringify({success:false}),{status:429,headers:{'retry-after':'12'}})
+    fetchImpl:async()=>new Response(JSON.stringify({success:false}),{status:429,headers:{'retry-after':'3600'}})
   });
   const result=await app.retryMaxCommandReplies();
   assert.equal(result[0].status,'queued');
   assert.equal(failures[0].retryable,true);
   assert.equal(failures[0].errorCode,'max_rate_limited');
-  assert.equal(failures[0].retryBaseMs,12000);
-  assert.equal(failures[0].retryMaxMs,15 * 60_000);
+  assert.equal(failures[0].retryBaseMs,60 * 60_000);
+  assert.equal(failures[0].retryMaxMs,6 * 60 * 60_000);
 });
 
 
