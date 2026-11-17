@@ -1,0 +1,13 @@
+node_modules/
+public/
+standby/public/media/
+standby/public/assets/
+standby/public/api/
+standby/public/index.html
+standby/public/.nojekyll
+standby/data/inbox.json
+standby/data/public-snapshot.json
+standby/data/migration-report.json
+standby/data/*.tmp*
+.wrangler/
+.env
