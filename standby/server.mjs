@@ -454,7 +454,7 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
   async function handle(req, res) {
     const url = new URL(req.url, 'http://standby.local');
     if (req.method === 'GET' && url.pathname === '/healthz') return json(res,200,{ ok:true, service:'avtoy-korea-standby' });
-    if (req.method === 'GET' && url.pathname === '/api/public-config') {
+    if (req.method === 'GET' && (url.pathname === '/api/public-config' || url.pathname === '/api/public-config.json')) {
       try {
         const snapshot = await readSnapshot();
         const envUrl = String(env.MAX_BOT_URL || '').trim();
@@ -464,15 +464,15 @@ export function createStandbyApp({ dataDir = path.join(ROOT, 'data'), publicDir 
         return json(res, 200, { maxBotUrl: null });
       }
     }
-    if (req.method === 'GET' && url.pathname === '/api/cars') {
+    if (req.method === 'GET' && (url.pathname === '/api/cars' || url.pathname === '/api/cars.json')) {
       try { const snapshot = await readSnapshot(); return json(res,200,{ cars:snapshot.cars, updatedAt:snapshot.updatedAt }); }
       catch { return json(res,500,{ error:'Каталог временно недоступен.' }); }
     }
-    if (req.method === 'GET' && url.pathname === '/api/news') {
+    if (req.method === 'GET' && (url.pathname === '/api/news' || url.pathname === '/api/news.json')) {
       try { const snapshot = await readSnapshot(); return json(res,200,{ news:snapshot.news, updatedAt:snapshot.updatedAt }); }
       catch { return json(res,500,{ error:'Новости временно недоступны.' }); }
     }
-    if (req.method === 'GET' && url.pathname === '/api/reviews') {
+    if (req.method === 'GET' && (url.pathname === '/api/reviews' || url.pathname === '/api/reviews.json')) {
       try { const snapshot = await readSnapshot(); return json(res,200,{ reviews:snapshot.reviews, updatedAt:snapshot.updatedAt }); }
       catch { return json(res,500,{ error:'Отзывы временно недоступны.' }); }
     }

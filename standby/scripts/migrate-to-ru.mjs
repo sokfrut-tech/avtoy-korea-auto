@@ -120,27 +120,28 @@ async function extractFrontendHtmlFromWorker({ maxBotUrl = process.env.MAX_BOT_U
   // 2) on 100% free cardless static hosting (GitVerse Pages: ./api/cars.json, ./api/reviews.json + direct compact request fallback + 1-click MAX/Telegram buttons)
   html = html.replace(
     "fetch('/api/public-config',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;})",
-    `fetch('./api/public-config',{cache:'no-store'}).then(function(r){if(r.ok)return r.json();return fetch('${workerApiOrigin}/api/public-config',{cache:'no-store'}).then(function(r2){return r2.ok?r2.json():null;});})`
+    `(/[.](?:gitverse[.]site|gitverse[.]ru|github[.]io)$/i.test(location.hostname)?fetch('${workerApiOrigin}/api/public-config',{cache:'no-store'}):fetch('./api/public-config.json',{cache:'no-store'})).catch(function(){return null;}).then(function(r){if(r&&r.ok)return r.json();return fetch('${workerApiOrigin}/api/public-config',{cache:'no-store'}).then(function(r2){return r2&&r2.ok?r2.json():null;});})`
   );
   html = html.replace(
     "fetch('/api/news',{cache:'no-store'}).then(function(r){return r.ok?r.json():{news:[]};})",
-    "fetch('./api/news',{cache:'no-store'}).then(function(r){if(r.ok)return r.json();return fetch('./api/news.json',{cache:'no-store'}).then(function(r2){return r2.ok?r2.json():{news:[]};});})"
+    "fetch('./api/news.json',{cache:'no-store'}).catch(function(){return null;}).then(function(r){if(r&&r.ok)return r.json();return fetch('./api/news',{cache:'no-store'}).then(function(r2){return r2.ok?r2.json():{news:[]};});})"
   );
   html = html.replace(
     "fetch('/api/reviews',{cache:'no-store'}).then(function(r){return r.json()})",
-    "fetch('./api/reviews',{cache:'no-store'}).then(function(r){if(r.ok)return r.json();return fetch('./api/reviews.json',{cache:'no-store'}).then(function(r2){return r2.json()});})"
+    "fetch('./api/reviews.json',{cache:'no-store'}).catch(function(){return null;}).then(function(r){if(r&&r.ok)return r.json();return fetch('./api/reviews',{cache:'no-store'}).then(function(r2){return r2.json()});})"
   );
   html = html.replace(
     "fetch('/api/cars',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})",
-    "fetch('./api/cars',{cache:'no-store'}).then(function(r){if(r.ok)return r.json();return fetch('./api/cars.json',{cache:'no-store'}).then(function(r2){if(!r2.ok)throw new Error('HTTP '+r2.status);return r2.json()});})"
+    "fetch('./api/cars.json',{cache:'no-store'}).catch(function(){return null;}).then(function(r){if(r&&r.ok)return r.json();return fetch('./api/cars',{cache:'no-store'}).then(function(r2){if(!r2.ok)throw new Error('HTTP '+r2.status);return r2.json()});})"
   );
 
-  // Upgrade form submission to try local ./api/request first, then Worker API, and offer 1-click messenger fallback if ISP blocks cross-origin POST
+  // Upgrade form submission to go straight to Worker API on static mirrors, or try local ./api/request first on standby server
   const originalFetchLine = "const r=await fetch('/api/request',{method:'POST',headers:{'content-type':'application/json','accept':'application/json','idempotency-key':window.requestIdempotencyKey},body:JSON.stringify(data)});";
   const resilientFetchBlock = [
     "const reqInit={method:'POST',headers:{'content-type':'application/json','accept':'application/json','idempotency-key':window.requestIdempotencyKey},body:JSON.stringify(data)};",
-    `let r=await fetch('./api/request',reqInit).catch(function(){return null;});`,
-    `if(!r||r.status===404||r.status===405){r=await fetch('${workerApiOrigin}/api/request',reqInit);}`
+    "const isStaticMirror=/[.](?:gitverse[.]site|gitverse[.]ru|github[.]io)$/i.test(location.hostname);",
+    "let r=isStaticMirror?null:await fetch('./api/request',reqInit).catch(function(){return null;});",
+    `if(!r||r.status===403||r.status===404||r.status===405||r.status===501){r=await fetch('${workerApiOrigin}/api/request',reqInit);}`
   ].join('');
   html = html.replace(originalFetchLine, resilientFetchBlock);
 
