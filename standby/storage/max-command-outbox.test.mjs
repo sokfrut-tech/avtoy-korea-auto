@@ -108,6 +108,21 @@ test('failed delivery is rescheduled with bounded retry and eventually dead-lett
   assert.equal(dead.status,'dead'); assert.equal(fake.replies.get(first.eventDigest).last_error,'max_network_error');
 });
 
+test('outbox accepts a six-hour MAX Retry-After within the documented bound',async()=>{
+  const fake=fakeSql(),now=1800000000000;
+  const store=createYdbRequestStore({sql:fake.sql,clock:()=>now,idFactory:()=> 'lease-long-retry'});
+  await store.recordMaxWebhookEvent(event());
+  const [claim]=await store.claimDueMaxCommandReplies({now});
+  const sixHours=6*60*60_000;
+  const retry=await store.failMaxCommandReply({
+    eventDigest:claim.eventDigest,leaseToken:claim.leaseToken,
+    errorCode:'max_rate_limited',retryable:true,now,
+    retryBaseMs:sixHours,retryMaxMs:sixHours
+  });
+  assert.equal(retry.status,'queued');
+  assert.equal(Date.parse(retry.nextAttemptAt),now+sixHours);
+});
+
 test('outbox rejects unsafe reply data and invalid lease/retry inputs',async()=>{
   const store=createYdbRequestStore({sql:fakeSql().sql});
   await assert.rejects(()=>store.recordMaxWebhookEvent(event('b'.repeat(64),{text:'x'.repeat(4001)})),/reply text/);
