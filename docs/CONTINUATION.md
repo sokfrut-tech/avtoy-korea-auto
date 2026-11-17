@@ -407,3 +407,10 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Fixed `standby/server.mjs`: if a recognized command needs a reply but the configured MAX adapter is not ready, return HTTP 503 before persisting the webhook event. This allows provider retry after outbound credentials are corrected and avoids accepting an undeliverable command. Commit `4536581870377305307017d1d9c5a379ba668630`.
 - Added regression test asserting HTTP 503 and zero event-store writes when `MAX_BOT_TOKEN` is missing. Commit `836fcbaf7ba69858f2acb7970541c3bac4a04e85`.
 - This server integration regression test has not yet been executed locally; the previously reported 14/14 local tests cover only MAX adapter and operator-auth modules. No live MAX webhook/provider retry has been tested.
+
+
+## MAX webhook canonical recipient hardening — 2026-11-17
+- Additional security review found the handler still accepted non-canonical destination fallbacks (`update.chat_id` and `update.callback.message.recipient`) even though MAX Update schema supplies recipient context on the top-level `update.message.recipient`. This unnecessarily broadened the accepted webhook payload shape.
+- Changed `standby/server.mjs` to derive both chat ID and chat type only from `update.message.recipient`; missing or mismatched canonical recipient now fails closed. Commit `5681808629e22e523f6c04f0507e536fd5f63153`.
+- Added regression coverage for (a) `message:null` plus forged top-level `chat_id` and nested callback recipient, and (b) a top-level chat ID that conflicts with the actual message recipient. Both must return 403 without persistence. Commit `338bb0649acbb5ab8fca73cddccc0dab19709d5b`.
+- These newly added server tests have not yet been executed; they are source-level changes only pending local full-suite execution.
