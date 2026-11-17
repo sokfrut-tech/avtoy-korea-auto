@@ -418,3 +418,11 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 
 ## Latest Actions observation — 2026-11-17
 - Latest head `87e97aca68fc38401c965e3c6d68caa297c8b43a` triggered MAX validation run `44012659596`; job `133803099296` failed with `steps=[]`. No test command executed. This repeats the runner-before-steps failure; local focused test evidence remains 14/14 adapter/auth tests only.
+
+
+## Six-hour Retry-After storage bound correction — 2026-11-17
+- Follow-up end-to-end audit found the previous server fix was incomplete: `retryMaxCommandReplies()` now passes `retryBaseMs` up to six hours, but `failMaxCommandReply()` still rejected any `retryBaseMs` above one hour. A valid MAX `Retry-After: 3600+` could therefore throw before durable rescheduling, leaving the row leased until timeout and potentially retrying too early.
+- Raised the storage validator's `retryBaseMs` ceiling from one hour to six hours, matching adapter parsing and server policy. Commit `789becc9f956f682f9a95899461dcb37c8c20c32`.
+- Added a storage regression test that claims a command reply, schedules a six-hour retry, and asserts the exact persisted next-attempt time. Commit `936905ca3e24cf9f48918d33d7587735d7487711`.
+- Test has not yet been executed; source-level change only. Existing local 14/14 evidence remains adapter/auth tests, not YDB storage tests.
+- Official MAX `POST /messages` docs/schema expose `chat_id`, optional `user_id`, and `disable_link_preview`, with a normal create-message response; no idempotency key/request identifier is documented. Therefore the current durable outbox provides at-least-once delivery, not exactly-once: a process crash after MAX accepts a send but before YDB marks it `sent` can produce a duplicate on lease recovery. Do not claim exactly-once delivery. See official API documentation: https://dev.max.ru/docs-api/ and schema reference https://github.com/max-messenger-bot/max-bot-api-schemas/blob/main/schema_2026_07_01.json.
