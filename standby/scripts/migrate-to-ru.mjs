@@ -196,10 +196,8 @@ async function computeMirrorCodeDigest() {
   return sha256(Buffer.from(parts.join('\n'), 'utf8')).slice(0, 24);
 }
 
-async function canReuseLocalMedia(kvKey, prevRecord, prevDigests, liveDigests) {
-  if (!kvKey || !prevRecord || !prevDigests || !liveDigests) return null;
-  if (!prevDigests[kvKey] || prevDigests[kvKey] !== liveDigests[kvKey]) return null;
-  const items = Array.isArray(prevRecord.mediaItems) ? prevRecord.mediaItems : [];
+async function hasValidLocalMediaItems(prevRecord) {
+  const items = Array.isArray(prevRecord?.mediaItems) ? prevRecord.mediaItems : [];
   if (!items.length) return null;
   for (const item of items) {
     const u = String(item?.url || '');
@@ -212,6 +210,12 @@ async function canReuseLocalMedia(kvKey, prevRecord, prevDigests, liveDigests) {
     }
   }
   return items;
+}
+
+async function canReuseLocalMedia(kvKey, prevRecord, prevDigests, liveDigests) {
+  if (!kvKey || !prevRecord || !prevDigests || !liveDigests) return null;
+  if (!prevDigests[kvKey] || prevDigests[kvKey] !== liveDigests[kvKey]) return null;
+  return hasValidLocalMediaItems(prevRecord);
 }
 
 export async function runMigration() {
@@ -378,7 +382,10 @@ export async function runMigration() {
       ? await canReuseLocalMedia(`car_approved:${car.id}`, prevCarsById.get(car.id), prevState?.recordDigests, catalogDigestPayload?.recordDigests)
       : null;
     const rawMediaItems = reused || await mirrorMediaList(car.id, 'car', rawItems);
-    const mediaItems = deduplicateMediaItems(rawMediaItems);
+    let mediaItems = deduplicateMediaItems(rawMediaItems);
+    if (!mediaItems.length && !s3.configured) {
+      mediaItems = (await hasValidLocalMediaItems(prevCarsById.get(car.id))) || [];
+    }
     if (!mediaItems.length) {
       skippedCars.push({ id: car.id, caption: String(car.caption || '').slice(0, 80), reason: 'all_media_unavailable_404' });
       continue;

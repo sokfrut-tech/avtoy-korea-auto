@@ -1136,12 +1136,15 @@ function postPhotos(post) {
 // Hide clearly undersized photo renditions from published vehicle galleries.
 // Unknown dimensions remain visible pending manual review.
 function catalogPhotoItems(car) {
- const source = Array.isArray(car.photos) ? car.photos : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []);
- return uniqueFileItems(source).filter(photo => {
+ const source = Array.isArray(car.photos) ? car.photos : (Array.isArray(car.photo) ? car.photo : (car.fileId && car.mediaType !== "video" ? [{file_id:car.fileId}] : []));
+ const all = uniqueFileItems(source);
+ const sharp = all.filter(photo => {
   const width = Number(photo.width) || 0, height = Number(photo.height) || 0;
   if (!width || !height) return true;
-  return Math.max(width, height) >= 1280 && width * height >= 900000;
+  return Math.max(width, height) >= 960 && width * height >= 500000;
  });
+ const hasVideos = (Array.isArray(car.videos) && car.videos.length > 0) || (car.mediaType === "video" && Boolean(car.fileId));
+ return (sharp.length > 0 || hasVideos) ? sharp : all;
 }
 
 function postVideos(post) {

@@ -27,6 +27,41 @@ function buildAuthArgs() {
   ];
 }
 
+async function cleanupGitVerseArtifacts() {
+  const token = String(process.env.GITVERSE_TOKEN || '').trim();
+  const repoSlug = String(process.env.GITVERSE_REPO || 'opus_pampus/avtoy-korea').trim();
+  if (!token) return;
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.gitverse.object+json;version=1'
+  };
+  try {
+    const res = await fetch(`https://api.gitverse.ru/repos/${repoSlug}/actions/artifacts`, { headers, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => null);
+    const artifacts = Array.isArray(data?.artifacts) ? data.artifacts : [];
+    let freedBytes = 0;
+    let deletedCount = 0;
+    for (const art of artifacts) {
+      if (!art?.id) continue;
+      const delRes = await fetch(`https://api.gitverse.ru/repos/${repoSlug}/actions/artifacts/${art.id}`, {
+        method: 'DELETE',
+        headers,
+        signal: AbortSignal.timeout(15_000)
+      }).catch(() => null);
+      if (delRes && (delRes.ok || delRes.status === 204)) {
+        deletedCount++;
+        freedBytes += Number(art.size_in_bytes || 0);
+      }
+    }
+    if (deletedCount > 0) {
+      console.log(`Очищено старых артефактов CI GitVerse: ${deletedCount} (освобождено ${(freedBytes / (1024 * 1024)).toFixed(1)} МБ).`);
+    }
+  } catch {
+    // Non-fatal: continue pushing even if artifact listing API is temporarily unavailable
+  }
+}
+
 async function main() {
   const authArgs = buildAuthArgs();
   const statusOut = gitExec(['-c', 'core.quotePath=false', 'status', '--porcelain', '-u']);
@@ -63,14 +98,15 @@ async function main() {
 
   if (deleted.length) {
     gitExec(['rm', '-q', '--ignore-unmatch', '--', ...deleted]);
-    const stAfterRm = gitExec(['diff', '--cached', '--name-only']);
-    if (stAfterRm) {
-      gitExec(['commit', '-q', '-m', 'chore: prune unpublished showcase media & pages']);
-      gitExec(['push', 'origin', 'main'], authArgs);
-    }
   }
 
   if (!upserted.length) {
+    const stAfterRm = gitExec(['diff', '--cached', '--name-only']);
+    if (stAfterRm) {
+      gitExec(['commit', '-q', '-m', 'chore: prune unpublished showcase media & pages']);
+      await cleanupGitVerseArtifacts();
+      gitExec(['push', 'origin', 'main'], authArgs);
+    }
     console.log('Синхронизация GitVerse завершена (удаления применены).');
     return;
   }
@@ -95,6 +131,7 @@ async function main() {
     const staged = gitExec(['diff', '--cached', '--name-only']);
     if (!staged) continue;
     gitExec(['commit', '-q', '-m', `chore: auto-sync showcase batch ${i + 1}/${batches.length}`]);
+    await cleanupGitVerseArtifacts();
     gitExec(['push', 'origin', 'main'], authArgs);
   }
   console.log(`Зеркало GitVerse обновлено (${batches.length} пакет(а), файлов: ${upserted.length}).`);

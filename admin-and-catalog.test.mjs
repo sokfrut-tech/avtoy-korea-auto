@@ -591,3 +591,27 @@ test("catalog digest tracks public changes and GitHub mirror sync auto-dispatche
     globalThis.fetch = origFetch;
   }
 });
+
+test("car catalogue keeps 1024x768 photos and falls back to 640x360 galleries when no sharp photos or videos exist", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:car_100_che168", JSON.stringify({
+    id: "car_100_che168",
+    caption: "T-ROC 2022",
+    photos: [{ file_id: "CHE1", file_unique_id: "CHE1_U", width: 1024, height: 768 }],
+    publishedAt: "2026-11-12T10:00:00Z"
+  }));
+  await kv.put("car_approved:car_100_encar", JSON.stringify({
+    id: "car_100_encar",
+    caption: "MERCEDES-BENZ GLB 200d",
+    photos: [{ file_id: "ENC1", file_unique_id: "ENC1_U", width: 640, height: 360 }],
+    publishedAt: "2026-11-12T09:00:00Z"
+  }));
+
+  const res = await worker.fetch(new Request("https://worker.test/api/cars"), baseEnv(kv));
+  assert.equal(res.status, 200);
+  const { cars } = await res.json();
+  const che = cars.find(c => c.id === "car_100_che168");
+  const encar = cars.find(c => c.id === "car_100_encar");
+  assert.equal(che.mediaItems.length, 1);
+  assert.equal(encar.mediaItems.length, 1);
+});
