@@ -16,7 +16,7 @@ const STANDBY_DIR = path.resolve(SCRIPT_DIR, '..');
 const REPO_ROOT = path.resolve(STANDBY_DIR, '..');
 
 const SOURCE_BASE = new URL(process.env.SOURCE_WORKER_URL || 'https://avtoy-korea-auto.sokfrut.workers.dev/');
-const PUBLIC_MIRROR_URL = (process.env.PUBLIC_MIRROR_URL || 'https://opus-pampus.gitverse.site').replace(/\/+$/, '');
+const PUBLIC_MIRROR_URL = (process.env.PUBLIC_MIRROR_URL || 'https://avtoy-korea.gitverse.site').replace(/\/+$/, '');
 const PUBLIC_DIR = path.join(STANDBY_DIR, 'public');
 const DATA_DIR = path.join(STANDBY_DIR, 'data');
 const MEDIA_DIR = path.join(PUBLIC_DIR, 'media');

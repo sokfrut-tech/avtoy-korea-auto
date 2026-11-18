@@ -29,7 +29,7 @@ function buildAuthArgs() {
 
 async function cleanupGitVerseArtifacts() {
   const token = String(process.env.GITVERSE_TOKEN || '').trim();
-  const primarySlug = String(process.env.GITVERSE_REPO || 'opus_pampus/opus_pampus').trim();
+  const primarySlug = String(process.env.GITVERSE_REPO || 'avtoy-korea/avtoy-korea').trim();
   const repoSlugs = [...new Set([primarySlug, 'opus_pampus/avtoy-korea'])];
   if (!token) return;
   const headers = {
