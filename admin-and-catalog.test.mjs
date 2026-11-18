@@ -521,3 +521,73 @@ test("Yandex SEO engine serves robots.txt, sitemap.xml, yandex-feed.xml, car/new
     globalThis.fetch = origFetch;
   }
 });
+
+test("catalog digest tracks public changes and GitHub mirror sync auto-dispatches, debounces, and supports /syncru", async () => {
+  const kv = memoryKV();
+  const envWithSync = { ...baseEnv(kv), GITHUB_SYNC_TOKEN: "gh-sync-test-token" };
+
+  const d0Res = await worker.fetch(new Request("https://worker.test/api/catalog-digest"), envWithSync);
+  assert.equal(d0Res.status, 200);
+  const d0 = await d0Res.json();
+  assert.equal(Object.keys(d0.recordDigests).length, 0);
+
+  await kv.put("car_approved:car_100_1", JSON.stringify({ id: "car_100_1", caption: "Kia Sportage 2025", publishedAt: "2026-11-18T00:00:00Z" }));
+  const d1 = await (await worker.fetch(new Request("https://worker.test/api/catalog-digest"), envWithSync)).json();
+  assert.notEqual(d1.digest, d0.digest);
+  assert.ok(d1.recordDigests["car_approved:car_100_1"]);
+
+  const origFetch = globalThis.fetch;
+  const dispatches = [];
+  const tgReplies = [];
+  globalThis.fetch = async (url, init) => {
+    const s = String(url);
+    if (s === "https://api.github.com/repos/sokfrut-tech/avtoy-korea-auto/dispatches") {
+      dispatches.push({ headers: init.headers, body: JSON.parse(init.body) });
+      return new Response(null, { status: 204 });
+    }
+    if (s.includes("api.telegram.org")) {
+      tgReplies.push(JSON.parse(init.body));
+      return Response.json({ ok: true, result: {} });
+    }
+    return origFetch(url, init);
+  };
+
+  try {
+    // 1. Publishing news via Telegram /news mutates news_approved:* and triggers automatic dispatch
+    await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "wh-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        message: { chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "/news Важное обновление тарифов" }
+      })
+    }), envWithSync);
+    assert.equal(dispatches.length, 1);
+    assert.equal(dispatches[0].body.event_type, "catalog-updated");
+
+    // 2. Second immediate mutation (/setyandex) is debounced within 45s (dispatch count stays 1), while /api/catalog-digest reflects the change
+    await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "wh-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        message: { chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "/setyandex verify98765432" }
+      })
+    }), envWithSync);
+    assert.equal(dispatches.length, 1);
+    const d2 = await (await worker.fetch(new Request("https://worker.test/api/catalog-digest"), envWithSync)).json();
+    assert.notEqual(d2.digest, d1.digest);
+    assert.equal(d2.yandexVerification, "verify98765432");
+
+    // 3. Explicit /syncru forces an immediate dispatch bypassing debounce
+    await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "wh-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        message: { chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "/syncru" }
+      })
+    }), envWithSync);
+    assert.equal(dispatches.length, 2);
+    assert.match(tgReplies[tgReplies.length - 1].text, /автоматическое облачное обновление/i);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});

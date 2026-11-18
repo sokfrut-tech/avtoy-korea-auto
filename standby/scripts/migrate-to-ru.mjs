@@ -179,12 +179,97 @@ async function extractFrontendHtmlFromWorker({
   return html;
 }
 
+async function readJsonSafe(filePath) {
+  try {
+    return JSON.parse(await fs.readFile(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function computeMirrorCodeDigest() {
+  const parts = [];
+  for (const rel of ['worker.js', 'seo-engine.js', 'catalog-formatter.js', 'standby/scripts/migrate-to-ru.mjs']) {
+    const content = await fs.readFile(path.join(REPO_ROOT, rel), 'utf8').catch(() => '');
+    parts.push(`${rel}:${sha256(Buffer.from(content, 'utf8'))}`);
+  }
+  return sha256(Buffer.from(parts.join('\n'), 'utf8')).slice(0, 24);
+}
+
+async function canReuseLocalMedia(kvKey, prevRecord, prevDigests, liveDigests) {
+  if (!kvKey || !prevRecord || !prevDigests || !liveDigests) return null;
+  if (!prevDigests[kvKey] || prevDigests[kvKey] !== liveDigests[kvKey]) return null;
+  const items = Array.isArray(prevRecord.mediaItems) ? prevRecord.mediaItems : [];
+  if (!items.length) return null;
+  for (const item of items) {
+    const u = String(item?.url || '');
+    if (!u.startsWith('./media/')) return null;
+    try {
+      const st = await fs.stat(path.join(PUBLIC_DIR, u.slice(2)));
+      if (!st.isFile() || st.size <= 0) return null;
+    } catch {
+      return null;
+    }
+  }
+  return items;
+}
+
 export async function runMigration() {
   const s3 = createS3MediaStore();
   await fs.mkdir(MEDIA_DIR, { recursive: true });
   await fs.mkdir(ASSETS_DIR, { recursive: true });
   await fs.mkdir(API_STATIC_DIR, { recursive: true });
   await fs.mkdir(DATA_DIR, { recursive: true });
+
+  const [codeDigest, prevState, prevCarsJson, prevNewsJson, prevReviewsJson, digestRes, cfgRes] = await Promise.all([
+    computeMirrorCodeDigest(),
+    readJsonSafe(path.join(API_STATIC_DIR, 'sync-state.json')),
+    readJsonSafe(path.join(API_STATIC_DIR, 'cars.json')),
+    readJsonSafe(path.join(API_STATIC_DIR, 'news.json')),
+    readJsonSafe(path.join(API_STATIC_DIR, 'reviews.json')),
+    fetch(new URL('/api/catalog-digest', SOURCE_BASE), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20_000) }).catch(() => null),
+    fetch(new URL('/api/public-config', SOURCE_BASE), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20_000) }).catch(() => null)
+  ]);
+
+  const catalogDigestPayload = digestRes && digestRes.ok ? await digestRes.json().catch(() => null) : null;
+  const publicCfg = cfgRes && cfgRes.ok ? await cfgRes.json().catch(() => null) : null;
+  const resolvedMaxBotUrl = String(publicCfg?.maxBotUrl || catalogDigestPayload?.maxBotUrl || process.env.MAX_BOT_URL || '').trim();
+  const resolvedYandexVerification = String(publicCfg?.yandexVerification || catalogDigestPayload?.yandexVerification || process.env.YANDEX_VERIFICATION || '').trim();
+  const syncDigest = catalogDigestPayload?.digest ? sha256(Buffer.from(`${catalogDigestPayload.digest}:${codeDigest}`, 'utf8')) : '';
+
+  const prevCars = Array.isArray(prevCarsJson?.cars) ? prevCarsJson.cars : [];
+  const prevNews = Array.isArray(prevNewsJson?.news) ? prevNewsJson.news : [];
+  const prevReviews = Array.isArray(prevReviewsJson?.reviews) ? prevReviewsJson.reviews : [];
+
+  if (!process.argv.includes('--force') && !s3.configured && syncDigest && prevState?.syncDigest === syncDigest) {
+    let requiredReady = true;
+    for (const rel of ['index.html', 'robots.txt', 'sitemap.xml', 'yandex-feed.xml', 'api/cars.json', 'api/news.json', 'api/reviews.json']) {
+      try {
+        const st = await fs.stat(path.join(PUBLIC_DIR, rel));
+        if (!st.isFile() || st.size <= 0) { requiredReady = false; break; }
+      } catch {
+        requiredReady = false;
+        break;
+      }
+    }
+    if (requiredReady) {
+      console.log('Зеркало уже актуально (syncDigest совпадает) — пропуск пересборки.');
+      return {
+        skippedUnchanged: true,
+        carsSourceCount: prevCars.length,
+        carsMigratedCount: prevCars.length,
+        carsSkipped: [],
+        newsMigratedCount: prevNews.length,
+        reviewsMigratedCount: prevReviews.length,
+        mediaVerifiedCount: 0,
+        totalMediaMegabytes: 0
+      };
+    }
+  }
+
+  const prevCarsById = new Map(prevCars.map(c => [c.id, c]));
+  const prevNewsById = new Map(prevNews.map(n => [n.id, n]));
+  const prevReviewsById = new Map(prevReviews.map(r => [r.id, r]));
 
   const manifestEntries = [];
   const skippedBrokenMedia = [];
@@ -289,7 +374,10 @@ export async function runMigration() {
     const rawItems = Array.isArray(car.mediaItems) && car.mediaItems.length
       ? car.mediaItems
       : (car.media ? [{ url: car.media, type: car.mediaType || 'photo' }] : []);
-    const rawMediaItems = await mirrorMediaList(car.id, 'car', rawItems);
+    const reused = !s3.configured
+      ? await canReuseLocalMedia(`car_approved:${car.id}`, prevCarsById.get(car.id), prevState?.recordDigests, catalogDigestPayload?.recordDigests)
+      : null;
+    const rawMediaItems = reused || await mirrorMediaList(car.id, 'car', rawItems);
     const mediaItems = deduplicateMediaItems(rawMediaItems);
     if (!mediaItems.length) {
       skippedCars.push({ id: car.id, caption: String(car.caption || '').slice(0, 80), reason: 'all_media_unavailable_404' });
@@ -312,7 +400,10 @@ export async function runMigration() {
     const rawItems = Array.isArray(nw.mediaItems) && nw.mediaItems.length
       ? nw.mediaItems
       : (nw.media ? [{ url: nw.media, type: nw.kind === 'video' ? 'video' : 'photo' }] : []);
-    const mediaItems = await mirrorMediaList(nw.id, 'news', rawItems);
+    const reused = !s3.configured
+      ? await canReuseLocalMedia(`news_approved:${nw.id}`, prevNewsById.get(nw.id), prevState?.recordDigests, catalogDigestPayload?.recordDigests)
+      : null;
+    const mediaItems = reused || await mirrorMediaList(nw.id, 'news', rawItems);
     const cleaned = cleanCarDisplayCaption(nw.text || nw.caption || '');
     if (!mediaItems.length && !cleaned) continue;
     seenNewsBaseIds.add(String(nw.id || '').replace(/^news_/, '').replace(/^-/, ''));
@@ -331,10 +422,15 @@ export async function runMigration() {
     const rawItems = Array.isArray(rv.mediaItems) && rv.mediaItems.length
       ? rv.mediaItems
       : (rv.media ? [{ url: rv.media, type: rv.kind === 'video' ? 'video' : 'photo' }] : []);
-    const mediaItems = await mirrorMediaList(rv.id, 'review', rawItems);
+    const isNewsItem = isMarketNewsRecord(rv);
+    const baseId = String(rv.id || '').replace(/^-/, '');
+    const prevRec = isNewsItem ? prevNewsById.get('news_' + baseId) : prevReviewsById.get(rv.id);
+    const reused = !s3.configured
+      ? await canReuseLocalMedia(`approved:${rv.id}`, prevRec, prevState?.recordDigests, catalogDigestPayload?.recordDigests)
+      : null;
+    const mediaItems = reused || await mirrorMediaList(rv.id, 'review', rawItems);
     if (!mediaItems.length && !String(rv.text || '').trim()) continue;
-    if (isMarketNewsRecord(rv)) {
-      const baseId = String(rv.id || '').replace(/^-/, '');
+    if (isNewsItem) {
       if (!seenNewsBaseIds.has(baseId)) {
         seenNewsBaseIds.add(baseId);
         migratedNews.push({
@@ -358,10 +454,33 @@ export async function runMigration() {
     });
   }
 
+  // Remove orphaned local media files from deleted/unpublished entries
+  if (!s3.configured) {
+    const referencedMedia = new Set();
+    for (const group of [migratedCars, migratedNews, migratedReviews]) {
+      for (const rec of group) {
+        for (const m of rec.mediaItems || []) {
+          if (typeof m?.url === 'string' && m.url.startsWith('./media/')) {
+            referencedMedia.add(path.basename(m.url));
+          }
+        }
+      }
+    }
+    const diskMediaFiles = await fs.readdir(MEDIA_DIR).catch(() => []);
+    for (const fileName of diskMediaFiles) {
+      if (fileName === '.gitkeep') continue;
+      if (!referencedMedia.has(fileName)) {
+        await fs.unlink(path.join(MEDIA_DIR, fileName)).catch(() => {});
+      }
+    }
+  }
+
   const updatedAt = new Date().toISOString();
   const snapshot = {
     schemaVersion: 2,
     updatedAt,
+    maxBotUrl: resolvedMaxBotUrl,
+    yandexVerification: resolvedYandexVerification,
     cars: migratedCars,
     news: migratedNews,
     reviews: migratedReviews
@@ -373,7 +492,21 @@ export async function runMigration() {
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'news.json'), Buffer.from(JSON.stringify({ news: migratedNews, updatedAt }) + '\n'));
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'reviews.json'), Buffer.from(JSON.stringify({ reviews: migratedReviews, updatedAt }) + '\n'));
 
-  await writeStaticSeoBundle({ cars: migratedCars, news: migratedNews, updatedAt, maxBotUrl: '', mirrorBaseUrl: PUBLIC_MIRROR_URL });
+  await writeStaticSeoBundle({
+    cars: migratedCars,
+    news: migratedNews,
+    updatedAt,
+    maxBotUrl: resolvedMaxBotUrl,
+    yandexVerification: resolvedYandexVerification,
+    mirrorBaseUrl: PUBLIC_MIRROR_URL
+  });
+  await writeAndVerifyFile(path.join(API_STATIC_DIR, 'sync-state.json'), Buffer.from(JSON.stringify({
+    syncDigest,
+    catalogDigest: catalogDigestPayload?.digest || '',
+    codeDigest,
+    recordDigests: catalogDigestPayload?.recordDigests || {},
+    updatedAt
+  }, null, 2) + '\n'));
   await writeAndVerifyFile(path.join(PUBLIC_DIR, '.nojekyll'), Buffer.from(''));
 
   const report = {
@@ -394,12 +527,18 @@ export async function runMigration() {
   return report;
 }
 
-async function writeStaticSeoBundle({ cars = [], news = [], updatedAt, maxBotUrl = '', mirrorBaseUrl = PUBLIC_MIRROR_URL }) {
-  const indexHtml = await extractFrontendHtmlFromWorker({ maxBotUrl, cars, news, mirrorBaseUrl });
+async function writeStaticSeoBundle({ cars = [], news = [], updatedAt, maxBotUrl = '', yandexVerification = '', mirrorBaseUrl = PUBLIC_MIRROR_URL }) {
+  const indexHtml = await extractFrontendHtmlFromWorker({ maxBotUrl, yandexVerification, cars, news, mirrorBaseUrl });
   await writeAndVerifyFile(path.join(PUBLIC_DIR, 'index.html'), Buffer.from(indexHtml, 'utf8'));
   await writeAndVerifyFile(path.join(PUBLIC_DIR, 'robots.txt'), Buffer.from(buildRobotsTxt({ baseUrl: mirrorBaseUrl }), 'utf8'));
   await writeAndVerifyFile(path.join(PUBLIC_DIR, 'sitemap.xml'), Buffer.from(buildSitemapXml({ baseUrl: mirrorBaseUrl, cars, news, useHtmlExt: true, updatedAt }), 'utf8'));
   await writeAndVerifyFile(path.join(PUBLIC_DIR, 'yandex-feed.xml'), Buffer.from(buildYandexMarketYml({ baseUrl: mirrorBaseUrl, cars, useHtmlExt: true, updatedAt }), 'utf8'));
+
+  if (/^[A-Za-z0-9_-]{8,64}$/.test(String(yandexVerification || '').trim())) {
+    const cleanCode = String(yandexVerification).trim();
+    const verifyHtml = `<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"></head><body>Verification: ${cleanCode}</body></html>`;
+    await writeAndVerifyFile(path.join(PUBLIC_DIR, `yandex_${cleanCode}.html`), Buffer.from(verifyHtml, 'utf8'));
+  }
 
   const carsOutDir = path.join(PUBLIC_DIR, 'cars');
   const newsOutDir = path.join(PUBLIC_DIR, 'news');
@@ -462,7 +601,14 @@ export async function rebuildLocalBundle() {
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'cars.json'), Buffer.from(JSON.stringify({ cars: snap.cars, updatedAt }) + '\n'));
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'news.json'), Buffer.from(JSON.stringify({ news: snap.news, updatedAt }) + '\n'));
   await writeAndVerifyFile(path.join(API_STATIC_DIR, 'reviews.json'), Buffer.from(JSON.stringify({ reviews: snap.reviews, updatedAt }) + '\n'));
-  await writeStaticSeoBundle({ cars: snap.cars, news: snap.news, updatedAt, maxBotUrl: snap.maxBotUrl || '', mirrorBaseUrl: PUBLIC_MIRROR_URL });
+  await writeStaticSeoBundle({
+    cars: snap.cars,
+    news: snap.news,
+    updatedAt,
+    maxBotUrl: snap.maxBotUrl || '',
+    yandexVerification: snap.yandexVerification || '',
+    mirrorBaseUrl: PUBLIC_MIRROR_URL
+  });
   return { cars: snap.cars.length, news: snap.news.length, reviews: snap.reviews.length };
 }
 

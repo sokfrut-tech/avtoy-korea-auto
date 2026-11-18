@@ -83,6 +83,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <a href="/" target="_blank" style="color:#93c5fd;text-decoration:none;font-weight:700;font-size:13px;margin-right:8px">Открыть сайт ↗</a>
       <button id="refresh-btn" class="sec" hidden>↻ Обновить</button>
+      <button id="sync-mirror-btn" class="sec" hidden title="Запустить облачное обновление российского зеркала GitVerse Pages">🔄 Обновить зеркало РФ</button>
       <button id="cleanup-btn" class="sec" hidden title="Убрать дубли фото, хвосты контактов и перенести новости из отзывов">✨ Автоочистка каталога</button>
       <button id="logout" class="sec" hidden>Выйти</button>
     </div>
@@ -161,6 +162,7 @@ const searchInput = document.getElementById('search');
 const filterSelect = document.getElementById('filter-select');
 const newsComposer = document.getElementById('news-composer');
 const refreshBtn = document.getElementById('refresh-btn');
+const syncMirrorBtn = document.getElementById('sync-mirror-btn');
 const cleanupBtn = document.getElementById('cleanup-btn');
 const logoutBtn = document.getElementById('logout');
 
@@ -186,13 +188,13 @@ function notify(msg, isError = false) {
 
 function showLogin(msg = '') {
   loginSec.hidden = false; appSec.hidden = true;
-  refreshBtn.hidden = cleanupBtn.hidden = logoutBtn.hidden = true;
+  refreshBtn.hidden = syncMirrorBtn.hidden = cleanupBtn.hidden = logoutBtn.hidden = true;
   loginStatus.textContent = msg;
 }
 
 function showApp() {
   loginSec.hidden = true; appSec.hidden = false;
-  refreshBtn.hidden = cleanupBtn.hidden = logoutBtn.hidden = false;
+  refreshBtn.hidden = syncMirrorBtn.hidden = cleanupBtn.hidden = logoutBtn.hidden = false;
   loadAll();
 }
 
@@ -434,6 +436,12 @@ document.querySelectorAll('.tab').forEach(btn => {
 searchInput.oninput = render;
 filterSelect.onchange = render;
 refreshBtn.onclick = loadAll;
+syncMirrorBtn.onclick = async () => {
+  try {
+    const r = await api('/api/admin/sync-mirror', 'POST', {});
+    notify(r.ok ? 'Облачное обновление зеркала РФ запущено (~2–3 мин)!' : ('Статус синхронизации: ' + (r.skipped || ('HTTP ' + (r.status || 0)))), !r.ok);
+  } catch (e) { notify(e.message, true); }
+};
 
 document.getElementById('save-max-url-btn').onclick = async () => {
   const val = document.getElementById('max-bot-url').value.trim();

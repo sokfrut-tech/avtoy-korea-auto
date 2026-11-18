@@ -5,7 +5,7 @@
   "type": "module",
   "description": "AVTOY KOREA — Pro Showroom, Admin Pro Dashboard, Telegram + MAX Dual Bot & Zero-Cost Russian Mirror",
   "scripts": {
-    "check": "node --check worker.js && node --check catalog-formatter.js && node --check admin-suite.js && node --check seo-engine.js && node --check max-worker-bridge.js && node --check standby/server.mjs && node --check standby/scripts/migrate-to-ru.mjs",
+    "check": "node --check worker.js && node --check catalog-formatter.js && node --check admin-suite.js && node --check seo-engine.js && node --check max-worker-bridge.js && node --check standby/server.mjs && node --check standby/scripts/migrate-to-ru.mjs && node --check standby/scripts/push-gitverse.mjs",
     "test": "node --test media-order.test.mjs max-worker-bridge.test.mjs admin-and-catalog.test.mjs worker.test.mjs standby/channels/max-adapter.test.mjs standby/security/operator-auth.test.mjs standby/storage/ydb-request-store.test.mjs standby/storage/max-command-outbox.test.mjs standby/test/server.test.mjs",
     "migrate:ru": "node standby/scripts/migrate-to-ru.mjs",
     "start:ru": "node standby/server.mjs"

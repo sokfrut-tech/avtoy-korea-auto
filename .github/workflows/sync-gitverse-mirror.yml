@@ -1,0 +1,60 @@
+name: Sync Russian GitVerse Mirror
+
+on:
+  repository_dispatch:
+    types: [catalog-updated]
+  workflow_run:
+    workflows: ["Deploy AVTOY KOREA Worker"]
+    types: [completed]
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: gitverse-mirror-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify GitVerse secret is configured
+        env:
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+        run: |
+          if [ -z "$GITVERSE_TOKEN" ]; then
+            echo "::error::Missing GitHub secret GITVERSE_TOKEN"
+            exit 1
+          fi
+
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Clone existing GitVerse mirror for incremental sync
+        env:
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+        run: |
+          rm -rf standby/public
+          AUTH_HEADER="Authorization: Basic $(printf 'opus_pampus:%s' "$GITVERSE_TOKEN" | base64 | tr -d '\n')"
+          git -c credential.helper= -c "http.https://gitverse.ru/.extraheader=$AUTH_HEADER" clone --depth 1 --branch main https://gitverse.ru/opus_pampus/avtoy-korea.git standby/public
+
+      - name: Rebuild static showcase and SEO bundle from Cloudflare Worker
+        run: node standby/scripts/migrate-to-ru.mjs
+
+      - name: Push incremental updates to GitVerse Pages
+        env:
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GITVERSE_USER: opus_pampus
+        run: node standby/scripts/push-gitverse.mjs

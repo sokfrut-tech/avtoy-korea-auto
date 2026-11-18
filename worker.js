@@ -1788,6 +1788,71 @@ async function resolveYandexVerification(env) {
  return /^[A-Za-z0-9_-]{8,64}$/.test(code) ? code : "";
 }
 
+async function computePublicCatalogDigest(env) {
+ const recordDigests = {};
+ if (env.REVIEWS) {
+  for (const prefix of ["car_approved:", "news_approved:", "approved:"]) {
+   const keys = [];
+   let cursor;
+   do {
+    const page = await env.REVIEWS.list({ prefix, ...(cursor ? { cursor } : {}) });
+    for (const k of page.keys) keys.push(k.name);
+    cursor = page.list_complete ? null : page.cursor;
+   } while (cursor);
+   keys.sort();
+   for (const keyName of keys) {
+    const raw = await env.REVIEWS.get(keyName);
+    if (raw) recordDigests[keyName] = (await sha256Hex(raw)).slice(0, 16);
+   }
+  }
+ }
+ const [maxBotUrl, yandexVerification] = await Promise.all([
+  resolveMaxBotUrl(env),
+  resolveYandexVerification(env)
+ ]);
+ const digest = await sha256Hex(JSON.stringify({ recordDigests, maxBotUrl, yandexVerification }));
+ return {
+  digest,
+  recordDigests,
+  maxBotUrl: maxBotUrl || null,
+  yandexVerification: yandexVerification || null
+ };
+}
+
+async function triggerGitHubMirrorSync(env, { reason = "catalog_mutation", force = false } = {}) {
+ const token = String((env && env.GITHUB_SYNC_TOKEN) || "").trim();
+ if (!token) return { ok: false, skipped: "no_token" };
+ const repo = String((env && env.GITHUB_SYNC_REPO) || "sokfrut-tech/avtoy-korea-auto").trim();
+ if (!force && env.REVIEWS) {
+  try {
+   const prev = Number((await env.REVIEWS.get("mirror_sync:last_dispatch")) || 0);
+   if (prev > 0 && Date.now() - prev < 45000) return { ok: true, debounced: true };
+  } catch {}
+ }
+ if (env.REVIEWS) {
+  try { await env.REVIEWS.put("mirror_sync:last_dispatch", String(Date.now())); } catch {}
+ }
+ try {
+  const res = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
+   method: "POST",
+   headers: {
+    "authorization": `Bearer ${token}`,
+    "accept": "application/vnd.github+json",
+    "content-type": "application/json",
+    "user-agent": "avtoy-korea-worker",
+    "x-github-api-version": "2022-11-28"
+   },
+   body: JSON.stringify({
+    event_type: "catalog-updated",
+    client_payload: { reason, ts: new Date().toISOString() }
+   })
+  });
+  return { ok: res.ok || res.status === 204, status: res.status };
+ } catch {
+  return { ok: false, status: 0 };
+ }
+}
+
 async function loadApprovedCarsForPublic(env) {
  if (!env.REVIEWS) return [];
  const cars = [];
@@ -2101,6 +2166,13 @@ async function handleWebAdminApi(request, url, env, adminIds) {
   return json({ ok: true, ...res });
  }
 
+ if (path === "/api/admin/sync-mirror" && request.method === "POST") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  const res = await triggerGitHubMirrorSync(env, { reason: "admin_web_manual", force: true });
+  await writeLog(env, session.adminId, "синхронизация зеркала РФ", "система", "gitverse", res.ok ? "запущена" : (res.skipped || String(res.status || "error")));
+  return json({ ok: Boolean(res.ok), ...res });
+ }
+
  const moveMatch = path.match(/^\/api\/admin\/items\/(news_[A-Za-z0-9_-]+|-?\d+_\d+)\/move$/);
  if (moveMatch && request.method === "POST") {
   if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
@@ -2277,8 +2349,29 @@ async function handleWebAdminApi(request, url, env, adminIds) {
 const ADMIN_PAGE_HTML = ADMIN_PRO_HTML;
 
 export default {
- async fetch(request, env) {
+ async fetch(request, rawEnv, ctx) {
   const url = new URL(request.url);
+  let publicCatalogMutated = false;
+  const hasMirrorToken = Boolean(rawEnv && String(rawEnv.GITHUB_SYNC_TOKEN || "").trim());
+  const env = (rawEnv && rawEnv.REVIEWS && hasMirrorToken)
+   ? {
+    ...rawEnv,
+    REVIEWS: {
+     get: (...a) => rawEnv.REVIEWS.get(...a),
+     list: (...a) => rawEnv.REVIEWS.list(...a),
+     put: (key, val, opts) => {
+      if (/^(?:car_approved:|news_approved:|approved:|site_config:)/.test(String(key))) publicCatalogMutated = true;
+      return opts !== undefined ? rawEnv.REVIEWS.put(key, val, opts) : rawEnv.REVIEWS.put(key, val);
+     },
+     delete: (key) => {
+      if (/^(?:car_approved:|news_approved:|approved:|site_config:)/.test(String(key))) publicCatalogMutated = true;
+      return rawEnv.REVIEWS.delete(key);
+     }
+    }
+   }
+   : rawEnv;
+
+  const runFetch = async () => {
   // Admins must be private Telegram user IDs (positive numbers), comma- or space-separated.
   // TELEGRAM_CHAT_ID remains as a legacy fallback for one private admin only.
   const adminIds = [...new Set(
@@ -2298,7 +2391,7 @@ export default {
     cleanupCatalog: () => runAdminCatalogCleanup(env, adminIds[0] || "max_admin", writeLog)
    });
   }
-  if (request.method === "OPTIONS" && (url.pathname === "/api/request" || url.pathname === "/api/cars" || url.pathname === "/api/reviews" || url.pathname === "/api/news" || url.pathname === "/api/public-config")) {
+  if (request.method === "OPTIONS" && (url.pathname === "/api/request" || url.pathname === "/api/cars" || url.pathname === "/api/reviews" || url.pathname === "/api/news" || url.pathname === "/api/public-config" || url.pathname === "/api/catalog-digest")) {
    return new Response(null, { status: 204, headers: resolveMirrorCorsHeaders(request, env) });
   }
 
@@ -2584,6 +2677,14 @@ export default {
       await writeLog(env, chatId, "установлена ссылка MAX", "настройки", "max_bot_url", rawUrl);
       await send(chatId, "✅ Ссылка на бота MAX сохранена! Все кнопки MAX на сайте теперь ведут на:\n" + rawUrl);
      }
+    } else if (/^\/syncru(?:@\w+)?$/i.test(text) && adminIds.includes(chatId)) {
+     const res = await triggerGitHubMirrorSync(env, { reason: "telegram_syncru", force: true });
+     await send(
+      chatId,
+      res.ok
+       ? "🔄 Запущено автоматическое облачное обновление российского зеркала GitVerse Pages! Свежие авто, новости, sitemap.xml и yandex-feed.xml появятся на сайте через 2–3 минуты."
+       : "⚠️ Не удалось запустить синхронизацию зеркала: " + (res.skipped || ("HTTP " + (res.status || 0)))
+     );
     } else if (text === "/panel" && adminIds.includes(chatId)) {
      await setAdminCommands(env, chatId).catch(() => {});
      await sendOrEditTelegramPanel(env, chatId, null, "home", { callTelegram, siteLabel, sha256Hex });
@@ -2729,8 +2830,16 @@ export default {
    return Response.json({ok:true,orderId,orderNumber,botLink:botUser?"https://t.me/"+botUser+"?start=order_"+bindToken:null,maxBotUrl},{headers});
   }
   if (request.method === "GET" && url.pathname === "/api/public-config") {
-   const maxBotUrl = (await resolveMaxBotUrl(env)) || null;
-   return Response.json({ maxBotUrl }, { headers: { "cache-control": "no-store", ...resolveMirrorCorsHeaders(request, env) } });
+   const [maxBotUrl, yandexVerification] = await Promise.all([
+    resolveMaxBotUrl(env),
+    resolveYandexVerification(env)
+   ]);
+   return Response.json({ maxBotUrl: maxBotUrl || null, yandexVerification: yandexVerification || null }, { headers: { "cache-control": "no-store", ...resolveMirrorCorsHeaders(request, env) } });
+  }
+  if (request.method === "GET" && url.pathname === "/api/catalog-digest") {
+   if (!env.REVIEWS) return Response.json({ error: "Catalogue storage unavailable" }, { status: 503, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+   const digestData = await computePublicCatalogDigest(env);
+   return Response.json(digestData, { headers: { "cache-control": "no-store", ...resolveMirrorCorsHeaders(request, env) } });
   }
   if (request.method === "GET" && url.pathname === "/api/cars") {
    if (!env.REVIEWS) return Response.json({error:"Catalogue storage unavailable"},{status:503,headers:{"cache-control":"no-store","x-content-type-options":"nosniff"}});
@@ -4457,5 +4566,15 @@ loadCars();
 </body>
 </html>`;
   return new Response(html,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"strict-origin-when-cross-origin"}});
+  };
+  try {
+   return await runFetch();
+  } finally {
+   if (publicCatalogMutated) {
+    const syncPromise = triggerGitHubMirrorSync(rawEnv, { reason: url.pathname }).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(syncPromise);
+    else await syncPromise;
+   }
+  }
  }
 };
