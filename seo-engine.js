@@ -121,7 +121,7 @@ export const SEO_FAQS = [
   }
 ];
 
-export function buildHomepageJsonLd({ baseUrl, cars = [], news = [] } = {}) {
+export function buildHomepageJsonLd({ baseUrl, cars = [], news = [], maxBotUrl = "" } = {}) {
   const cleanBase = normalizeBaseUrl(baseUrl);
   const useHtmlExt = !cleanBase.includes("workers.dev");
   const validCars = (Array.isArray(cars) ? cars : []).filter(c => c && c.id && !isPlaceholderCar(c)).slice(0, 25);
@@ -163,7 +163,7 @@ export function buildHomepageJsonLd({ baseUrl, cars = [], news = [] } = {}) {
       description: scrubHomepageText("Подбор, проверка и доставка автомобилей из Южной Кореи, Китая и ОАЭ под заказ под ключ по всей России."),
       currenciesAccepted: "RUB",
       areaServed: { "@type": "Country", name: "Россия" },
-      sameAs: ["https://t.me/avtoYkorea"]
+      sameAs: ["https://t.me/avtoYkorea", ...(/^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(String(maxBotUrl || "").trim()) ? [String(maxBotUrl).trim()] : [])]
     },
     {
       "@type": "ItemList",
@@ -396,7 +396,7 @@ footer{border-top:1px solid var(--line);margin-top:42px;padding:22px 0;color:var
       ${specsHtml}
       <div class="cta-col">
         <a class="btn" href="${escapeHtml(reqHref)}">Оставить заявку на этот автомобиль →</a>
-        <a class="btn btn-max" href="${escapeHtml(maxLink)}">M Написать в бот MAX</a>
+        <a class="btn btn-max" href="${escapeHtml(maxLink)}">${/^https:\/\/max\.ru\/join\//i.test(maxLink) ? "M Перейти в чат MAX" : "M Написать в бот MAX"}</a>
         <a class="btn btn-tg" href="https://t.me/avtoYkorea" target="_blank" rel="noopener">Канал Telegram (@avtoYkorea) ↗</a>
       </div>
     </div>
@@ -482,7 +482,7 @@ h1{margin:10px 0 16px;font-size:clamp(24px,3.2vw,34px);line-height:1.2}
     <div style="margin-top:18px;display:grid;gap:14px">${mediaHtml}</div>
     <div class="actions">
       <a class="btn" href="${escapeHtml(reqHref)}">Рассчитать автомобиль по актуальным условиям →</a>
-      <a class="btn btn-max" href="${escapeHtml(maxLink)}">M Написать в бот MAX</a>
+      <a class="btn btn-max" href="${escapeHtml(maxLink)}">${/^https:\/\/max\.ru\/join\//i.test(maxLink) ? "M Перейти в чат MAX" : "M Написать в бот MAX"}</a>
     </div>
   </article>
 </main>

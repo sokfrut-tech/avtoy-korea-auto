@@ -17,3 +17,6 @@ new_sqlite_classes = ["AlbumSerializer"]
 
 [assets]
 directory = "./public"
+
+[vars]
+MAX_BOT_URL = "https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ"

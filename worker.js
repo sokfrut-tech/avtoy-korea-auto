@@ -3013,7 +3013,7 @@ export default {
   const maxHrefAttr = resolvedMaxUrl ? `href="${resolvedMaxUrl}" target="_blank" rel="noopener"` : `href="#max-bot"`;
   const yandexVerifyMeta = resolvedYandexCode ? `\n<meta name="yandex-verification" content="${resolvedYandexCode}">` : "";
   const canonicalUrl = `${url.origin}/`;
-  const seoJsonLd = buildHomepageJsonLd({ baseUrl: url.origin, cars: ssrCars, news: ssrNews });
+  const seoJsonLd = buildHomepageJsonLd({ baseUrl: url.origin, cars: ssrCars, news: ssrNews, maxBotUrl: resolvedMaxUrl });
   const ssrCarsHtml = renderServerCatalogPreviewHtml(ssrCars, { useHtmlExt: false });
   const ssrFaqAndLinksHtml = renderFaqAndDirectoryHtml(ssrCars, ssrNews, { useHtmlExt: false });
   const html = `<!doctype html>
@@ -4532,17 +4532,22 @@ loadCars();
   function isMaxHref(u){return String(u||'').toLowerCase().indexOf('https://max.ru/')===0;}
   function applyMaxBotLinks(url){
     if(isMaxHref(url))activeMaxUrl=url;
+    var isJoin=String(activeMaxUrl||'').toLowerCase().indexOf('https://max.ru/join/')===0;
     document.querySelectorAll('[data-max-bot-link]').forEach(function(el){
       if(activeMaxUrl){
         el.href=activeMaxUrl;
         el.target='_blank';
         el.rel='noopener';
+        if(isJoin&&typeof NodeFilter!=='undefined'&&document.createTreeWalker){
+          var walk=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null);
+          var n;while((n=walk.nextNode())){n.nodeValue=n.nodeValue.replace(/Бот в MAX/g,'Чат в MAX').replace(/Бот подбора в MAX/g,'Чат подбора в MAX').replace(/Написать в бот MAX/g,'Перейти в чат MAX');}
+        }
       }
     });
   }
   document.querySelectorAll('[data-max-bot-link]').forEach(function(el){
     var initialHref=el.getAttribute('href')||'';
-    if(isMaxHref(initialHref))activeMaxUrl=initialHref;
+    if(isMaxHref(initialHref))applyMaxBotLinks(initialHref);
     el.addEventListener('click',function(e){
       if(activeMaxUrl)return;
       e.preventDefault();

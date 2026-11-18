@@ -93,7 +93,7 @@ async function downloadBuffer(url, maxBytes = MAX_MEDIA_BYTES, timeoutMs = 60_00
 }
 
 async function extractFrontendHtmlFromWorker({
-  maxBotUrl = process.env.MAX_BOT_URL || '',
+  maxBotUrl = process.env.MAX_BOT_URL || 'https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ',
   yandexVerification = process.env.YANDEX_VERIFICATION || '',
   workerApiOrigin = SOURCE_BASE.origin,
   mirrorBaseUrl = PUBLIC_MIRROR_URL,
@@ -125,7 +125,7 @@ async function extractFrontendHtmlFromWorker({
     : '';
   html = html.replaceAll('${canonicalUrl}', `${cleanMirror}/`);
   html = html.replaceAll('${yandexVerifyMeta}', yandexMeta);
-  html = html.replaceAll('${seoJsonLd}', () => buildHomepageJsonLd({ baseUrl: cleanMirror, cars, news }));
+  html = html.replaceAll('${seoJsonLd}', () => buildHomepageJsonLd({ baseUrl: cleanMirror, cars, news, maxBotUrl: validMax }));
   html = html.replaceAll('${ssrCarsHtml}', () => renderServerCatalogPreviewHtml(cars, { useHtmlExt: true }));
   html = html.replaceAll('${ssrFaqAndLinksHtml}', () => renderFaqAndDirectoryHtml(cars, news, { useHtmlExt: true }));
 
@@ -612,7 +612,7 @@ export async function rebuildLocalBundle() {
     cars: snap.cars,
     news: snap.news,
     updatedAt,
-    maxBotUrl: snap.maxBotUrl || '',
+    maxBotUrl: snap.maxBotUrl || process.env.MAX_BOT_URL || 'https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ',
     yandexVerification: snap.yandexVerification || '',
     mirrorBaseUrl: PUBLIC_MIRROR_URL
   });
