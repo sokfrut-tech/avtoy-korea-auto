@@ -2481,7 +2481,8 @@ test("catalogue page shows an explicit retry state when the car API request fail
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Повторить загрузку/);
-  assert.match(html, /Автомобили в продаже и под заказ/);
+  assert.match(html, /Автомобили под заказ/);
+  assert.doesNotMatch(html, /Автомобили в продаже/);
   assert.match(html, /Не удалось загрузить автомобили/);
 });
 

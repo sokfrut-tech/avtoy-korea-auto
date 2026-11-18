@@ -12,6 +12,8 @@ export function cleanCarDisplayCaption(raw) {
     .replace(/(?:^|\n)\s*\+\s*$/gm, "")
     .replace(/\s+,/g, ",")
     .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\s*в\s+наличии\s*\n+/i, "")
+    .replace(/^\s*в\s+наличии\s+/i, "")
     .trim();
   // Repair orphaned ". " list items left behind when keycap emojis (e.g. "2️⃣. ") were stripped
   let prevNum = 0;
@@ -63,12 +65,12 @@ export function parseVehicleCardData(car) {
   let titleLineIndex = 0;
   let promoBadge = "";
   if (lines.length > 1 && /^(?:встречайте(?:\s+новый)?|новинка|спецпредложение|в\s+наличии)$/i.test(lines[0])) {
-    if (/в\s+наличии/i.test(lines[0])) promoBadge = "В наличии";
+    if (/в\s+наличии/i.test(lines[0])) promoBadge = "Под заказ";
     titleLineIndex = 1;
   }
 
-  let rawTitle = (lines[titleLineIndex] || "").replace(/^в\s+наличии\s+(?:новый\s+)?/i, match => {
-    promoBadge = "В наличии";
+  let rawTitle = (lines[titleLineIndex] || "").replace(/^(?:в\s+наличии\s+(?:новый\s+)?|новый\s+(?=[A-Za-z]))/i, match => {
+    promoBadge = /новый/i.test(match) ? "Новый" : "Под заказ";
     return "";
   });
   rawTitle = rawTitle

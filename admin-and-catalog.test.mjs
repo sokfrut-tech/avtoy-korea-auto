@@ -43,6 +43,13 @@ test("catalog-formatter strips Telegram contact tails, parses price/specs, and d
     { type: "photo", url: "./media/car-13-abcdef123456.jpg" }
   ]);
   assert.equal(dedup.length, 2);
+
+  const inStockRaw = "В НАЛИЧИИ НОВЫЙ KIA SPORTAGE\nГод выпуска: 2026\nЦена под ключ до Москвы:\n4.050.000 ₽";
+  const inStockCleaned = cleanCarDisplayCaption(inStockRaw);
+  assert.doesNotMatch(inStockCleaned, /наличии/i);
+  const inStockParsed = parseVehicleCardData({ id: "car_sportage", caption: inStockRaw, mediaItems: [{ type: "photo", url: "/s.jpg" }] });
+  assert.equal(inStockParsed.title, "KIA SPORTAGE");
+  assert.doesNotMatch(inStockParsed.promoBadge, /наличии/i);
 });
 
 test("Admin Pro dashboard supports cleanup, cover photo reorder, photo delete, directText edit, and order CRM", async () => {
@@ -475,6 +482,9 @@ test("Yandex SEO engine serves robots.txt, sitemap.xml, yandex-feed.xml, car/new
     // 2. Homepage renders SSR preview, FAQ, Schema.org JSON-LD, yandex-verification meta, and zero /гарант/i
     const home = await (await worker.fetch(new Request("https://worker.test/"), baseEnv(kv))).text();
     assert.doesNotMatch(home, /гарант/i);
+    assert.match(home, /<h2>Автомобили под заказ<\/h2>/);
+    assert.doesNotMatch(home, /в продаже|в наличии/i);
+    assert.match(home, /schema\.org\/PreOrder/);
     assert.match(home, /<meta name="yandex-verification" content="abcd1234ef567890">/);
     assert.match(home, /application\/ld\+json/);
     assert.match(home, /Kia Sorento Prestige/);
@@ -492,6 +502,7 @@ test("Yandex SEO engine serves robots.txt, sitemap.xml, yandex-feed.xml, car/new
 
     const yml = await (await worker.fetch(new Request("https://worker.test/yandex-feed.xml"), baseEnv(kv))).text();
     assert.match(yml, /<yml_catalog/);
+    assert.match(yml, /available="false"/);
     assert.match(yml, /<price>4250000<\/price>/);
     assert.match(yml, /<vendor>Kia<\/vendor>/);
     assert.ok(!yml.includes("3482"));

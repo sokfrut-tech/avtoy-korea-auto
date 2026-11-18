@@ -3611,7 +3611,7 @@ body{background:radial-gradient(ellipse at 78% 0%,#16253b 0,transparent 40%),#07
 <section class="wrap section" id="about" style="padding-bottom:20px"><div class="eyebrow">AVTOY KOREA</div><h2>Автомобили из Кореи под ваш запрос</h2><p class="sub">Помогаем выбрать автомобиль, проверить его перед покупкой и организовать доставку. Сопровождаем на каждом этапе.</p></section>
 <section class="wrap section" id="cars" style="padding-top:20px">
   <div class="eyebrow">Наши автомобили</div>
-  <h2>Автомобили в продаже и под заказ</h2>
+  <h2>Автомобили под заказ</h2>
   <p class="sub">Проверенные автомобили из Южной Кореи, Китая и ОАЭ с расчётом стоимости под ключ.</p>
   <div class="catalog-toolbar" id="cars-toolbar" hidden>
     <div class="catalog-search-row">
@@ -4092,10 +4092,10 @@ loadCars();
     var lines=cleaned.split(NL).map(function(l){return l.replace(/\\u00a0/g,' ').trim();}).filter(Boolean);
     var ti=0,promo='';
     if(lines.length>1&&/^(?:встречайте(?:\\s+новый)?|новинка|в\\s+наличии)$/i.test(lines[0])){
-      if(/наличии/i.test(lines[0]))promo='В наличии';
+      if(/наличии/i.test(lines[0]))promo='Под заказ';
       ti=1;
     }
-    var title=(lines[ti]||'').replace(/^в\\s+наличии\\s+(?:новый\\s+)?/i,function(){promo='В наличии';return '';});
+    var title=(lines[ti]||'').replace(/^(?:в\\s+наличии\\s+(?:новый\\s+)?|новый\\s+(?=[A-Za-z]))/i,function(m){promo=/новый/i.test(m)?'Новый':'Под заказ';return '';});
     title=title.replace(/KG_MOBILITY_SSANGYONG/gi,'KG Mobility').replace(/\\bTIBOLI\\b/gi,'Tivoli').replace(/\\bShevrolet\\b/gi,'Chevrolet').replace(/_/g,' ').trim();
     var extraTrim='';
     if(lines[ti+1]&&lines[ti+1].indexOf(':')<0&&/^[A-Z0-9\\s-]{4,32}$/.test(lines[ti+1])&&!/цена|год|пробег/i.test(lines[ti+1]))extraTrim=lines[ti+1];

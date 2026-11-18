@@ -135,7 +135,7 @@ export function buildHomepageJsonLd({ baseUrl, cars = [], news = [] } = {}) {
     const offer = {
       "@type": "Offer",
       priceCurrency: "RUB",
-      availability: "https://schema.org/InStock",
+      availability: "https://schema.org/PreOrder",
       url: carUrl
     };
     if (meta.priceRub) offer.price = String(meta.priceRub);
@@ -293,7 +293,7 @@ export function renderCarLandingHtml(car, { baseUrl, isStaticMirror = false, max
           "@type": "Offer",
           priceCurrency: "RUB",
           ...(meta.priceRub ? { price: String(meta.priceRub) } : {}),
-          availability: "https://schema.org/InStock",
+          availability: "https://schema.org/PreOrder",
           url: canonical,
           seller: { "@type": "Organization", name: "AVTOY KOREA" }
         }
@@ -571,7 +571,7 @@ export function buildYandexMarketYml({ baseUrl, cars = [], useHtmlExt = false, u
     const desc = cleanCarDisplayCaption(car.caption || "").replace(/\s+/g, " ").trim().slice(0, 2500);
 
     offers.push([
-      `      <offer id="${escapeXml(offerId)}" available="true">`,
+      `      <offer id="${escapeXml(offerId)}" available="false">`,
       `        <url>${escapeXml(carAbsoluteUrl(cleanBase, car.id, useHtmlExt))}</url>`,
       `        <price>${meta.priceRub}</price>`,
       `        <currencyId>RUR</currencyId>`,
