@@ -1782,13 +1782,17 @@ async function resolveMaxBotUrl(env) {
  return /^https:\/\/max\.ru\/[A-Za-z0-9_./?=-]+$/.test(candidate) ? candidate : "";
 }
 
+function parseYandexCodes(raw) {
+ return [...new Set(String(raw || "").split(/[\s,]+/).map(s => s.trim()).filter(s => /^[A-Za-z0-9_-]{8,64}$/.test(s)))];
+}
+
 async function resolveYandexVerification(env) {
- let code = "";
+ let raw = "";
  if (env.REVIEWS) {
-  try { code = String((await env.REVIEWS.get("site_config:yandex_verification")) || "").trim(); } catch {}
+  try { raw = String((await env.REVIEWS.get("site_config:yandex_verification")) || "").trim(); } catch {}
  }
- if (!code) code = String(env.YANDEX_VERIFICATION || "").trim();
- return /^[A-Za-z0-9_-]{8,64}$/.test(code) ? code : "";
+ if (!raw) raw = String(env.YANDEX_VERIFICATION || "").trim();
+ return parseYandexCodes(raw).join(",");
 }
 
 async function computePublicCatalogDigest(env) {
@@ -2946,9 +2950,10 @@ export default {
   }
   const yandexFileMatch = url.pathname.match(/^\/yandex_([A-Za-z0-9_-]{8,64})\.html$/);
   if (request.method === "GET" && yandexFileMatch) {
-   const expectedCode = await resolveYandexVerification(env);
-   if (expectedCode && yandexFileMatch[1] === expectedCode) {
-    return new Response(`<html>\n    <head>\n        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">\n    </head>\n    <body>Verification: ${expectedCode}</body>\n</html>`, {
+   const allowedCodes = parseYandexCodes(await resolveYandexVerification(env));
+   if (allowedCodes.includes(yandexFileMatch[1])) {
+    const matchedCode = yandexFileMatch[1];
+    return new Response(`<html>\n    <head>\n        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">\n    </head>\n    <body>Verification: ${matchedCode}</body>\n</html>`, {
      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }
     });
    }
@@ -3011,7 +3016,7 @@ export default {
    loadApprovedNewsForPublic(env).catch(() => [])
   ]);
   const maxHrefAttr = resolvedMaxUrl ? `href="${resolvedMaxUrl}" target="_blank" rel="noopener"` : `href="#max-bot"`;
-  const yandexVerifyMeta = resolvedYandexCode ? `\n<meta name="yandex-verification" content="${resolvedYandexCode}">` : "";
+  const yandexVerifyMeta = parseYandexCodes(resolvedYandexCode).map(c => `\n<meta name="yandex-verification" content="${c}">`).join("");
   const canonicalUrl = `${url.origin}/`;
   const seoJsonLd = buildHomepageJsonLd({ baseUrl: url.origin, cars: ssrCars, news: ssrNews, maxBotUrl: resolvedMaxUrl });
   const ssrCarsHtml = renderServerCatalogPreviewHtml(ssrCars, { useHtmlExt: false });

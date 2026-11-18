@@ -92,9 +92,13 @@ async function downloadBuffer(url, maxBytes = MAX_MEDIA_BYTES, timeoutMs = 60_00
   return { buf, mime };
 }
 
+function parseYandexCodes(raw) {
+  return [...new Set(String(raw || '').split(/[\s,]+/).map(s => s.trim()).filter(s => /^[A-Za-z0-9_-]{8,64}$/.test(s)))];
+}
+
 async function extractFrontendHtmlFromWorker({
   maxBotUrl = process.env.MAX_BOT_URL || 'https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ',
-  yandexVerification = process.env.YANDEX_VERIFICATION || '2f2c5ca34475102a',
+  yandexVerification = process.env.YANDEX_VERIFICATION || '0a002fff1445e6c3,2f2c5ca34475102a',
   workerApiOrigin = SOURCE_BASE.origin,
   mirrorBaseUrl = PUBLIC_MIRROR_URL,
   cars = [],
@@ -120,9 +124,9 @@ async function extractFrontendHtmlFromWorker({
 
   // Inject Russian mirror SEO metadata, Schema.org JSON-LD, SSR car cards, and FAQ directory
   const cleanMirror = mirrorBaseUrl.replace(/\/+$/, '');
-  const yandexMeta = /^[A-Za-z0-9_-]{8,64}$/.test(String(yandexVerification || '').trim())
-    ? `\n<meta name="yandex-verification" content="${String(yandexVerification).trim()}">`
-    : '';
+  const yandexMeta = parseYandexCodes(yandexVerification)
+    .map(c => `\n<meta name="yandex-verification" content="${c}">`)
+    .join('');
   html = html.replaceAll('${canonicalUrl}', `${cleanMirror}/`);
   html = html.replaceAll('${yandexVerifyMeta}', yandexMeta);
   html = html.replaceAll('${seoJsonLd}', () => buildHomepageJsonLd({ baseUrl: cleanMirror, cars, news, maxBotUrl: validMax }));
@@ -238,7 +242,7 @@ export async function runMigration() {
   const catalogDigestPayload = digestRes && digestRes.ok ? await digestRes.json().catch(() => null) : null;
   const publicCfg = cfgRes && cfgRes.ok ? await cfgRes.json().catch(() => null) : null;
   const resolvedMaxBotUrl = String(publicCfg?.maxBotUrl || catalogDigestPayload?.maxBotUrl || process.env.MAX_BOT_URL || 'https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ').trim();
-  const resolvedYandexVerification = String(publicCfg?.yandexVerification || catalogDigestPayload?.yandexVerification || process.env.YANDEX_VERIFICATION || '2f2c5ca34475102a').trim();
+  const resolvedYandexVerification = String(publicCfg?.yandexVerification || catalogDigestPayload?.yandexVerification || process.env.YANDEX_VERIFICATION || '0a002fff1445e6c3,2f2c5ca34475102a').trim();
   const syncDigest = catalogDigestPayload?.digest ? sha256(Buffer.from(`${catalogDigestPayload.digest}:${codeDigest}`, 'utf8')) : '';
 
   const prevCars = Array.isArray(prevCarsJson?.cars) ? prevCarsJson.cars : [];
@@ -541,8 +545,7 @@ async function writeStaticSeoBundle({ cars = [], news = [], updatedAt, maxBotUrl
   await writeAndVerifyFile(path.join(PUBLIC_DIR, 'sitemap.xml'), Buffer.from(buildSitemapXml({ baseUrl: mirrorBaseUrl, cars, news, useHtmlExt: true, updatedAt }), 'utf8'));
   await writeAndVerifyFile(path.join(PUBLIC_DIR, 'yandex-feed.xml'), Buffer.from(buildYandexMarketYml({ baseUrl: mirrorBaseUrl, cars, useHtmlExt: true, updatedAt }), 'utf8'));
 
-  if (/^[A-Za-z0-9_-]{8,64}$/.test(String(yandexVerification || '').trim())) {
-    const cleanCode = String(yandexVerification).trim();
+  for (const cleanCode of parseYandexCodes(yandexVerification)) {
     const verifyHtml = `<html>\n    <head>\n        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">\n    </head>\n    <body>Verification: ${cleanCode}</body>\n</html>`;
     await writeAndVerifyFile(path.join(PUBLIC_DIR, `yandex_${cleanCode}.html`), Buffer.from(verifyHtml, 'utf8'));
   }
@@ -613,7 +616,7 @@ export async function rebuildLocalBundle() {
     news: snap.news,
     updatedAt,
     maxBotUrl: snap.maxBotUrl || process.env.MAX_BOT_URL || 'https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ',
-    yandexVerification: snap.yandexVerification || process.env.YANDEX_VERIFICATION || '2f2c5ca34475102a',
+    yandexVerification: snap.yandexVerification || process.env.YANDEX_VERIFICATION || '0a002fff1445e6c3,2f2c5ca34475102a',
     mirrorBaseUrl: PUBLIC_MIRROR_URL
   });
   return { cars: snap.cars.length, news: snap.news.length, reviews: snap.reviews.length };
