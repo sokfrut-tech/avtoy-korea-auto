@@ -29,29 +29,32 @@ function buildAuthArgs() {
 
 async function cleanupGitVerseArtifacts() {
   const token = String(process.env.GITVERSE_TOKEN || '').trim();
-  const repoSlug = String(process.env.GITVERSE_REPO || 'opus_pampus/avtoy-korea').trim();
+  const primarySlug = String(process.env.GITVERSE_REPO || 'opus_pampus/opus_pampus').trim();
+  const repoSlugs = [...new Set([primarySlug, 'opus_pampus/avtoy-korea'])];
   if (!token) return;
   const headers = {
     Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.gitverse.object+json;version=1'
   };
   try {
-    const res = await fetch(`https://api.gitverse.ru/repos/${repoSlug}/actions/artifacts`, { headers, signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) return;
-    const data = await res.json().catch(() => null);
-    const artifacts = Array.isArray(data?.artifacts) ? data.artifacts : [];
     let freedBytes = 0;
     let deletedCount = 0;
-    for (const art of artifacts) {
-      if (!art?.id) continue;
-      const delRes = await fetch(`https://api.gitverse.ru/repos/${repoSlug}/actions/artifacts/${art.id}`, {
-        method: 'DELETE',
-        headers,
-        signal: AbortSignal.timeout(15_000)
-      }).catch(() => null);
-      if (delRes && (delRes.ok || delRes.status === 204)) {
-        deletedCount++;
-        freedBytes += Number(art.size_in_bytes || 0);
+    for (const repoSlug of repoSlugs) {
+      const res = await fetch(`https://api.gitverse.ru/repos/${repoSlug}/actions/artifacts`, { headers, signal: AbortSignal.timeout(15_000) }).catch(() => null);
+      if (!res || !res.ok) continue;
+      const data = await res.json().catch(() => null);
+      const artifacts = Array.isArray(data?.artifacts) ? data.artifacts : [];
+      for (const art of artifacts) {
+        if (!art?.id) continue;
+        const delRes = await fetch(`https://api.gitverse.ru/repos/${repoSlug}/actions/artifacts/${art.id}`, {
+          method: 'DELETE',
+          headers,
+          signal: AbortSignal.timeout(15_000)
+        }).catch(() => null);
+        if (delRes && (delRes.ok || delRes.status === 204)) {
+          deletedCount++;
+          freedBytes += Number(art.size_in_bytes || 0);
+        }
       }
     }
     if (deletedCount > 0) {

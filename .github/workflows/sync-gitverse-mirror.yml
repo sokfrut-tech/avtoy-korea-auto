@@ -51,7 +51,11 @@ jobs:
           AUTH_HEADER="Authorization: Basic $(printf 'opus_pampus:%s' "$CLEAN_TOKEN" | base64 | tr -d '\r\n')"
           for attempt in 1 2 3; do
             rm -rf standby/public
-            if git -c credential.helper= -c "http.https://gitverse.ru/.extraheader=$AUTH_HEADER" clone --depth 1 --branch main https://gitverse.ru/opus_pampus/avtoy-korea.git standby/public; then
+            if git -c credential.helper= -c "http.https://gitverse.ru/.extraheader=$AUTH_HEADER" clone --depth 1 --branch main https://gitverse.ru/opus_pampus/opus_pampus.git standby/public; then
+              break
+            fi
+            if git -c credential.helper= -c "http.https://gitverse.ru/.extraheader=$AUTH_HEADER" clone --depth 1 https://gitverse.ru/opus_pampus/opus_pampus.git standby/public; then
+              git -C standby/public checkout -B main
               break
             fi
             echo "Clone attempt $attempt failed, retrying in 5s..."

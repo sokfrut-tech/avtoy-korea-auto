@@ -2948,7 +2948,7 @@ export default {
   if (request.method === "GET" && yandexFileMatch) {
    const expectedCode = await resolveYandexVerification(env);
    if (expectedCode && yandexFileMatch[1] === expectedCode) {
-    return new Response(`<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"></head><body>Verification: ${expectedCode}</body></html>`, {
+    return new Response(`<html>\n    <head>\n        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">\n    </head>\n    <body>Verification: ${expectedCode}</body>\n</html>`, {
      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }
     });
    }

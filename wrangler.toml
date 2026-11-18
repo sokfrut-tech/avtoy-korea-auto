@@ -20,3 +20,4 @@ directory = "./public"
 
 [vars]
 MAX_BOT_URL = "https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ"
+YANDEX_VERIFICATION = "2f2c5ca34475102a"

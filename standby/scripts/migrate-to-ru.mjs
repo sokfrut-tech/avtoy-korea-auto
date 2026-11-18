@@ -16,7 +16,7 @@ const STANDBY_DIR = path.resolve(SCRIPT_DIR, '..');
 const REPO_ROOT = path.resolve(STANDBY_DIR, '..');
 
 const SOURCE_BASE = new URL(process.env.SOURCE_WORKER_URL || 'https://avtoy-korea-auto.sokfrut.workers.dev/');
-const PUBLIC_MIRROR_URL = (process.env.PUBLIC_MIRROR_URL || 'https://opus-pampus.gitverse.site/avtoy-korea').replace(/\/+$/, '');
+const PUBLIC_MIRROR_URL = (process.env.PUBLIC_MIRROR_URL || 'https://opus-pampus.gitverse.site').replace(/\/+$/, '');
 const PUBLIC_DIR = path.join(STANDBY_DIR, 'public');
 const DATA_DIR = path.join(STANDBY_DIR, 'data');
 const MEDIA_DIR = path.join(PUBLIC_DIR, 'media');
@@ -94,7 +94,7 @@ async function downloadBuffer(url, maxBytes = MAX_MEDIA_BYTES, timeoutMs = 60_00
 
 async function extractFrontendHtmlFromWorker({
   maxBotUrl = process.env.MAX_BOT_URL || 'https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ',
-  yandexVerification = process.env.YANDEX_VERIFICATION || '',
+  yandexVerification = process.env.YANDEX_VERIFICATION || '2f2c5ca34475102a',
   workerApiOrigin = SOURCE_BASE.origin,
   mirrorBaseUrl = PUBLIC_MIRROR_URL,
   cars = [],
@@ -237,8 +237,8 @@ export async function runMigration() {
 
   const catalogDigestPayload = digestRes && digestRes.ok ? await digestRes.json().catch(() => null) : null;
   const publicCfg = cfgRes && cfgRes.ok ? await cfgRes.json().catch(() => null) : null;
-  const resolvedMaxBotUrl = String(publicCfg?.maxBotUrl || catalogDigestPayload?.maxBotUrl || process.env.MAX_BOT_URL || '').trim();
-  const resolvedYandexVerification = String(publicCfg?.yandexVerification || catalogDigestPayload?.yandexVerification || process.env.YANDEX_VERIFICATION || '').trim();
+  const resolvedMaxBotUrl = String(publicCfg?.maxBotUrl || catalogDigestPayload?.maxBotUrl || process.env.MAX_BOT_URL || 'https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ').trim();
+  const resolvedYandexVerification = String(publicCfg?.yandexVerification || catalogDigestPayload?.yandexVerification || process.env.YANDEX_VERIFICATION || '2f2c5ca34475102a').trim();
   const syncDigest = catalogDigestPayload?.digest ? sha256(Buffer.from(`${catalogDigestPayload.digest}:${codeDigest}`, 'utf8')) : '';
 
   const prevCars = Array.isArray(prevCarsJson?.cars) ? prevCarsJson.cars : [];
@@ -543,7 +543,7 @@ async function writeStaticSeoBundle({ cars = [], news = [], updatedAt, maxBotUrl
 
   if (/^[A-Za-z0-9_-]{8,64}$/.test(String(yandexVerification || '').trim())) {
     const cleanCode = String(yandexVerification).trim();
-    const verifyHtml = `<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"></head><body>Verification: ${cleanCode}</body></html>`;
+    const verifyHtml = `<html>\n    <head>\n        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">\n    </head>\n    <body>Verification: ${cleanCode}</body>\n</html>`;
     await writeAndVerifyFile(path.join(PUBLIC_DIR, `yandex_${cleanCode}.html`), Buffer.from(verifyHtml, 'utf8'));
   }
 
@@ -613,7 +613,7 @@ export async function rebuildLocalBundle() {
     news: snap.news,
     updatedAt,
     maxBotUrl: snap.maxBotUrl || process.env.MAX_BOT_URL || 'https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ',
-    yandexVerification: snap.yandexVerification || '',
+    yandexVerification: snap.yandexVerification || process.env.YANDEX_VERIFICATION || '2f2c5ca34475102a',
     mirrorBaseUrl: PUBLIC_MIRROR_URL
   });
   return { cars: snap.cars.length, news: snap.news.length, reviews: snap.reviews.length };
