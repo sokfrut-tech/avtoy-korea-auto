@@ -45,9 +45,11 @@ jobs:
       - name: Clone existing GitVerse mirror for incremental sync
         env:
           GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GIT_TERMINAL_PROMPT: "0"
         run: |
           rm -rf standby/public
-          AUTH_HEADER="Authorization: Basic $(printf 'opus_pampus:%s' "$GITVERSE_TOKEN" | base64 | tr -d '\n')"
+          CLEAN_TOKEN="$(printf '%s' "$GITVERSE_TOKEN" | tr -d '\r\n')"
+          AUTH_HEADER="Authorization: Basic $(printf 'opus_pampus:%s' "$CLEAN_TOKEN" | base64 | tr -d '\r\n')"
           git -c credential.helper= -c "http.https://gitverse.ru/.extraheader=$AUTH_HEADER" clone --depth 1 --branch main https://gitverse.ru/opus_pampus/avtoy-korea.git standby/public
 
       - name: Rebuild static showcase and SEO bundle from Cloudflare Worker

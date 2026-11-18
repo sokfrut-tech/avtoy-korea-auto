@@ -99,5 +99,5 @@ jobs:
           GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
         run: |
           if [ -n "$GH_DISPATCH_TOKEN" ]; then
-            printf '%s' "$GH_DISPATCH_TOKEN" | npx wrangler@4 secret put GITHUB_SYNC_TOKEN
+            printf '%s' "$GH_DISPATCH_TOKEN" | tr -d '\r\n' | npx wrangler@4 secret put GITHUB_SYNC_TOKEN
           fi
