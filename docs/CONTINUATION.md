@@ -277,3 +277,14 @@ The order callback parser used a double-escaped digit pattern in both `ord:` and
 - Source-level work is committed on the feature branch. Exact-head CI, runtime Telegram round-trip, real photo fidelity, and phone visual verification are pending. Do not merge or deploy without explicit owner approval.
 - Remaining media-quality investigation: trace actual published car image URL/rendition end-to-end; distinguish Telegram-compressed photo uploads from source images that were already blurry; implement duplicate suppression at the vehicle-post scope without deleting intentional repeated images across different vehicles; verify site renders full media and not an accidental thumbnail URL.
 - Next action: open PR and run full Worker/Cloudflare/Factory checks; inspect actual code/test results before any merge.
+
+
+## Bidirectional Telegram + MAX + Website car sync & deduplication — 2026-11-19
+- Branch: `main` (ready for commit/push and GitHub Actions deployment).
+- Changed files:
+  - `catalog-formatter.js`: added expanded `BRAND_ALIASES`, `normalizePostDedupText`, `buildCarContentKeys` (normalized text + `brand|model|year|mileage|priceRub` spec keys), and `isCarListingPost` (excludes customer questions, thank-you reviews, news, and media-less text).
+  - `max-worker-bridge.js`: added `extractMaxImageUrls`, two-step `crosspostCarToMax` (`POST /uploads?type=image` + `POST /messages` with `max_xpost:<carId>` idempotency), `/bindgroup`, `/synctg`, and MAX-to-Worker car post ingestion while silently ignoring non-admin chat chatter in bound public groups.
+  - `worker.js`: added automatic `AUTO_PUBLISH_CARS` pipeline on live `@avtoYkorea` posts (>= 2026-01-01) with album photo merging, KV content deduplication (`markCarContentSeen`, `clearCarContentSeen` on unpublish, `findDuplicateCarInKv`), `crosspostCarToTelegramChannel` (supports both Telegram `file_id` and MAX/URL binary uploads with anti-loop markers), `pubascar:` crossposting, `syncPublicTelegramChannel` (`https://t.me/s/avtoYkorea` + `?embed=1` scanner for third-party bridge posts + `/api/car-media/` `tgweb:`/`exturl:` handlers), `/synctg` & `/autosync` commands, `/api/admin/sync-telegram`, and Cloudflare Cron handler `scheduled`.
+  - `admin-suite.js` & `wrangler.toml`: added `#sync-tg-btn` and `#auto-publish-cars` controls in `/admin`; configured `[triggers] crons = ["*/15 * * * *"]`, `AUTO_PUBLISH_CARS = "1"`, and `TELEGRAM_CHANNEL_USERNAME = "avtoYkorea"`.
+  - `admin-and-catalog.test.mjs` & `max-worker-bridge.test.mjs`: expanded suite to `263` automated tests covering car-post filtering, content deduplication, bidirectional MAX/Telegram crossposting, `t.me/s/avtoYkorea` album scraping, `/api/car-media/` `tgweb:` serving, and `worker.scheduled`.
+- Security/privacy: zero secret values stored or printed; customer PII remains gated and non-admin messages in bound MAX public groups are ignored.

@@ -83,6 +83,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <a href="/" target="_blank" style="color:#93c5fd;text-decoration:none;font-weight:700;font-size:13px;margin-right:8px">Открыть сайт ↗</a>
       <button id="refresh-btn" class="sec" hidden>↻ Обновить</button>
+      <button id="sync-tg-btn" class="sec" hidden title="Проверить @avtoYkorea и подтянуть новые авто без дублей">📥 Синхронизировать @avtoYkorea</button>
       <button id="sync-mirror-btn" class="sec" hidden title="Запустить облачное обновление российского зеркала GitVerse Pages">🔄 Обновить зеркало РФ</button>
       <button id="cleanup-btn" class="sec" hidden title="Убрать дубли фото, хвосты контактов и перенести новости из отзывов">✨ Автоочистка каталога</button>
       <button id="logout" class="sec" hidden>Выйти</button>
@@ -121,6 +122,13 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--red);box
       <span style="font-weight:800;white-space:nowrap">🔍 Яндекс.Вебмастер (код):</span>
       <input id="yandex-verify-code" type="text" style="flex:1;min-width:220px;padding:9px 12px" placeholder="Код подтверждения из meta-тега yandex-verification (пример: a1b2c3d4e5f6)">
       <button type="button" id="save-yandex-btn" class="sec sm" style="padding:9px 14px">💾 Сохранить код Яндекса</button>
+    </div>
+
+    <div class="composer" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px">
+      <label for="auto-publish-cars" style="display:flex;gap:10px;align-items:center;cursor:pointer;font-weight:800">
+        <input id="auto-publish-cars" type="checkbox" style="width:18px;height:18px">
+        <span>⚡ Автопубликация новых авто (Telegram ↔ MAX ↔ Сайт) без дублей</span>
+      </label>
     </div>
 
     <div class="tabs">
@@ -162,6 +170,7 @@ const searchInput = document.getElementById('search');
 const filterSelect = document.getElementById('filter-select');
 const newsComposer = document.getElementById('news-composer');
 const refreshBtn = document.getElementById('refresh-btn');
+const syncTgBtn = document.getElementById('sync-tg-btn');
 const syncMirrorBtn = document.getElementById('sync-mirror-btn');
 const cleanupBtn = document.getElementById('cleanup-btn');
 const logoutBtn = document.getElementById('logout');
@@ -188,13 +197,13 @@ function notify(msg, isError = false) {
 
 function showLogin(msg = '') {
   loginSec.hidden = false; appSec.hidden = true;
-  refreshBtn.hidden = syncMirrorBtn.hidden = cleanupBtn.hidden = logoutBtn.hidden = true;
+  refreshBtn.hidden = syncTgBtn.hidden = syncMirrorBtn.hidden = cleanupBtn.hidden = logoutBtn.hidden = true;
   loginStatus.textContent = msg;
 }
 
 function showApp() {
   loginSec.hidden = true; appSec.hidden = false;
-  refreshBtn.hidden = syncMirrorBtn.hidden = cleanupBtn.hidden = logoutBtn.hidden = false;
+  refreshBtn.hidden = syncTgBtn.hidden = syncMirrorBtn.hidden = cleanupBtn.hidden = logoutBtn.hidden = false;
   loadAll();
 }
 
@@ -213,6 +222,8 @@ async function loadAll() {
     if (maxInput && document.activeElement !== maxInput) maxInput.value = data.maxBotUrl || '';
     const yandexInput = document.getElementById('yandex-verify-code');
     if (yandexInput && document.activeElement !== yandexInput) yandexInput.value = data.yandexVerification || '';
+    const autoPubEl = document.getElementById('auto-publish-cars');
+    if (autoPubEl) autoPubEl.checked = Boolean(data.autoPublishCars);
     render();
   } catch (e) {
     if (e.message === 'Unauthorized') return showLogin('Сессия истекла. Получите новый код командой /adminlink в боте.');
@@ -436,11 +447,32 @@ document.querySelectorAll('.tab').forEach(btn => {
 searchInput.oninput = render;
 filterSelect.onchange = render;
 refreshBtn.onclick = loadAll;
+syncTgBtn.onclick = async () => {
+  notify('Проверяем @avtoYkorea на новые автомобили…');
+  try {
+    const r = await api('/api/admin/sync-telegram', 'POST', {});
+    notify(
+      r.ok
+        ? ('Готово: добавлено новых авто — ' + (r.importedCars || 0) + ', пропущено дублей — ' + (r.skippedDuplicates || 0))
+        : ('Не удалось синхронизировать @avtoYkorea: ' + (r.reason || ('HTTP ' + (r.status || 0)))),
+      !r.ok
+    );
+    if (r.ok) loadAll();
+  } catch (e) { notify(e.message, true); }
+};
+
 syncMirrorBtn.onclick = async () => {
   try {
     const r = await api('/api/admin/sync-mirror', 'POST', {});
     notify(r.ok ? 'Облачное обновление зеркала РФ запущено (~2–3 мин)!' : ('Статус синхронизации: ' + (r.skipped || ('HTTP ' + (r.status || 0)))), !r.ok);
   } catch (e) { notify(e.message, true); }
+};
+
+document.getElementById('auto-publish-cars').onchange = async e => {
+  try {
+    const r = await api('/api/admin/settings', 'POST', { autoPublishCars: Boolean(e.target.checked) });
+    notify(r.autoPublishCars ? 'Автопубликация новых авто включена' : 'Автопубликация новых авто выключена');
+  } catch (err) { notify(err.message, true); }
 };
 
 document.getElementById('save-max-url-btn').onclick = async () => {

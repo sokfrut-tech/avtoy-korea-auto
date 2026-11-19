@@ -18,6 +18,11 @@ new_sqlite_classes = ["AlbumSerializer"]
 [assets]
 directory = "./public"
 
+[triggers]
+crons = ["*/15 * * * *"]
+
 [vars]
+AUTO_PUBLISH_CARS = "1"
+TELEGRAM_CHANNEL_USERNAME = "avtoYkorea"
 MAX_BOT_URL = "https://max.ru/join/9nTH-Ax7rp9Xn0eoOcdn5giDwEorT0qLNQlQEkv03PQ"
 YANDEX_VERIFICATION = "0a002fff1445e6c3,2f2c5ca34475102a"

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "./worker.js";
-import { cleanCarDisplayCaption, deduplicateMediaItems, isMarketNewsRecord, parseNewsCardData, parseVehicleCardData } from "./catalog-formatter.js";
+import { buildCarContentKeys, cleanCarDisplayCaption, deduplicateMediaItems, isCarListingPost, isMarketNewsRecord, normalizePostDedupText, parseNewsCardData, parseVehicleCardData } from "./catalog-formatter.js";
 
 function memoryKV() {
   const map = new Map();
@@ -614,4 +614,267 @@ test("car catalogue keeps 1024x768 photos and falls back to 640x360 galleries wh
   const encar = cars.find(c => c.id === "car_100_encar");
   assert.equal(che.mediaItems.length, 1);
   assert.equal(encar.mediaItems.length, 1);
+});
+
+test("normalizePostDedupText, buildCarContentKeys, and isCarListingPost classify and fingerprint vehicles accurately", () => {
+  const tgText = "Genesis GV80 2023\nПробег: 34 000 км\nЦена под ключ: 6.450.000 ₽\nhttps://t.me/avtoYkorea";
+  const maxCopyText = "[MAX] Genesis GV80 2023\nПробег: 34.000 км\nЦена под ключ: 6 450 000 ₽\n@avtoYkorea";
+  const tgKeys = buildCarContentKeys(tgText);
+  const maxKeys = buildCarContentKeys(maxCopyText);
+  assert.ok(tgKeys.some(k => maxKeys.includes(k)), "TG and MAX variants of the same car must share a dedup key");
+  assert.equal(normalizePostDedupText(tgText), normalizePostDedupText(maxCopyText));
+
+  assert.equal(isCarListingPost({ text: maxCopyText, hasMedia: true }), true);
+  assert.equal(isCarListingPost({ text: "LiXiang L7 Ultra\nГод выпуска: 2024\nПробег: 0 км", hasMedia: true }), true);
+  assert.equal(isCarListingPost({ text: tgText, hasMedia: false }), false);
+  assert.equal(isCarListingPost({ text: "Здравствуйте! Сколько стоит привезти Kia Sportage 2023?", hasMedia: true }), false);
+  assert.equal(isCarListingPost({ text: "Спасибо огромное за отличный Kia Sorento!", hasMedia: true }), false);
+  assert.equal(isCarListingPost({ text: "Повышение утильсбора и изменение таможенных пошлин с 1 мая", hasMedia: true }), false);
+});
+
+test("AUTO_PUBLISH_CARS auto-publishes channel car albums without duplicates, crossposts to MAX, and blocks pubascar duplicates", async () => {
+  const kv = memoryKV();
+  const env = {
+    ...baseEnv(kv),
+    AUTO_PUBLISH_CARS: "1",
+    TELEGRAM_CHANNEL_USERNAME: "avtoYkorea",
+    MAX_BOT_TOKEN: "max-tok",
+    MAX_PUBLIC_GROUP_ID: "888001"
+  };
+  const origFetch = globalThis.fetch;
+  const tgCalls = [];
+  const maxCalls = [];
+  globalThis.fetch = async (url, init) => {
+    const s = String(url);
+    if (s.includes("api.telegram.org/bot")) {
+      if (s.endsWith("/getFile")) {
+        return Response.json({ ok: true, result: { file_path: "photos/car.jpg" } });
+      }
+      tgCalls.push(JSON.parse(init.body));
+      return Response.json({ ok: true, result: { message_id: 999 } });
+    }
+    if (s.includes("api.telegram.org/file/bot")) {
+      return new Response(new Uint8Array([1, 2, 3, 4]), { status: 200, headers: { "content-type": "image/jpeg" } });
+    }
+    if (s.includes("platform-api2.max.ru/uploads")) {
+      return Response.json({ url: "https://upload.max.ru/u/1", token: "max-img-tok" });
+    }
+    if (s.startsWith("https://upload.max.ru/")) {
+      return Response.json({ token: "max-img-tok" });
+    }
+    if (s.includes("platform-api2.max.ru/messages")) {
+      maxCalls.push(JSON.parse(init.body));
+      return Response.json({ success: true });
+    }
+    return origFetch(url, init);
+  };
+
+  try {
+    const carCaption = "Kia K5 GT-Line\nГод выпуска: 2024\nПробег: 18 000 км\nЦена под ключ: 2.950.000 ₽";
+    // Part 1 of album arrives live from channel
+    const r1 = await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "wh-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        update_id: 9101,
+        channel_post: {
+          message_id: 800,
+          media_group_id: "alb-800",
+          date: 1790000000,
+          chat: { id: -100555, username: "avtoYkorea", type: "channel" },
+          caption: carCaption,
+          photo: [{ file_id: "ALB1", file_unique_id: "UALB1", width: 1280, height: 960 }]
+        }
+      })
+    }), env);
+    assert.equal(r1.status, 200);
+
+    // Part 2 merges into car_approved:car_100555_800
+    const r2 = await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "wh-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        update_id: 9102,
+        channel_post: {
+          message_id: 801,
+          media_group_id: "alb-800",
+          date: 1790000000,
+          chat: { id: -100555, username: "avtoYkorea", type: "channel" },
+          photo: [{ file_id: "ALB2", file_unique_id: "UALB2", width: 1280, height: 960 }]
+        }
+      })
+    }), env);
+    assert.equal(r2.status, 200);
+
+    const saved = JSON.parse(await kv.get("car_approved:car_100555_800"));
+    assert.ok(saved, "car should be auto-published immediately");
+    assert.deepEqual(saved.photos.map(p => p.file_id), ["ALB1", "ALB2"]);
+    assert.equal(maxCalls.length, 1, "single MAX crosspost emitted");
+
+    // Duplicate post with another message_id (805) and slight formatting variance is skipped
+    await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "wh-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        update_id: 9103,
+        channel_post: {
+          message_id: 805,
+          date: 1790000100,
+          chat: { id: -100555, username: "avtoYkorea", type: "channel" },
+          caption: "[MAX] Kia K5 GT-Line\nГод выпуска: 2024\nПробег: 18.000 км\nЦена под ключ: 2 950 000 ₽",
+          photo: [{ file_id: "ALB_DUP", file_unique_id: "UALB_DUP", width: 1280, height: 960 }]
+        }
+      })
+    }), env);
+    assert.equal(await kv.get("car_approved:car_100555_805"), null, "duplicate car must not be published");
+    assert.equal(maxCalls.length, 1, "duplicate must not bounce back to MAX");
+
+    // Duplicate manual upload via pubascar: is also rejected
+    await kv.put("pending:111111111_777", JSON.stringify({ id: "111111111_777", kind: "text", text: carCaption, photos: [{ file_id: "MANUAL1" }] }));
+    await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "wh-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        callback_query: {
+          id: "cb-dup",
+          from: { id: 111111111 },
+          message: { message_id: 950, chat: { id: 111111111, type: "private" } },
+          data: "pubascar:111111111_777"
+        }
+      })
+    }), env);
+    assert.equal(await kv.get("car_approved:car_111111111_777"), null);
+    assert.ok(tgCalls.some(c => /дубль пропущен/i.test(c.text || "")));
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("/api/admin/sync-telegram imports new cars from t.me/s/avtoYkorea, skips duplicates, and serves tgweb photos via /api/car-media", async () => {
+  const kv = memoryKV();
+  await kv.put("car_approved:car_900000_111", JSON.stringify({
+    id: "car_900000_111",
+    caption: "Hyundai Santa Fe 2023\nПробег: 25 000 км\nЦена под ключ: 3.600.000 ₽",
+    photos: [{ file_id: "EXISTING_SF" }],
+    publishedAt: "2026-11-18T10:00:00Z"
+  }));
+  const env = { ...baseEnv(kv), TELEGRAM_CHANNEL_USERNAME: "avtoYkorea" };
+  const channelHtml = [
+    '<div class="tgme_widget_message_wrap"><div class="tgme_widget_message" data-post="avtoYkorea/3601">',
+    '<div class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn4.telesco.pe/file/p1.jpg\')"></div>',
+    '<div class="tgme_widget_message_text js-message_text" dir="auto">Kia Carnival<br/><i class="emoji"><b>➖</b></i>Год выпуска: 2023<br/><i class="emoji"><b>➖</b></i>Пробег: 45 000 км<br/>Цена под ключ:<br/>3.850.000 ₽</div>',
+    '<time datetime="2026-11-19T09:00:00+00:00"></time></div></div>',
+    '<div class="tgme_widget_message_wrap"><div class="tgme_widget_message" data-post="avtoYkorea/3602">',
+    '<div class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn4.telesco.pe/file/n1.jpg\')"></div>',
+    '<div class="tgme_widget_message_text js-message_text" dir="auto">Повышение утильсбора и таможенные пошлины с мая</div>',
+    '<time datetime="2026-11-19T09:05:00+00:00"></time></div></div>',
+    '<div class="tgme_widget_message_wrap"><div class="tgme_widget_message" data-post="avtoYkorea/3603">',
+    '<div class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn4.telesco.pe/file/d1.jpg\')"></div>',
+    '<div class="tgme_widget_message_text js-message_text" dir="auto">Hyundai Santa Fe 2023<br/>Пробег: 25.000 км<br/>Цена под ключ: 3 600 000 ₽</div>',
+    '<time datetime="2026-11-19T09:10:00+00:00"></time></div></div>'
+  ].join("");
+  const embedHtml = '<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn4.telesco.pe/file/p1.jpg\')"></a><a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn4.telesco.pe/file/p2.jpg\')"></a>';
+
+  const origFetch = globalThis.fetch;
+  const tgCalls = [];
+  globalThis.fetch = async (url, init) => {
+    const s = String(url);
+    if (s === "https://t.me/s/avtoYkorea") return new Response(channelHtml, { status: 200 });
+    if (s === "https://t.me/avtoYkorea/3601?embed=1") return new Response(embedHtml, { status: 200 });
+    if (s === "https://cdn4.telesco.pe/file/p1.jpg") return new Response(new Uint8Array([9, 8, 7]), { status: 200, headers: { "content-type": "image/jpeg" } });
+    if (s.includes("api.telegram.org")) {
+      tgCalls.push(JSON.parse(init.body));
+      return Response.json({ ok: true, result: {} });
+    }
+    return origFetch(url, init);
+  };
+
+  try {
+    await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "wh-sec", "content-type": "application/json" },
+      body: JSON.stringify({ message: { chat: { id: 111111111, type: "private" }, from: { id: 111111111 }, text: "/adminlink" } })
+    }), env);
+    const code = tgCalls[0].text.match(/Код входа: (\d{8})/)[1];
+    const loginRes = await worker.fetch(new Request("https://worker.test/api/admin/login", {
+      method: "POST",
+      headers: { origin: "https://worker.test", "content-type": "application/json" },
+      body: JSON.stringify({ code })
+    }), env);
+    const cookie = loginRes.headers.get("set-cookie").split(";")[0];
+
+    const syncRes = await worker.fetch(new Request("https://worker.test/api/admin/sync-telegram", {
+      method: "POST",
+      headers: { cookie, origin: "https://worker.test", "content-type": "application/json" },
+      body: "{}"
+    }), env);
+    assert.equal(syncRes.status, 200);
+    const syncJson = await syncRes.json();
+    assert.equal(syncJson.importedCars, 1);
+    assert.equal(syncJson.skippedDuplicates, 1);
+
+    const imported = JSON.parse(await kv.get("car_approved:car_1002326996766_3601"));
+    assert.ok(imported);
+    assert.equal(imported.photos.length, 2);
+    assert.equal(imported.photos[0].file_id, "tgweb:avtoYkorea/3601/0");
+    assert.equal(await kv.get("car_approved:car_1002326996766_3602"), null);
+    assert.equal(await kv.get("car_approved:car_1002326996766_3603"), null);
+
+    const mediaRes = await worker.fetch(new Request("https://worker.test/api/car-media/car_1002326996766_3601/photo/0"), env);
+    assert.equal(mediaRes.status, 200);
+    assert.deepEqual(new Uint8Array(await mediaRes.arrayBuffer()), new Uint8Array([9, 8, 7]));
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("worker.scheduled imports new t.me/s/avtoYkorea cars once, triggers mirror dispatch, and skips on rerun", async () => {
+  const kv = memoryKV();
+  const env = {
+    ...baseEnv(kv),
+    AUTO_PUBLISH_CARS: "1",
+    TELEGRAM_CHANNEL_USERNAME: "avtoYkorea",
+    GITHUB_SYNC_TOKEN: "gh-sync-tok",
+    GITHUB_SYNC_REPO: "sokfrut-tech/avtoy-korea-auto"
+  };
+  const channelHtml = [
+    '<div class="tgme_widget_message_wrap"><div class="tgme_widget_message" data-post="avtoYkorea/3610">',
+    '<div class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn4.telesco.pe/file/cron1.jpg\')"></div>',
+    '<div class="tgme_widget_message_text js-message_text" dir="auto">Genesis GV80<br/>Год выпуска: 2024<br/>Пробег: 18 000 км<br/>Цена под ключ: 6.450.000 ₽</div>',
+    '<time datetime="2026-11-19T12:00:00+00:00"></time></div></div>'
+  ].join("");
+  const embedHtml = '<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn4.telesco.pe/file/cron1.jpg\')"></a>';
+
+  const origFetch = globalThis.fetch;
+  const dispatches = [];
+  globalThis.fetch = async (url, init) => {
+    const s = String(url);
+    if (s === "https://t.me/s/avtoYkorea") return new Response(channelHtml, { status: 200 });
+    if (s === "https://t.me/avtoYkorea/3610?embed=1") return new Response(embedHtml, { status: 200 });
+    if (s === "https://api.github.com/repos/sokfrut-tech/avtoy-korea-auto/dispatches") {
+      dispatches.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    }
+    return origFetch(url, init);
+  };
+
+  try {
+    const pending1 = [];
+    await worker.scheduled({}, env, { waitUntil(p) { pending1.push(p); } });
+    await Promise.all(pending1);
+
+    const saved = JSON.parse(await kv.get("car_approved:car_1002326996766_3610"));
+    assert.ok(saved);
+    assert.match(saved.caption, /Genesis GV80/i);
+    assert.equal(dispatches.length, 1);
+    assert.equal(dispatches[0].event_type, "catalog-updated");
+    assert.equal(dispatches[0].client_payload.reason, "cron_sync_tg");
+
+    const pending2 = [];
+    await worker.scheduled({}, env, { waitUntil(p) { pending2.push(p); } });
+    await Promise.all(pending2);
+    assert.equal(dispatches.length, 1);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
 });

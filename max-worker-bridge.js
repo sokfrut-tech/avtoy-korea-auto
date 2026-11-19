@@ -1,8 +1,43 @@
 // Dual-channel MAX messenger integration for AVTOY KOREA Cloudflare Worker.
 // Keeps customer PII strictly inside private admin dialogs (never in group chats).
+import { cleanCarDisplayCaption, isCarListingPost } from "./catalog-formatter.js";
 
 export const MAX_API_BASE = "https://platform-api2.max.ru";
 export const MAX_TELEGRAM_BOT_VIDEO_BYTES = 20 * 1024 * 1024;
+
+function isSafeMaxCdnUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || "").trim());
+    if (parsed.protocol !== "https:") return false;
+    const h = parsed.hostname.toLowerCase();
+    return (
+      h === "max.ru" || h.endsWith(".max.ru") ||
+      h === "mycdn.me" || h.endsWith(".mycdn.me") ||
+      h === "userapi.com" || h.endsWith(".userapi.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function extractMaxImageUrls(message) {
+  const rawList = [
+    ...(Array.isArray(message?.attachments) ? message.attachments : []),
+    ...(Array.isArray(message?.body?.attachments) ? message.body.attachments : [])
+  ];
+  const seen = new Set();
+  const urls = [];
+  for (const item of rawList) {
+    const kind = String(item?.type || "").toLowerCase();
+    if (kind !== "image" && kind !== "photo") continue;
+    const url = String(item?.payload?.url || "").trim();
+    if (!url || seen.has(url) || !isSafeMaxCdnUrl(url)) continue;
+    seen.add(url);
+    urls.push(url);
+    if (urls.length >= 10) break;
+  }
+  return urls;
+}
 
 function parsePositiveIds(raw) {
   return [...new Set(
@@ -57,6 +92,100 @@ export async function callMaxApi(env, query, text, fetchImpl = fetch) {
 
 export function getMaxAdminIds(env) {
   return parsePositiveIds(env.MAX_ADMIN_IDS || env.MAX_OPERATOR_USER_IDS || "");
+}
+
+export async function crosspostCarToMax(env, car, options = {}) {
+  const token = String(env.MAX_BOT_TOKEN || "").trim();
+  if (!token || !car || !car.id) return { ok: false, reason: "max_not_configured" };
+
+  const kvGroupId = env.REVIEWS
+    ? String((await env.REVIEWS.get("site_config:max_public_group_id").catch(() => "")) || "").trim()
+    : "";
+  const targetChatId = kvGroupId || String(env.MAX_PUBLIC_GROUP_ID || env.MAX_OPERATOR_CHAT_ID || "").trim();
+  if (!/^-?\d{1,24}$/.test(targetChatId) || targetChatId === "0") {
+    return { ok: false, reason: "max_group_not_configured" };
+  }
+
+  if (env.REVIEWS && await env.REVIEWS.get("max_xpost:" + car.id)) {
+    return { ok: true, alreadySent: true };
+  }
+
+  const fetchImpl = options.fetchImpl || fetch;
+  const loadPhotoBytes = typeof options.loadPhotoBytes === "function" ? options.loadPhotoBytes : null;
+  const photoItems = Array.isArray(car.photos) && car.photos.length
+    ? car.photos.slice(0, 10)
+    : (car.fileId && car.mediaType !== "video" ? [{ file_id: car.fileId }] : []);
+
+  const attachments = [];
+  if (loadPhotoBytes && photoItems.length) {
+    for (let i = 0; i < photoItems.length; i++) {
+      try {
+        const loaded = await loadPhotoBytes(photoItems[i], i);
+        if (!loaded || !loaded.bytes) continue;
+        const upUrlResp = await fetchImpl(`${MAX_API_BASE}/uploads?type=image`, {
+          method: "POST",
+          headers: { Authorization: token }
+        });
+        if (!upUrlResp.ok) continue;
+        const upUrlData = await upUrlResp.json().catch(() => ({}));
+        if (!upUrlData || !upUrlData.url) continue;
+
+        const form = new FormData();
+        form.append(
+          "data",
+          new Blob([loaded.bytes], { type: loaded.mimeType || "image/jpeg" }),
+          loaded.fileName || `car-${i + 1}.jpg`
+        );
+        const binResp = await fetchImpl(upUrlData.url, { method: "POST", body: form });
+        if (!binResp.ok) continue;
+        const binData = await binResp.json().catch(() => ({}));
+        const photoMapToken = binData?.photos && typeof binData.photos === "object"
+          ? Object.values(binData.photos).find(v => v && v.token)?.token
+          : null;
+        const imgToken = upUrlData.token || binData?.token || photoMapToken || null;
+        if (imgToken) {
+          attachments.push({ type: "image", payload: { token: String(imgToken) } });
+        }
+      } catch {}
+    }
+  }
+
+  const cleanedText = cleanCarDisplayCaption(car.caption || "").slice(0, 3800);
+  const text = cleanedText || (attachments.length ? "Автомобиль под заказ AVTOY KOREA" : "");
+  if (!text) return { ok: false, reason: "empty_text" };
+
+  try {
+    const response = await fetchImpl(`${MAX_API_BASE}/messages?chat_id=${encodeURIComponent(targetChatId)}`, {
+      method: "POST",
+      headers: {
+        Authorization: token,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        text,
+        ...(attachments.length ? { attachments } : {}),
+        notify: true
+      })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.ok && body?.success !== false) {
+      if (env.REVIEWS) {
+        await env.REVIEWS.put(
+          "max_xpost:" + car.id,
+          JSON.stringify({
+            chatId: targetChatId,
+            sentAt: new Date().toISOString(),
+            attachmentCount: attachments.length
+          }),
+          { expirationTtl: 7776000 }
+        );
+      }
+      return { ok: true, chatId: targetChatId, attachmentCount: attachments.length };
+    }
+    return { ok: false, status: response.status, reason: "max_rejected" };
+  } catch {
+    return { ok: false, reason: "max_network_error" };
+  }
 }
 
 export async function deliverOrderToMax(env, order, f, idem, saveIdem, fetchImpl = fetch) {
@@ -134,6 +263,8 @@ const MAX_ADMIN_HELP = [
   "",
   "Команды администратора:",
   "• /adminlink — войти в веб-панель управления сайтом в 1 клик",
+  "• /synctg — проверить @avtoYkorea и подтянуть новые авто без дублей",
+  "• /bindgroup — (отправить внутри группы MAX) привязать группу для автосинхронизации",
   "• /news <текст> — опубликовать новость на сайт",
   "• /setmax <https://max.ru/...> — привязать ссылку на этого бота к кнопкам MAX на сайте",
   "• /site (или !site) — список опубликованных авто, новостей и отзывов",
@@ -147,7 +278,7 @@ const MAX_ADMIN_HELP = [
 ].join("\n");
 
 export async function handleMaxBotWebhook(request, env, helpers = {}) {
-  const { callTelegram, telegramAdminIds = [], unpublishById, issueAdminMagicLink, cleanupCatalog, fetchImpl = fetch } = helpers;
+  const { callTelegram, telegramAdminIds = [], unpublishById, issueAdminMagicLink, cleanupCatalog, ingestMaxCarPost, syncTelegramChannel, fetchImpl = fetch } = helpers;
   const expectedSecret = String(env.MAX_WEBHOOK_SECRET || "").trim();
   const suppliedSecret = request.headers.get("x-max-bot-api-secret") || "";
   if (!expectedSecret || !safeSecretEqual(suppliedSecret, expectedSecret)) {
@@ -207,16 +338,44 @@ export async function handleMaxBotWebhook(request, env, helpers = {}) {
   const maxAdmins = getMaxAdminIds(env);
   const isMaxAdmin = /^\d+$/.test(senderId) && maxAdmins.includes(senderId);
   const configuredGroupChat = String(env.MAX_OPERATOR_CHAT_ID || "").trim();
+  const kvPublicGroup = env.REVIEWS
+    ? String((await env.REVIEWS.get("site_config:max_public_group_id").catch(() => "")) || "").trim()
+    : "";
+  const publicGroupChat = kvPublicGroup || String(env.MAX_PUBLIC_GROUP_ID || "").trim();
+  const imageUrls = extractMaxImageUrls(message);
 
   const replyToDialog = bodyText =>
     chatId
       ? callMaxApi(env, `chat_id=${encodeURIComponent(chatId)}`, bodyText, fetchImpl)
       : callMaxApi(env, `user_id=${encodeURIComponent(senderId)}`, bodyText, fetchImpl);
 
-  // 1. Group chat handling: strictly only the configured operator group and allowlisted admins; zero PII.
+  // 1. Group chat handling: operator group OR bound public group; strictly allowlisted admins, zero PII.
   if (chatType === "chat") {
-    if (!configuredGroupChat || chatId !== configuredGroupChat || !isMaxAdmin) {
+    if (isMaxAdmin && /^[!/]bindgroup$/i.test(text) && env.REVIEWS && /^-?\d{1,24}$/.test(chatId) && chatId !== "0") {
+      await env.REVIEWS.put("site_config:max_public_group_id", chatId);
+      await callMaxApi(env, `chat_id=${encodeURIComponent(chatId)}`, "✅ Группа MAX привязана для двусторонней синхронизации автомобилей с сайтом и @avtoYkorea!", fetchImpl);
+      return Response.json({ ok: true, command: "bindgroup", chatId });
+    }
+
+    const isPublicGroup = Boolean(publicGroupChat && chatId === publicGroupChat);
+    const isOperatorGroup = Boolean(configuredGroupChat && chatId === configuredGroupChat);
+    if (!isPublicGroup && (!isOperatorGroup || !isMaxAdmin)) {
       return Response.json({ ok: false, error: "Forbidden group or sender" }, { status: 403 });
+    }
+    if (!isMaxAdmin) {
+      // Customers chatting in the bound public group must be ignored silently without leaking errors or forwarding group spam.
+      return Response.json({ ok: true, ignored: true });
+    }
+    if (imageUrls.length > 0 && isCarListingPost({ text, hasMedia: true }) && typeof ingestMaxCarPost === "function") {
+      const carSync = await ingestMaxCarPost({
+        messageId: String(message?.body?.mid || message?.mid || Date.now()),
+        chatId,
+        senderId,
+        text,
+        imageUrls,
+        fetchImpl
+      });
+      return Response.json({ ok: true, carSync });
     }
     if (/^[!/]help$/i.test(text)) {
       await callMaxApi(env, `chat_id=${encodeURIComponent(chatId)}`, "Команды группы AVTOY KOREA: !help — справка; !site — статистика каталога; !status <ID> — статус заявки. Контакты клиентов доступны только в личном чате с ботом.", fetchImpl);
@@ -379,6 +538,38 @@ export async function handleMaxBotWebhook(request, env, helpers = {}) {
       const res = await callMaxApi(env, `user_id=${encodeURIComponent(replyMatch[1])}`, replyMatch[2], fetchImpl);
       await replyToDialog(res.ok ? "✅ Ответ отправлен клиенту в MAX." : "❌ Не удалось отправить сообщение клиенту.");
       return Response.json({ ok: true, command: "replymax" });
+    }
+
+    if (/^[!/]synctg$/i.test(text) && typeof syncTelegramChannel === "function") {
+      const res = await syncTelegramChannel();
+      await replyToDialog(
+        res?.ok
+          ? `🔄 Синхронизация @avtoYkorea завершена.\n🚘 Новых авто: ${res.importedCars || 0}\n⏭ Дублей пропущено: ${res.skippedDuplicates || 0}`
+          : "❌ Не удалось прочитать @avtoYkorea."
+      );
+      return Response.json({ ok: true, command: "synctg", result: res });
+    }
+
+    if (!/^[!/]/.test(text) && imageUrls.length > 0 && isCarListingPost({ text, hasMedia: true }) && typeof ingestMaxCarPost === "function") {
+      const carSync = await ingestMaxCarPost({
+        messageId: String(message?.body?.mid || message?.mid || Date.now()),
+        chatId: chatId || senderId,
+        senderId,
+        text,
+        imageUrls,
+        fetchImpl
+      });
+      if (carSync?.skippedDuplicate) {
+        await replyToDialog(`⏭ Такой автомобиль уже есть на сайте (${carSync.existingId}) — дубль пропущен.`);
+      } else if (carSync?.ok) {
+        await replyToDialog(
+          `✅ Автомобиль опубликован на сайте (${carSync.id})` +
+          (carSync.telegramCrossposted ? " и отправлен в @avtoYkorea!" : "!")
+        );
+      } else {
+        await replyToDialog("⚠️ Не удалось сохранить автомобиль.");
+      }
+      return Response.json({ ok: true, carSync });
     }
 
     await replyToDialog("Команда не распознана. Отправьте /help для списка команд администратора.");

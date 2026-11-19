@@ -1,6 +1,6 @@
 import { mergeOrderedMediaItems, orderedMediaFromRecord } from "./media-order.js";
-import { MAX_TELEGRAM_BOT_VIDEO_BYTES, deliverOrderToMax, handleMaxBotWebhook, resolveMirrorCorsHeaders } from "./max-worker-bridge.js";
-import { cleanCarDisplayCaption, isMarketNewsRecord } from "./catalog-formatter.js";
+import { MAX_TELEGRAM_BOT_VIDEO_BYTES, crosspostCarToMax, deliverOrderToMax, handleMaxBotWebhook, resolveMirrorCorsHeaders } from "./max-worker-bridge.js";
+import { buildCarContentKeys, cleanCarDisplayCaption, isCarListingPost, isMarketNewsRecord } from "./catalog-formatter.js";
 import { ADMIN_PRO_CSP, ADMIN_PRO_HTML, enrichAdminItem, runAdminCatalogCleanup, sendOrEditTelegramPanel } from "./admin-suite.js";
 import { buildHomepageJsonLd, buildRobotsTxt, buildSitemapXml, buildYandexMarketYml, renderCarLandingHtml, renderFaqAndDirectoryHtml, renderNewsLandingHtml, renderServerCatalogPreviewHtml } from "./seo-engine.js";
 
@@ -176,6 +176,9 @@ async function setAdminCommands(env, adminId) {
  await callTelegram(env, "setMyCommands", {
   commands: [
    { command: "panel", description: "Центр управления (авто, новости, отзывы, заявки)" },
+   { command: "synctg", description: "Проверить @avtoYkorea и подтянуть новые авто" },
+   { command: "syncru", description: "Обновить российское зеркало GitVerse Pages" },
+   { command: "autosync", description: "Автопубликация новых авто: /autosync on|off" },
    { command: "news", description: "Опубликовать новость: /news текст" },
    { command: "setmax", description: "Указать ссылку на бота MAX: /setmax https://max.ru/..." },
    { command: "setyandex", description: "Подтвердить Яндекс Вебмастер: /setyandex код" },
@@ -667,8 +670,8 @@ async function handleForwardedGroupPostSerialized(msg, env, adminIds) {
 
 // Channel album parts can arrive as parallel webhook requests too. Serialize them
 // by media_group_id so every photo is merged before the next part reads/writes KV.
-async function stageChannelPostSerialized(post, env, adminIds) {
- if (!post.media_group_id || !env.ALBUM_SERIALIZER) return stageChannelPost(post, env, adminIds);
+async function stageChannelPostSerialized(post, env, adminIds, ctx = null) {
+ if (!post.media_group_id || !env.ALBUM_SERIALIZER) return stageChannelPost(post, env, adminIds, ctx);
  const albumKey = "channel-album:" + String(post.chat && post.chat.id || "") + "_" + String(post.media_group_id);
  const stub = env.ALBUM_SERIALIZER.get(env.ALBUM_SERIALIZER.idFromName(albumKey));
  const response = await stub.fetch("https://album.internal/process", {
@@ -676,26 +679,45 @@ async function stageChannelPostSerialized(post, env, adminIds) {
   body: JSON.stringify({ type: "channel", msg: post, adminIds })
  });
  if (!response.ok) throw new Error("Channel album serializer failed: " + response.status);
- return (await response.json()).handled === true;
+ return await response.json();
 }
 
 export class AlbumSerializer {
  constructor(state, env) {
+  this.state = state;
   this.env = env;
   this.chain = Promise.resolve();
  }
 
  async fetch(request) {
   const { msg, adminIds, type } = await request.json();
+  let mutated = false;
+  const scopedEnv = (this.env && this.env.REVIEWS)
+   ? {
+    ...this.env,
+    REVIEWS: {
+     get: (...a) => this.env.REVIEWS.get(...a),
+     list: (...a) => this.env.REVIEWS.list(...a),
+     put: (key, val, opts) => {
+      if (/^(?:car_approved:|news_approved:|approved:|site_config:)/.test(String(key))) mutated = true;
+      return opts !== undefined ? this.env.REVIEWS.put(key, val, opts) : this.env.REVIEWS.put(key, val);
+     },
+     delete: (key) => {
+      if (/^(?:car_approved:|news_approved:|approved:|site_config:)/.test(String(key))) mutated = true;
+      return this.env.REVIEWS.delete(key);
+     }
+    }
+   }
+   : this.env;
   // Очередь: каждая часть альбома ждёт завершения предыдущей, даже если KV отвечает медленно.
   const run = this.chain.then(() => type === "channel"
-   ? stageChannelPost(msg, this.env, adminIds)
+   ? stageChannelPost(msg, scopedEnv, adminIds, this.state)
    : type === "group_media"
-    ? stageGroupMedia(msg, this.env, adminIds)
-    : handleForwardedGroupPost(msg, this.env, adminIds));
+    ? stageGroupMedia(msg, scopedEnv, adminIds)
+    : handleForwardedGroupPost(msg, scopedEnv, adminIds));
   this.chain = run.catch(() => {});
   const handled = await run;
-  return Response.json({ handled });
+  return Response.json({ handled, mutated });
  }
 }
 
@@ -927,6 +949,7 @@ async function unpublishItem(env, adminIds, id) {
   delete car.publishedAt;
   await env.REVIEWS.put("car_pending:" + id, JSON.stringify(car));
   await env.REVIEWS.delete(storedKey);
+  await clearCarContentSeen(env, record.caption);
   await sendPendingCarCard(env, adminIds, car, id, "↩️ Снято с сайта. Объявление снова ожидает решения модератора.");
  } else if (isNews) {
   const newsItem = { ...record };
@@ -1268,6 +1291,11 @@ async function handleCarPost(post, env, adminIds) {
   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"✅ Этот автомобиль уже опубликован на сайте. Повторная публикация не создана: https://t.me/" + chat.username + "/" + messageNumberOf(post.message_id)})));
   return;
  }
+ const contentDup = await findDuplicateCarInKv(env, caption, id);
+ if (contentDup) {
+  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"⏭ Такой автомобиль уже есть на сайте (" + contentDup.existingId + "). Дубль не создан."})));
+  return;
+ }
  const existing = await env.REVIEWS.get("car_pending:" + id);
  if (existing) {
   const saved = JSON.parse(existing);
@@ -1457,6 +1485,7 @@ async function resendChannelImportEntry(entry, id, env, adminIds) {
 
 // Другие части той же пересылки альбома: добавляем фото и видео к уже существующей записи, без новых карточек.
 async function mergeChannelPartMedia(post, id, env) {
+ if (env.REVIEWS && await env.REVIEWS.get("import_skip_dup:" + id)) return;
  const photos = [...largestPhotoOf(post.photo), ...(imageDocumentItemFrom(post.document) ? [imageDocumentItemFrom(post.document)] : [])];
  const videos = postVideos(post);
  const incomingItems = [...photos.map(item => ({...item,type:item.mime_type ? "document" : "photo",sourceMessageId:Number(post.message_id)||null})), ...videos.map(item => ({...item,type:"video",sourceMessageId:Number(post.message_id)||null}))];
@@ -1512,6 +1541,21 @@ async function mergeChannelPartMedia(post, id, env) {
   await env.REVIEWS.put(carKey, JSON.stringify(car));
   return;
  }
+ const approvedCarKey = "car_approved:car_" + String(id).slice(0, String(id).lastIndexOf("_")).replace(/-/g,"") + "_" + number;
+ const approvedCarRaw = await env.REVIEWS.get(approvedCarKey);
+ if (approvedCarRaw) {
+  const car = JSON.parse(approvedCarRaw);
+  const hadCarMedia = (Array.isArray(car.photos) && car.photos.length) || (Array.isArray(car.videos) && car.videos.length) || Boolean(car.fileId);
+  const hadCanonicalOrder = Array.isArray(car.mediaItems) && car.mediaItems.length > 0;
+  car.photos = uniqueFileItems([...(Array.isArray(car.photos) ? car.photos : []), ...photos]);
+  car.videos = uniqueFileItems([...(Array.isArray(car.videos) ? car.videos : []), ...videos]);
+  const mergedOrder = mergeOrderedMediaItems(car.mediaItems || [], incomingItems);
+  car.mediaItems = mergedOrder.mediaItems;
+  car.mediaOrderKnown = hadCanonicalOrder ? (car.mediaOrderKnown === true && mergedOrder.mediaOrderKnown) : (!hadCarMedia && mergedOrder.mediaOrderKnown);
+  if (!car.fileId) car.fileId = (car.photos[car.photos.length - 1] || car.videos[0] || {}).file_id || null;
+  await env.REVIEWS.put(approvedCarKey, JSON.stringify(car));
+  return;
+ }
  const newsKey = "news_pending:news_" + String(id).slice(0, String(id).lastIndexOf("_")).replace(/-/g,"") + "_" + number;
  const newsRaw = await env.REVIEWS.get(newsKey);
  if (newsRaw) {
@@ -1528,9 +1572,11 @@ async function mergeChannelPartMedia(post, id, env) {
  }
 }
 
-async function stageChannelPost(post, env, adminIds) {
+async function stageChannelPost(post, env, adminIds, ctx = null) {
  const chat = post.chat || {};
- if (String(chat.username || "").toLowerCase() !== "avtoykorea" || !env.REVIEWS) return;
+ const expectedChannelUser = String((env && env.TELEGRAM_CHANNEL_USERNAME) || "avtoYkorea").replace(/^@/, "").toLowerCase();
+ const actualChannelUser = String(chat.username || "").toLowerCase();
+ if ((actualChannelUser !== "avtoykorea" && actualChannelUser !== expectedChannelUser) || !env.REVIEWS) return;
  const ownId = channelPostId(chat, post.message_id);
  const batchKey = post.media_group_id ? "import_batch:" + String(chat.id) + "_" + String(post.media_group_id) : null;
  const originKey = "import_origin:" + ownId;
@@ -1543,6 +1589,7 @@ async function stageChannelPost(post, env, adminIds) {
  const batchStart = !batch || batch.start === privateId;
  if (batchKey && !batch) await env.REVIEWS.put(batchKey, JSON.stringify({ id, start: privateId }), { expirationTtl: 2592000 });
  await env.REVIEWS.put(originKey, id, { expirationTtl: 2592000 });
+ if (await env.REVIEWS.get("import_skip_dup:" + id)) return;
  if (!batchStart) {
   await mergeChannelPartMedia(post, id, env);
   return;
@@ -1550,10 +1597,23 @@ async function stageChannelPost(post, env, adminIds) {
  const number = messageNumberOf(id);
  const carId = "car_" + String(chat.id).replace(/-/g,"") + "_" + number;
  const newsId = "news_" + String(chat.id).replace(/-/g,"") + "_" + number;
+ const echoUserKey = actualChannelUser ? "tg_channel_echo:" + actualChannelUser + "_" + number : "";
+ const echoAtKey = actualChannelUser ? "tg_channel_echo:@" + actualChannelUser + "_" + number : "";
+ const echoIdKey = chat.id ? "tg_channel_echo:" + String(chat.id) + "_" + number : "";
+ if (
+  (echoUserKey && await env.REVIEWS.get(echoUserKey)) ||
+  (echoAtKey && await env.REVIEWS.get(echoAtKey)) ||
+  (echoIdKey && await env.REVIEWS.get(echoIdKey))
+ ) {
+  await env.REVIEWS.put("import_skip_dup:" + id, "echo", { expirationTtl: 86400 });
+  return;
+ }
  const approvedCar = await env.REVIEWS.get("car_approved:" + carId);
  const approvedNews = await env.REVIEWS.get("news_approved:" + newsId);
  if (await env.REVIEWS.get("approved:" + id) || approvedCar || approvedNews) {
-  await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"✅ Эта публикация уже опубликована на сайте. Повторная копия не создана: https://t.me/" + chat.username + "/" + number})));
+  if (post.privateMessageId !== undefined) {
+   await Promise.all(adminIds.map(adminId => callTelegram(env,"sendMessage",{chat_id:adminId,text:"✅ Эта публикация уже опубликована на сайте. Повторная копия не создана: https://t.me/" + chat.username + "/" + number})));
+  }
   return;
  }
  const pendingReviewRaw = await env.REVIEWS.get("pending:" + id);
@@ -1589,6 +1649,54 @@ async function stageChannelPost(post, env, adminIds) {
  const videos = postVideos(post);
  const mediaSeed = mergeOrderedMediaItems([], [...photos.map(item=>({...item,type:item.mime_type ? "document" : "photo",sourceMessageId:Number(post.message_id)||null})), ...videos.map(item=>({...item,type:"video",sourceMessageId:Number(post.message_id)||null}))]);
  const stored = {...post,chat,message_id:Number(number),albumId:post.media_group_id ? String(post.media_group_id) : "",photo:photos,videos,mediaItems:mediaSeed.mediaItems,mediaOrderKnown:mediaSeed.mediaOrderKnown};
+ const isLiveChannelPost = post.privateMessageId === undefined;
+ if (isLiveChannelPost && await resolveAutoPublishCars(env)) {
+  const rawCaption = cleanPublicationText(post.caption || post.text).slice(0, 3000);
+  const created = sourcePostDate(post);
+  const cutoff = Math.floor(Date.UTC(2026, 0, 1) / 1000);
+  if (created >= cutoff && isCarListingPost({ text: rawCaption, hasMedia: photos.length > 0 || videos.length > 0 })) {
+   const dup = await findDuplicateCarInKv(env, rawCaption, carId);
+   if (dup) {
+    await env.REVIEWS.put("import_skip_dup:" + id, dup.existingId, { expirationTtl: 86400 });
+    await writeLog(env, "auto", "дубль авто пропущен", "машина", carId, dup.existingId);
+    return;
+   }
+   const caption = cleanCarDisplayCaption(rawCaption).slice(0, 3000);
+   const carRec = {
+    id: carId,
+    caption,
+    fileId: photos.length ? photos[photos.length - 1].file_id : (videos.length ? videos[0].file_id : null),
+    photos,
+    videos,
+    mediaItems: stored.mediaItems,
+    mediaOrderKnown: stored.mediaOrderKnown,
+    mediaType: videos.length && !photos.length ? "video" : "photo",
+    sourceUrl: "https://t.me/" + (chat.username || "avtoYkorea") + "/" + number,
+    createdAt: new Date().toISOString(),
+    publishedAt: new Date().toISOString(),
+    sourceDate: created
+   };
+   await env.REVIEWS.put("car_approved:" + carId, JSON.stringify(carRec));
+   await markCarContentSeen(env, carId, carRec.caption);
+   await writeLog(env, "auto", "автопубликация из @avtoYkorea", "машина", carId, siteLabel(carId, carRec));
+   if (String(env.MAX_BOT_TOKEN || "").trim() && !/^\s*\[MAX\]/i.test(String(post.caption || post.text || ""))) {
+    const canWaitUntil = Boolean(ctx && typeof ctx.waitUntil === "function");
+    const runMaxCrosspost = async () => {
+     if (canWaitUntil && post.media_group_id) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+     }
+     const latestRaw = await env.REVIEWS.get("car_approved:" + carId);
+     const latestCar = latestRaw ? JSON.parse(latestRaw) : carRec;
+     await crosspostCarToMax(env, latestCar, {
+      loadPhotoBytes: (photo, idx) => loadCarPhotoBytes(env, photo, idx)
+     });
+    };
+    if (canWaitUntil && post.media_group_id) ctx.waitUntil(runMaxCrosspost().catch(() => {}));
+    else await runMaxCrosspost().catch(() => {});
+   }
+   return;
+  }
+ }
  await env.REVIEWS.put("import_pending:" + id,JSON.stringify({...stored,post:stored}),{expirationTtl:2592000});
  const keyboard = {inline_keyboard:[[{text:"🚗 Автомобиль",callback_data:"imp:car:" + id},{text:"⭐ Отзыв",callback_data:"imp:review:" + id},{text:"📰 Новость",callback_data:"imp:news:" + id}]]};
  await Promise.all(adminIds.map(async adminId => {
@@ -1686,9 +1794,14 @@ async function handleCarCallback(callback, env, adminIds) {
   const warnings = publishWarnings(car.caption, postPhotos(car).length + postVideos(car).length);
   if (warnings.length) { await askPublishCheck(env, fromId, "car", id, warnings); return answer("Проверьте перед публикацией"); }
  }
- await env.REVIEWS.put("car_approved:" + id,JSON.stringify({...car,publishedAt:new Date().toISOString()}));
+ const carRec = {...car,publishedAt:new Date().toISOString()};
+ await env.REVIEWS.put("car_approved:" + id,JSON.stringify(carRec));
+ await markCarContentSeen(env, id, carRec.caption);
  await env.REVIEWS.delete("car_pending:" + id);
  await writeLog(env, fromId, "опубликован", "машина", id, siteLabel(id, {caption: car.caption}));
+ if (String(env.MAX_BOT_TOKEN || "").trim()) {
+  await crosspostCarToMax(env, carRec, { loadPhotoBytes: (photo, idx) => loadCarPhotoBytes(env, photo, idx) }).catch(() => {});
+ }
  await offerUndo(env, fromId, id, { action: "unpublish" }, "🌐 Автомобиль опубликован на сайте.", [[{ text: "🗑 Убрать с сайта", callback_data: "sitedel:" + id }]]);
  return answer("Автомобиль опубликован на сайте");
 }
@@ -1793,6 +1906,460 @@ async function resolveYandexVerification(env) {
  }
  if (!raw) raw = String(env.YANDEX_VERIFICATION || "").trim();
  return parseYandexCodes(raw).join(",");
+}
+
+async function resolveAutoPublishCars(env) {
+ if (env && env.REVIEWS) {
+  try {
+   const stored = await env.REVIEWS.get("site_config:auto_publish_cars");
+   if (stored === "1") return true;
+   if (stored === "0") return false;
+  } catch {}
+ }
+ return String((env && env.AUTO_PUBLISH_CARS) || "").trim() === "1";
+}
+
+async function resolveTelegramChannelTarget(env) {
+ if (env && env.REVIEWS) {
+  try {
+   const stored = String((await env.REVIEWS.get("site_config:telegram_channel")) || "").trim();
+   if (stored) return stored;
+  } catch {}
+ }
+ const chId = String((env && env.TELEGRAM_CHANNEL_ID) || "").trim();
+ if (chId) return chId;
+ const chUser = String((env && env.TELEGRAM_CHANNEL_USERNAME) || "").trim().replace(/^@/, "");
+ return chUser ? "@" + chUser : "";
+}
+
+async function resolveTelegramChannelUsername(env) {
+ if (env && env.REVIEWS) {
+  try {
+   const stored = String((await env.REVIEWS.get("site_config:telegram_channel")) || "").trim().replace(/^@/, "");
+   if (stored && /^[A-Za-z0-9_]{4,32}$/.test(stored)) return stored;
+  } catch {}
+ }
+ const chUser = String((env && env.TELEGRAM_CHANNEL_USERNAME) || "").trim().replace(/^@/, "");
+ return /^[A-Za-z0-9_]{4,32}$/.test(chUser) ? chUser : "avtoYkorea";
+}
+
+async function markCarContentSeen(env, carId, caption) {
+ if (!env || !env.REVIEWS || !carId) return;
+ const keys = buildCarContentKeys(caption);
+ for (const k of keys) {
+  try {
+   const hash = (await sha256Hex(k)).slice(0, 32);
+   await env.REVIEWS.put("car_sync_seen:" + hash, String(carId), { expirationTtl: 7776000 });
+  } catch {}
+ }
+}
+
+async function clearCarContentSeen(env, caption) {
+ if (!env || !env.REVIEWS) return;
+ const keys = buildCarContentKeys(caption);
+ for (const k of keys) {
+  try {
+   const hash = (await sha256Hex(k)).slice(0, 32);
+   await env.REVIEWS.delete("car_sync_seen:" + hash);
+  } catch {}
+ }
+}
+
+async function findDuplicateCarInKv(env, caption, excludeId = "") {
+ if (!env || !env.REVIEWS) return null;
+ const candidateKeys = buildCarContentKeys(caption);
+ if (!candidateKeys.length) return null;
+ const candidateSet = new Set(candidateKeys);
+ for (const k of candidateKeys) {
+  try {
+   const hash = (await sha256Hex(k)).slice(0, 32);
+   const seenId = await env.REVIEWS.get("car_sync_seen:" + hash);
+   if (seenId && seenId !== excludeId) {
+    const existingApproved = await env.REVIEWS.get("car_approved:" + seenId);
+    if (existingApproved) return { duplicate: true, existingId: seenId, matchedKey: k };
+   }
+  } catch {}
+ }
+ let cursor;
+ do {
+  const page = await env.REVIEWS.list({ prefix: "car_approved:", ...(cursor ? { cursor } : {}) });
+  for (const key of page.keys) {
+   const existingId = key.name.slice("car_approved:".length);
+   if (existingId === excludeId) continue;
+   const raw = await env.REVIEWS.get(key.name);
+   if (!raw) continue;
+   let car;
+   try { car = JSON.parse(raw); } catch { continue; }
+   if (String(car.caption || "").trim().toLowerCase() === "исправить") continue;
+   const existingKeys = buildCarContentKeys(car.caption);
+   for (const ek of existingKeys) {
+    if (candidateSet.has(ek)) return { duplicate: true, existingId, matchedKey: ek };
+   }
+  }
+  cursor = page.list_complete ? null : page.cursor;
+ } while (cursor);
+ return null;
+}
+
+function isAllowedHostUrl(rawUrl, domains) {
+ try {
+  const parsed = new URL(String(rawUrl || "").trim());
+  if (parsed.protocol !== "https:") return false;
+  const host = parsed.hostname.toLowerCase();
+  return domains.some(d => host === d || host.endsWith("." + d));
+ } catch {
+  return false;
+ }
+}
+
+function isSafeTelegramWebUrl(rawUrl) {
+ return isAllowedHostUrl(rawUrl, ["telesco.pe", "telegram.org", "cdn-telegram.org"]);
+}
+
+function isSafeExternalMaxUrl(rawUrl) {
+ return isAllowedHostUrl(rawUrl, ["max.ru", "mycdn.me", "userapi.com"]);
+}
+
+function decodeHtmlEntities(str) {
+ return String(str || "")
+  .replace(/&nbsp;/gi, " ")
+  .replace(/&amp;/gi, "&")
+  .replace(/&lt;/gi, "<")
+  .replace(/&gt;/gi, ">")
+  .replace(/&quot;/gi, "\"")
+  .replace(/&#39;|&#x27;/gi, "'")
+  .replace(/&#(\d+);/g, (_, code) => {
+   const n = Number(code);
+   return n >= 32 && n <= 0x10ffff ? String.fromCodePoint(n) : " ";
+  })
+  .replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
+   const n = Number.parseInt(hex, 16);
+   return n >= 32 && n <= 0x10ffff ? String.fromCodePoint(n) : " ";
+  });
+}
+
+function extractTelegramPostPlainText(htmlFragment) {
+ const prepared = String(htmlFragment || "")
+  .replace(/<i\s+class="emoji"[^>]*><b>([^<]*)<\/b><\/i>/gi, (_, emojiText) => emojiText === "➖" ? "" : emojiText)
+  .replace(/<br\s*\/?>/gi, "\n")
+  .replace(/<[^>]+>/g, "");
+ return decodeHtmlEntities(prepared);
+}
+
+async function fetchTelegramWebPostDetails(channelUsername, msgId, fetchImpl = fetch) {
+ const cleanChannel = String(channelUsername || "").replace(/^@/, "");
+ const cleanMsgId = String(msgId || "").trim();
+ if (!/^[A-Za-z0-9_]{4,32}$/.test(cleanChannel) || !/^\d+$/.test(cleanMsgId)) {
+  return { ok: false, photoUrls: [] };
+ }
+ try {
+  const resp = await fetchImpl(`https://t.me/${cleanChannel}/${cleanMsgId}?embed=1`, {
+   headers: { "user-agent": "Mozilla/5.0 (compatible; AVTOYKoreaSync/1.0)" }
+  });
+  if (!resp.ok) return { ok: false, status: resp.status, photoUrls: [] };
+  const html = await resp.text();
+  const seen = new Set();
+  const photoUrls = [];
+  const rx = /class="[^"]*tgme_widget_message_photo_wrap[^"]*"[^>]*style="[^"]*background-image:url\((?:'|&quot;|")?([^'"&)]+)(?:'|&quot;|")?\)/gi;
+  let match;
+  while ((match = rx.exec(html)) !== null) {
+   const imgUrl = decodeHtmlEntities(match[1]);
+   if (!seen.has(imgUrl) && isSafeTelegramWebUrl(imgUrl)) {
+    seen.add(imgUrl);
+    photoUrls.push(imgUrl);
+    if (photoUrls.length >= 10) break;
+   }
+  }
+  return { ok: true, photoUrls };
+ } catch {
+  return { ok: false, photoUrls: [] };
+ }
+}
+
+async function loadCarPhotoBytes(env, photoItem, _index = 0, fetchImpl = fetch) {
+ const fileId = String((photoItem && photoItem.file_id) || "");
+ if (!fileId) return null;
+ const maxBytes = 15 * 1024 * 1024;
+ if (fileId.startsWith("tgweb:")) {
+  const m = fileId.match(/^tgweb:([A-Za-z0-9_]{4,32})\/(\d+)\/(\d+)$/);
+  if (!m) return null;
+  const details = await fetchTelegramWebPostDetails(m[1], m[2], fetchImpl);
+  const url = details.photoUrls[Number(m[3])];
+  if (!url) return null;
+  const r = await fetchImpl(url);
+  if (!r.ok) return null;
+  const bytes = await r.arrayBuffer();
+  if (!bytes.byteLength || bytes.byteLength > maxBytes) return null;
+  return { bytes, mimeType: r.headers.get("content-type") || "image/jpeg", fileName: `car-${Number(m[3]) + 1}.jpg` };
+ }
+ if (fileId.startsWith("exturl:")) {
+  const rawUrl = fileId.slice("exturl:".length);
+  if (!isSafeExternalMaxUrl(rawUrl)) return null;
+  const r = await fetchImpl(rawUrl);
+  if (!r.ok) return null;
+  const bytes = await r.arrayBuffer();
+  if (!bytes.byteLength || bytes.byteLength > maxBytes) return null;
+  return { bytes, mimeType: r.headers.get("content-type") || "image/jpeg", fileName: "car-max.jpg" };
+ }
+ if (!env || !env.TELEGRAM_BOT_TOKEN) return null;
+ try {
+  const info = await callTelegram(env, "getFile", { file_id: fileId });
+  const filePath = info && info.result && info.result.file_path;
+  if (!filePath) return null;
+  const r = await fetchImpl("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + filePath);
+  if (!r.ok) return null;
+  const bytes = await r.arrayBuffer();
+  if (!bytes.byteLength || bytes.byteLength > maxBytes) return null;
+  return {
+   bytes,
+   mimeType: (photoItem && photoItem.mime_type) || r.headers.get("content-type") || "image/jpeg",
+   fileName: (photoItem && photoItem.file_name) || "car.jpg"
+  };
+ } catch {
+  return null;
+ }
+}
+
+async function crosspostCarToTelegramChannel(env, carRec, externalImageUrls = [], options = {}) {
+ const fetchImpl = options.fetchImpl || fetch;
+ const channelTarget = await resolveTelegramChannelTarget(env);
+ if (!env || !env.TELEGRAM_BOT_TOKEN || !channelTarget || !carRec || !carRec.id) {
+  return { ok: false, reason: "telegram_channel_not_configured", tgPhotos: [] };
+ }
+ if (env.REVIEWS && await env.REVIEWS.get("tg_xpost:" + carRec.id)) {
+  return { ok: true, alreadySent: true, tgPhotos: [] };
+ }
+ await markCarContentSeen(env, carRec.id, carRec.caption || "");
+
+ const captionText = cleanCarDisplayCaption(carRec.caption || "").slice(0, 1024);
+ const photoSources = externalImageUrls.length > 0
+  ? externalImageUrls.slice(0, 10).map(u => ({ file_id: "exturl:" + u }))
+  : (Array.isArray(carRec.photos) ? carRec.photos.slice(0, 10) : []);
+ if (!photoSources.length) return { ok: false, reason: "no_photos", tgPhotos: [] };
+
+ const allDirectTgIds = photoSources.every(p => {
+  const idStr = String(p && p.file_id || "");
+  return Boolean(idStr) && !idStr.startsWith("tgweb:") && !idStr.startsWith("exturl:");
+ });
+
+ let messages = [];
+ try {
+  if (allDirectTgIds) {
+   if (photoSources.length === 1) {
+    const res = await callTelegram(env, "sendPhoto", {
+     chat_id: channelTarget,
+     photo: photoSources[0].file_id,
+     ...(captionText ? { caption: captionText } : {})
+    });
+    if (res && res.result) messages = [res.result];
+   } else {
+    const media = photoSources.map((p, idx) => ({
+     type: "photo",
+     media: p.file_id,
+     ...(idx === 0 && captionText ? { caption: captionText } : {})
+    }));
+    const res = await callTelegram(env, "sendMediaGroup", { chat_id: channelTarget, media });
+    if (Array.isArray(res && res.result)) messages = res.result;
+   }
+  } else {
+   const loaded = [];
+   for (let i = 0; i < photoSources.length; i++) {
+    const item = await loadCarPhotoBytes(env, photoSources[i], i, fetchImpl);
+    if (item && item.bytes) loaded.push(item);
+   }
+   if (!loaded.length) return { ok: false, reason: "image_download_failed", tgPhotos: [] };
+   const form = new FormData();
+   form.append("chat_id", channelTarget);
+   if (loaded.length === 1) {
+    form.append("photo", new Blob([loaded[0].bytes], { type: loaded[0].mimeType || "image/jpeg" }), loaded[0].fileName || "car.jpg");
+    if (captionText) form.append("caption", captionText);
+    const resp = await fetchImpl(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendPhoto`, { method: "POST", body: form });
+    const data = await resp.json().catch(() => null);
+    if (resp.ok && data && data.ok && data.result) messages = [data.result];
+   } else {
+    const media = loaded.map((item, idx) => {
+     const field = "file" + idx;
+     form.append(field, new Blob([item.bytes], { type: item.mimeType || "image/jpeg" }), item.fileName || `car-${idx + 1}.jpg`);
+     return {
+      type: "photo",
+      media: "attach://" + field,
+      ...(idx === 0 && captionText ? { caption: captionText } : {})
+     };
+    });
+    form.append("media", JSON.stringify(media));
+    const resp = await fetchImpl(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMediaGroup`, { method: "POST", body: form });
+    const data = await resp.json().catch(() => null);
+    if (resp.ok && data && data.ok && Array.isArray(data.result)) messages = data.result;
+   }
+  }
+ } catch {
+  return { ok: false, reason: "telegram_send_failed", tgPhotos: [] };
+ }
+
+ if (!messages.length) return { ok: false, reason: "telegram_rejected", tgPhotos: [] };
+ const tgPhotos = messages.map(m => photoItemFrom(largestPhotoSize(m && m.photo))).filter(Boolean);
+ const firstMsgId = messages[0] && messages[0].message_id ? String(messages[0].message_id) : "";
+ if (env.REVIEWS) {
+  await env.REVIEWS.put("tg_xpost:" + carRec.id, JSON.stringify({ channelTarget, firstMsgId, sentAt: new Date().toISOString() }), { expirationTtl: 7776000 });
+  const targetClean = channelTarget.replace(/^@/, "").toLowerCase();
+  for (const m of messages) {
+   if (m && m.message_id) {
+    await env.REVIEWS.put(`tg_channel_echo:${targetClean}_${m.message_id}`, String(carRec.id), { expirationTtl: 86400 });
+   }
+  }
+ }
+ const chUser = await resolveTelegramChannelUsername(env);
+ const channelPostUrl = firstMsgId && chUser ? `https://t.me/${chUser}/${firstMsgId}` : "";
+ return { ok: true, tgPhotos, firstMsgId, channelPostUrl };
+}
+
+async function ingestMaxCarPost(env, payload = {}) {
+ if (!env || !env.REVIEWS) return { ok: false, reason: "kv_unavailable" };
+ const fetchImpl = payload.fetchImpl || fetch;
+ const caption = cleanCarDisplayCaption(cleanPublicationText(String(payload.text || ""))).slice(0, 3000);
+ const imageUrls = Array.isArray(payload.imageUrls) ? payload.imageUrls.filter(isSafeExternalMaxUrl).slice(0, 10) : [];
+ if (!isCarListingPost({ text: caption, hasMedia: imageUrls.length > 0 })) {
+  return { ok: false, ignored: true, reason: "not_car_listing" };
+ }
+ const dup = await findDuplicateCarInKv(env, caption);
+ if (dup) {
+  return { ok: true, skippedDuplicate: true, existingId: dup.existingId };
+ }
+ const rawDigits = String(payload.messageId || "").replace(/\D/g, "").slice(-12);
+ const suffix = rawDigits || String(Date.now());
+ const carId = "car_900000_" + suffix;
+ if (await env.REVIEWS.get("car_approved:" + carId)) {
+  return { ok: true, skippedDuplicate: true, existingId: carId };
+ }
+ await markCarContentSeen(env, carId, caption);
+ const xpost = await crosspostCarToTelegramChannel(env, { id: carId, caption, photos: [] }, imageUrls, { fetchImpl });
+ const photos = xpost.ok && Array.isArray(xpost.tgPhotos) && xpost.tgPhotos.length
+  ? xpost.tgPhotos
+  : imageUrls.map((u, idx) => ({ file_id: "exturl:" + u, file_unique_id: `max_${carId}_${idx}` }));
+ const carRec = {
+  id: carId,
+  caption,
+  fileId: photos[0] ? photos[0].file_id : null,
+  photos,
+  videos: [],
+  mediaItems: photos.map(p => ({ ...p, type: "photo" })),
+  mediaOrderKnown: true,
+  mediaType: "photo",
+  sourceUrl: xpost.channelPostUrl || "Группа MAX AVTOY KOREA",
+  createdAt: new Date().toISOString(),
+  publishedAt: new Date().toISOString()
+ };
+ await env.REVIEWS.put("car_approved:" + carId, JSON.stringify(carRec));
+ await env.REVIEWS.put("max_xpost:" + carId, JSON.stringify({ chatId: String(payload.chatId || ""), source: "max_inbound", at: new Date().toISOString() }), { expirationTtl: 7776000 });
+ await writeLog(env, String(payload.senderId || "max"), "опубликован из MAX", "машина", carId, siteLabel(carId, carRec));
+ return { ok: true, id: carId, telegramCrossposted: Boolean(xpost.ok), attachmentCount: photos.length };
+}
+
+async function syncPublicTelegramChannel(env, fetchImpl = fetch) {
+ if (!env || !env.REVIEWS) return { ok: false, reason: "kv_unavailable", importedCars: 0, skippedDuplicates: 0 };
+ const chUser = await resolveTelegramChannelUsername(env);
+ const chNumId = String(env.TELEGRAM_CHANNEL_NUMERIC_ID || String(env.TELEGRAM_CHANNEL_ID || "").replace(/^-/, "") || "1002326996766");
+ let html = "";
+ try {
+  const resp = await fetchImpl(`https://t.me/s/${chUser}`, {
+   headers: { "user-agent": "Mozilla/5.0 (compatible; AVTOYKoreaSync/1.0)" }
+  });
+  if (!resp.ok) return { ok: false, status: resp.status, importedCars: 0, skippedDuplicates: 0 };
+  html = await resp.text();
+ } catch {
+  return { ok: false, reason: "network_error", importedCars: 0, skippedDuplicates: 0 };
+ }
+
+ const blocks = html.split(/(?=<div class="tgme_widget_message_wrap)/);
+ const cutoff = Math.floor(Date.UTC(2026, 0, 1) / 1000);
+ const postIdRx = new RegExp(`data-post="${chUser.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}/(\\d+)"`, "i");
+ let importedCars = 0;
+ let skippedDuplicates = 0;
+ let inspectedPosts = 0;
+
+ for (const block of blocks) {
+  const postMatch = block.match(postIdRx);
+  if (!postMatch) continue;
+  inspectedPosts++;
+  const msgId = postMatch[1];
+  const timeMatch = block.match(/<time[^>]*datetime="([^"]+)"/i);
+  const parsedMs = timeMatch ? Date.parse(timeMatch[1]) : 0;
+  const created = Number.isFinite(parsedMs) && parsedMs > 0 ? Math.floor(parsedMs / 1000) : 0;
+  if (!created || created < cutoff) continue;
+
+  const hasPhoto = /tgme_widget_message_photo_wrap/.test(block);
+  if (!hasPhoto) continue;
+
+  const textMatch =
+   block.match(/<div class="tgme_widget_message_text js-message_text"[^>]*>([\s\S]*?)<\/div>/i) ||
+   block.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+  const rawPlain = textMatch ? extractTelegramPostPlainText(textMatch[1]) : "";
+  const caption = cleanCarDisplayCaption(cleanPublicationText(rawPlain)).slice(0, 3000);
+  if (!isCarListingPost({ text: caption, hasMedia: true })) continue;
+
+  const chLower = chUser.toLowerCase();
+  if (
+   (await env.REVIEWS.get(`tg_channel_echo:${chLower}_${msgId}`)) ||
+   (await env.REVIEWS.get(`tg_channel_echo:-${chNumId}_${msgId}`))
+  ) {
+   continue;
+  }
+
+  const carId = `car_${chNumId}_${msgId}`;
+  const newsId = `news_${chNumId}_${msgId}`;
+  const revId = `-${chNumId}_${msgId}`;
+  if (
+   (await env.REVIEWS.get("car_approved:" + carId)) ||
+   (await env.REVIEWS.get("car_pending:" + carId)) ||
+   (await env.REVIEWS.get("news_approved:" + newsId)) ||
+   (await env.REVIEWS.get("approved:" + revId)) ||
+   (await env.REVIEWS.get("import_skip_dup:" + revId))
+  ) {
+   continue;
+  }
+
+  const dup = await findDuplicateCarInKv(env, caption, carId);
+  if (dup) {
+   await env.REVIEWS.put("import_skip_dup:" + revId, dup.existingId, { expirationTtl: 2592000 });
+   skippedDuplicates++;
+   continue;
+  }
+
+  const details = await fetchTelegramWebPostDetails(chUser, msgId, fetchImpl);
+  if (!details.photoUrls.length) continue;
+
+  const photos = details.photoUrls.map((_, idx) => ({
+   file_id: `tgweb:${chUser}/${msgId}/${idx}`,
+   file_unique_id: `tgweb_${chUser}_${msgId}_${idx}`
+  }));
+  const carRec = {
+   id: carId,
+   caption,
+   fileId: photos[0].file_id,
+   photos,
+   videos: [],
+   mediaItems: photos.map(p => ({ ...p, type: "photo" })),
+   mediaOrderKnown: true,
+   mediaType: "photo",
+   sourceUrl: `https://t.me/${chUser}/${msgId}`,
+   createdAt: new Date().toISOString(),
+   publishedAt: new Date(created * 1000).toISOString(),
+   sourceDate: created
+  };
+  await env.REVIEWS.put("car_approved:" + carId, JSON.stringify(carRec));
+  await markCarContentSeen(env, carId, caption);
+  await writeLog(env, "auto", "синхронизация с @avtoYkorea (веб)", "машина", carId, siteLabel(carId, carRec));
+
+  if (String(env.MAX_BOT_TOKEN || "").trim() && !/^\s*\[MAX\]/i.test(rawPlain)) {
+   await crosspostCarToMax(env, carRec, {
+    loadPhotoBytes: (photo, idx) => loadCarPhotoBytes(env, photo, idx, fetchImpl),
+    fetchImpl
+   }).catch(() => {});
+  }
+  importedCars++;
+ }
+
+ return { ok: true, channel: chUser, inspectedPosts, importedCars, skippedDuplicates };
 }
 
 async function computePublicCatalogDigest(env) {
@@ -2113,8 +2680,12 @@ async function handleWebAdminApi(request, url, env, adminIds) {
    try { orders.push(JSON.parse(raw)); } catch {}
   }
   orders.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
-  const [maxBotUrl, yandexVerification] = await Promise.all([resolveMaxBotUrl(env), resolveYandexVerification(env)]);
-  return json({ items, pending, orders, maxBotUrl, yandexVerification });
+  const [maxBotUrl, yandexVerification, autoPublishCars] = await Promise.all([
+   resolveMaxBotUrl(env),
+   resolveYandexVerification(env),
+   resolveAutoPublishCars(env)
+  ]);
+  return json({ items, pending, orders, maxBotUrl, yandexVerification, autoPublishCars });
  }
 
  if (path === "/api/admin/settings" && request.method === "POST") {
@@ -2139,10 +2710,16 @@ async function handleWebAdminApi(request, url, env, adminIds) {
    else await env.REVIEWS.delete("site_config:yandex_verification");
    await writeLog(env, session.adminId, "обновлён код Яндекс.Вебмастер", "настройки", "yandex_verification", rawYandex || "очищено");
   }
+  if (Object.hasOwn(body || {}, "autoPublishCars")) {
+   const flag = body.autoPublishCars === true || body.autoPublishCars === "1" || body.autoPublishCars === 1 ? "1" : "0";
+   await env.REVIEWS.put("site_config:auto_publish_cars", flag);
+   await writeLog(env, session.adminId, flag === "1" ? "включена автопубликация авто" : "выключена автопубликация авто", "настройки", "auto_publish_cars", flag);
+  }
   return json({
    ok: true,
    maxBotUrl: await resolveMaxBotUrl(env),
-   yandexVerification: await resolveYandexVerification(env)
+   yandexVerification: await resolveYandexVerification(env),
+   autoPublishCars: await resolveAutoPublishCars(env)
   });
  }
 
@@ -2177,6 +2754,13 @@ async function handleWebAdminApi(request, url, env, adminIds) {
   if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
   const res = await triggerGitHubMirrorSync(env, { reason: "admin_web_manual", force: true });
   await writeLog(env, session.adminId, "синхронизация зеркала РФ", "система", "gitverse", res.ok ? "запущена" : (res.skipped || String(res.status || "error")));
+  return json({ ok: Boolean(res.ok), ...res });
+ }
+
+ if (path === "/api/admin/sync-telegram" && request.method === "POST") {
+  if (!hasSameOrigin(request)) return json({ error: "Same-origin request required" }, 403);
+  const res = await syncPublicTelegramChannel(env);
+  await writeLog(env, session.adminId, "синхронизация канала Telegram", "система", res.channel || "avtoYkorea", `новых: ${res.importedCars || 0}, дублей: ${res.skippedDuplicates || 0}`);
   return json({ ok: Boolean(res.ok), ...res });
  }
 
@@ -2233,6 +2817,10 @@ async function handleWebAdminApi(request, url, env, adminIds) {
    rec.id = carId;
    rec.publishedAt = new Date().toISOString();
    await env.REVIEWS.put("car_approved:" + carId, JSON.stringify(rec));
+   await markCarContentSeen(env, carId, rec.caption);
+   if (String(env.MAX_BOT_TOKEN || "").trim()) {
+    await crosspostCarToMax(env, rec, { loadPhotoBytes: (photo, idx) => loadCarPhotoBytes(env, photo, idx) }).catch(() => {});
+   }
   } else if (isNews) {
    const newsId = id.startsWith("news_") ? id : "news_" + id.replace(/-/g, "");
    if (customText !== null) rec.text = cleanCarDisplayCaption(customText).slice(0, 3000);
@@ -2338,6 +2926,7 @@ async function handleWebAdminApi(request, url, env, adminIds) {
   record.editedAt = new Date().toISOString();
   record.editedBy = session.adminId;
   await env.REVIEWS.put(key, JSON.stringify(record));
+  if (isCar) await markCarContentSeen(env, id, record.caption);
   await writeLog(env, session.adminId, "изменён текст через веб-панель", isCar ? "машина" : (isNews ? "новость" : "отзыв"), id, siteLabel(id, record));
   return json({ ok: true });
  }
@@ -2395,7 +2984,9 @@ export default {
     telegramAdminIds: adminIds,
     unpublishById: id => unpublishItem(env, adminIds, id),
     issueAdminMagicLink: () => issueAdminLoginCodeFor(env, adminIds[0] || "max_admin"),
-    cleanupCatalog: () => runAdminCatalogCleanup(env, adminIds[0] || "max_admin", writeLog)
+    cleanupCatalog: () => runAdminCatalogCleanup(env, adminIds[0] || "max_admin", writeLog),
+    ingestMaxCarPost: payload => ingestMaxCarPost(env, payload),
+    syncTelegramChannel: () => syncPublicTelegramChannel(env)
    });
   }
   if (request.method === "OPTIONS" && (url.pathname === "/api/request" || url.pathname === "/api/cars" || url.pathname === "/api/reviews" || url.pathname === "/api/news" || url.pathname === "/api/public-config" || url.pathname === "/api/catalog-digest")) {
@@ -2463,23 +3054,43 @@ export default {
       else {
        const rev = JSON.parse(pendRaw);
        const carId = "car_" + pendId.replace(/-/g, "");
-       const carRec = {
-        id: carId,
-        caption: cleanCarDisplayCaption(cleanPublicationText(rev.text || "")).slice(0, 3000),
-        fileId: rev.fileId || null,
-        photos: Array.isArray(rev.photos) ? rev.photos : [],
-        videos: rev.kind === "video" && rev.fileId ? [{ file_id: rev.fileId }] : (Array.isArray(rev.videos) ? rev.videos : []),
-        mediaType: rev.kind === "video" && !(rev.photos && rev.photos.length) ? "video" : "photo",
-        publishedAt: new Date().toISOString(),
-        sourceUrl: rev.sourceUrl || "Загрузка администратора"
-       };
-       await env.REVIEWS.put("car_approved:" + carId, JSON.stringify(carRec));
-       await env.REVIEWS.delete("pending:" + pendId);
-       const upRaw = await env.REVIEWS.get("admin_upload:" + pendId);
-       if (upRaw) { const st = JSON.parse(upRaw); st.status = "approved"; await env.REVIEWS.put("admin_upload:" + pendId, JSON.stringify(st), { expirationTtl: 2592000 }); }
-       await writeLog(env, callbackUserId, "опубликован как авто из лички", "машина", carId, siteLabel(carId, carRec));
-       await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "🚘 Автомобиль опубликован в каталог!" });
-       await callTelegram(env, "sendMessage", { chat_id: cb.message.chat.id, text: "🚘 Автомобиль успешно добавлен в каталог сайта!", reply_markup: { inline_keyboard: [[{ text: "🗑 Снять с сайта", callback_data: "sitedel:" + carId }, { text: "🎛 Панель", callback_data: "panel:home" }]] } });
+       const caption = cleanCarDisplayCaption(cleanPublicationText(rev.text || "")).slice(0, 3000);
+       const dup = await findDuplicateCarInKv(env, caption, carId);
+       if (dup) {
+        await env.REVIEWS.delete("pending:" + pendId);
+        await writeLog(env, callbackUserId, "дубль авто пропущен (личка)", "машина", carId, dup.existingId);
+        await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "⏭ Уже на сайте (" + dup.existingId + ") — дубль пропущен", show_alert: true });
+        await callTelegram(env, "sendMessage", { chat_id: cb.message.chat.id, text: "⏭ Этот автомобиль уже опубликован на сайте (" + dup.existingId + "). Повторная публикация отменена." });
+       } else {
+        const carRec = {
+         id: carId,
+         caption,
+         fileId: rev.fileId || null,
+         photos: Array.isArray(rev.photos) ? rev.photos : [],
+         videos: rev.kind === "video" && rev.fileId ? [{ file_id: rev.fileId }] : (Array.isArray(rev.videos) ? rev.videos : []),
+         mediaType: rev.kind === "video" && !(rev.photos && rev.photos.length) ? "video" : "photo",
+         publishedAt: new Date().toISOString(),
+         sourceUrl: rev.sourceUrl || "Загрузка администратора"
+        };
+        await env.REVIEWS.put("car_approved:" + carId, JSON.stringify(carRec));
+        await markCarContentSeen(env, carId, carRec.caption);
+        await env.REVIEWS.delete("pending:" + pendId);
+        const upRaw = await env.REVIEWS.get("admin_upload:" + pendId);
+        if (upRaw) { const st = JSON.parse(upRaw); st.status = "approved"; await env.REVIEWS.put("admin_upload:" + pendId, JSON.stringify(st), { expirationTtl: 2592000 }); }
+        await writeLog(env, callbackUserId, "опубликован как авто из лички", "машина", carId, siteLabel(carId, carRec));
+        const tgX = await crosspostCarToTelegramChannel(env, carRec).catch(() => null);
+        const maxX = String(env.MAX_BOT_TOKEN || "").trim()
+         ? await crosspostCarToMax(env, carRec, { loadPhotoBytes: (photo, idx) => loadCarPhotoBytes(env, photo, idx) }).catch(() => null)
+         : null;
+        await callTelegram(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "🚘 Автомобиль опубликован в каталог!" });
+        await callTelegram(env, "sendMessage", {
+         chat_id: cb.message.chat.id,
+         text: "🚘 Автомобиль успешно добавлен в каталог сайта!" +
+          (tgX && tgX.ok ? "\n📣 Отправлено в канал @avtoYkorea." : "") +
+          (maxX && maxX.ok ? "\n💬 Отправлено в группу MAX." : ""),
+         reply_markup: { inline_keyboard: [[{ text: "🗑 Снять с сайта", callback_data: "sitedel:" + carId }, { text: "🎛 Панель", callback_data: "panel:home" }]] }
+        });
+       }
       }
      }
      else if (String(cb.data || "").startsWith("pubasnews:")) {
@@ -2518,7 +3129,13 @@ export default {
     return Response.json({ ok: true });
    }
    const channelPost = update.channel_post;
-   if (channelPost) { try { await stageChannelPostSerialized({...channelPost,sourceDate:channelPost.date}, env, adminIds); } catch { return new Response("Telegram import staging failed", {status:502}); } return Response.json({ok:true}); }
+   if (channelPost) {
+    try {
+     const stageRes = await stageChannelPostSerialized({...channelPost,sourceDate:channelPost.date}, env, adminIds, ctx);
+     if (stageRes && stageRes.mutated) publicCatalogMutated = true;
+    } catch { return new Response("Telegram import staging failed", {status:502}); }
+    return Response.json({ok:true});
+   }
    const msg = update.message;
    if (!msg || !msg.chat || !msg.chat.id) return Response.json({ ok: true });
    // Groups/channels: only the one review group, only /review messages. Everything else is ignored.
@@ -2683,6 +3300,28 @@ export default {
       await env.REVIEWS.put("site_config:max_bot_url", rawUrl);
       await writeLog(env, chatId, "установлена ссылка MAX", "настройки", "max_bot_url", rawUrl);
       await send(chatId, "✅ Ссылка на бота MAX сохранена! Все кнопки MAX на сайте теперь ведут на:\n" + rawUrl);
+     }
+    } else if (/^\/synctg(?:@\w+)?$/i.test(text) && adminIds.includes(chatId)) {
+     const res = await syncPublicTelegramChannel(env);
+     await send(
+      chatId,
+      res.ok
+       ? `🔄 Синхронизация @${res.channel || "avtoYkorea"} завершена!\n🚘 Новых авто добавлено: ${res.importedCars || 0}\n⏭ Дублей пропущено: ${res.skippedDuplicates || 0}\n📄 Проверено постов в ленте: ${res.inspectedPosts || 0}`
+       : "⚠️ Не удалось прочитать публичную ленту @avtoYkorea (" + (res.reason || ("HTTP " + (res.status || 0))) + ")."
+     );
+    } else if (/^\/autosync(?:@\w+)?(?:\s+(on|off|1|0))?$/i.test(text) && adminIds.includes(chatId)) {
+     const m = text.match(/^\/autosync(?:@\w+)?(?:\s+(on|off|1|0))?$/i);
+     const arg = m && m[1] ? m[1].toLowerCase() : "";
+     if (!arg) {
+      const enabled = await resolveAutoPublishCars(env);
+      await send(chatId, `⚡ Автопубликация новых авто из @avtoYkorea на сайт (с антидублем): ${enabled ? "ВКЛЮЧЕНА" : "ВЫКЛЮЧЕНА"}.\nЧтобы переключить, отправьте:\n/autosync on — включить\n/autosync off — только по кнопке`);
+     } else if (!env.REVIEWS) {
+      await send(chatId, "Хранилище REVIEWS не настроено.");
+     } else {
+      const nextFlag = (arg === "on" || arg === "1") ? "1" : "0";
+      await env.REVIEWS.put("site_config:auto_publish_cars", nextFlag);
+      await writeLog(env, chatId, nextFlag === "1" ? "включена автопубликация авто" : "выключена автопубликация авто", "настройки", "auto_publish_cars", nextFlag);
+      await send(chatId, nextFlag === "1" ? "✅ Автопубликация новых автомобилей из Telegram/MAX на сайт ВКЛЮЧЕНА (с проверкой дублей)." : "⏸ Автопубликация выключена: новые авто будут ждать ручного подтверждения.");
      }
     } else if (/^\/syncru(?:@\w+)?$/i.test(text) && adminIds.includes(chatId)) {
      const res = await triggerGitHubMirrorSync(env, { reason: "telegram_syncru", force: true });
@@ -2856,16 +3495,39 @@ export default {
   const carMediaPath = url.pathname.startsWith("/api/car-media/") ? url.pathname.slice("/api/car-media/".length) : "";
   const carMediaMatch = carMediaPath.match(/^(car_-?[0-9]+_[0-9]+)(?:\/(photo|video)\/(\d+)|(\d+))?$/);
   if (request.method === "GET" && carMediaMatch) {
-   if (!env.REVIEWS || !env.TELEGRAM_BOT_TOKEN) return new Response("Not found",{status:404});
+   if (!env.REVIEWS) return new Response("Not found",{status:404});
    const raw = await env.REVIEWS.get("car_approved:" + carMediaMatch[1]); if (!raw) return new Response("Not found",{status:404});
    const car = JSON.parse(raw); const mediaType = carMediaMatch[2] || (car.mediaType === "video" ? "video" : "photo"); const index = Number(carMediaMatch[3] || carMediaMatch[4] || 0);
    const photos = catalogPhotoItems(car);
    const videos = uniqueFileItems(Array.isArray(car.videos) ? car.videos : (car.mediaType === "video" && car.fileId ? [{file_id:car.fileId}] : []));
    const selected = (mediaType === "video" ? videos : photos)[index]; const fileId = selected && selected.file_id ? selected.file_id : null;
    if (!fileId) return new Response("Not found",{status:404});
+   const range = request.headers.get("range");
+   if (fileId.startsWith("tgweb:")) {
+    const m = fileId.match(/^tgweb:([A-Za-z0-9_]{4,32})\/(\d+)\/(\d+)$/);
+    if (!m) return new Response("Not found", { status: 404 });
+    const details = await fetchTelegramWebPostDetails(m[1], m[2]);
+    const photoUrl = details.photoUrls[Number(m[3])];
+    if (!photoUrl || !isSafeTelegramWebUrl(photoUrl)) return new Response("Not found", { status: 404 });
+    const upstream = await fetch(photoUrl, range ? { headers: { range } } : {});
+    if (!upstream.ok && upstream.status !== 206) return new Response("Bad Gateway", { status: 502 });
+    const mediaHeaders = { "content-type": upstream.headers.get("content-type") || "image/jpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" };
+    for (const name of ["content-length", "content-range", "accept-ranges"]) { const value = upstream.headers.get(name); if (value) mediaHeaders[name] = value; }
+    return new Response(upstream.body, { status: upstream.status, headers: mediaHeaders });
+   }
+   if (fileId.startsWith("exturl:")) {
+    const photoUrl = fileId.slice("exturl:".length);
+    if (!isSafeExternalMaxUrl(photoUrl)) return new Response("Not found", { status: 404 });
+    const upstream = await fetch(photoUrl, range ? { headers: { range } } : {});
+    if (!upstream.ok && upstream.status !== 206) return new Response("Bad Gateway", { status: 502 });
+    const mediaHeaders = { "content-type": upstream.headers.get("content-type") || "image/jpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" };
+    for (const name of ["content-length", "content-range", "accept-ranges"]) { const value = upstream.headers.get(name); if (value) mediaHeaders[name] = value; }
+    return new Response(upstream.body, { status: upstream.status, headers: mediaHeaders });
+   }
+   if (!env.TELEGRAM_BOT_TOKEN) return new Response("Not found",{status:404});
    const info = await callTelegram(env,"getFile",{file_id:fileId}).catch(()=>null); const path = info && info.result && info.result.file_path;
    if (!path) return new Response("Not found",{status:404});
-   const range = request.headers.get("range"); const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path, range ? {headers:{range}} : {}); if (!upstream.ok && upstream.status !== 206) return new Response("Bad Gateway",{status:502});
+   const upstream = await fetch("https://api.telegram.org/file/bot" + env.TELEGRAM_BOT_TOKEN + "/" + path, range ? {headers:{range}} : {}); if (!upstream.ok && upstream.status !== 206) return new Response("Bad Gateway",{status:502});
    const contentType = mediaType === "video" ? (/\.webm$/i.test(path) ? "video/webm" : "video/mp4") : ((selected && selected.mime_type) || "image/jpeg");
    // Media URLs use positional indexes. A car can be replaced while its URL stays the same, so never cache by index.
    const mediaHeaders = {"content-type":contentType,"cache-control":"no-store","x-content-type-options":"nosniff"};
@@ -4589,5 +5251,17 @@ loadCars();
     else await syncPromise;
    }
   }
+ },
+
+ async scheduled(_event, rawEnv, ctx) {
+  if (!rawEnv || !rawEnv.REVIEWS) return;
+  const runSync = async () => {
+   const res = await syncPublicTelegramChannel(rawEnv);
+   if (res && res.importedCars > 0) {
+    await triggerGitHubMirrorSync(rawEnv, { reason: "cron_sync_tg", force: true });
+   }
+  };
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(runSync());
+  else await runSync();
  }
 };

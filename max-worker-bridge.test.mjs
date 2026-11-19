@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "./worker.js";
-import { deliverOrderToMax, handleMaxBotWebhook } from "./max-worker-bridge.js";
+import { crosspostCarToMax, deliverOrderToMax, handleMaxBotWebhook } from "./max-worker-bridge.js";
 
 function memoryKV() {
   const map = new Map();
@@ -129,4 +129,166 @@ test("Worker CORS allows Russian GitVerse/Yandex mirror origins on /api/request 
   );
   assert.equal(res.status, 204);
   assert.equal(res.headers.get("access-control-allow-origin"), "https://avtoy-korea.gitverse.ru");
+});
+
+test("MAX public group car sync publishes to website, crossposts to @avtoYkorea without loop, and ignores regular customer messages", async () => {
+  const kv = memoryKV();
+  const env = {
+    REVIEWS: kv,
+    MAX_BOT_TOKEN: "max-token",
+    MAX_WEBHOOK_SECRET: "max-sec",
+    MAX_ADMIN_IDS: "555001",
+    TELEGRAM_BOT_TOKEN: "tg-token",
+    TELEGRAM_ADMIN_IDS: "111111111",
+    TELEGRAM_WEBHOOK_SECRET: "tg-sec",
+    TELEGRAM_CHANNEL_USERNAME: "avtoYkorea",
+    AUTO_PUBLISH_CARS: "1"
+  };
+
+  const origFetch = globalThis.fetch;
+  const maxMsgs = [];
+  const tgApiCalls = [];
+  globalThis.fetch = async (url, init) => {
+    const s = String(url);
+    if (s.includes("platform-api2.max.ru/messages")) {
+      maxMsgs.push(JSON.parse(init.body));
+      return Response.json({ success: true });
+    }
+    if (s === "https://cdn.max.ru/car1.jpg") {
+      return new Response(new Uint8Array([5, 6, 7]), { status: 200, headers: { "content-type": "image/jpeg" } });
+    }
+    if (s.startsWith("https://api.telegram.org/bot")) {
+      tgApiCalls.push({ url: s, isForm: init.body instanceof FormData });
+      return Response.json({
+        ok: true,
+        result: { message_id: 901, photo: [{ file_id: "TG_CROSS_1", file_unique_id: "UTG1", width: 1280, height: 960 }] }
+      });
+    }
+    return origFetch(url, init);
+  };
+
+  try {
+    // 1. Bind group from MAX admin
+    const bindRes = await worker.fetch(new Request("https://worker.test/max/webhook", {
+      method: "POST",
+      headers: { "x-max-bot-api-secret": "max-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        update_type: "message_created",
+        message: { sender: { user_id: 555001 }, recipient: { chat_type: "chat", chat_id: 7770001 }, body: { text: "/bindgroup" } }
+      })
+    }), env);
+    assert.equal(bindRes.status, 200);
+    assert.equal(await kv.get("site_config:max_public_group_id"), "7770001");
+
+    // 2. Customer chat message in public group is ignored silently (no car created, no error)
+    const custGroupRes = await worker.fetch(new Request("https://worker.test/max/webhook", {
+      method: "POST",
+      headers: { "x-max-bot-api-secret": "max-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        update_type: "message_created",
+        message: {
+          sender: { user_id: 999888, name: "Клиент" },
+          recipient: { chat_type: "chat", chat_id: 7770001 },
+          body: { mid: "mid-cust-1", text: "Здравствуйте! Сколько стоит пригон Kia?" },
+          attachments: [{ type: "image", payload: { url: "https://cdn.max.ru/car1.jpg" } }]
+        }
+      })
+    }), env);
+    assert.equal(custGroupRes.status, 200);
+    assert.equal((await custGroupRes.json()).ignored, true);
+    assert.equal((await kv.list({ prefix: "car_approved:" })).keys.length, 0);
+
+    // 3. MAX admin posts a car listing -> publishes on site & crossposts to @avtoYkorea
+    const carCaption = "Hyundai Palisade\nГод выпуска: 2024\nПробег: 12 000 км\nЦена под ключ: 4.500.000 ₽";
+    const adminCarRes = await worker.fetch(new Request("https://worker.test/max/webhook", {
+      method: "POST",
+      headers: { "x-max-bot-api-secret": "max-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        update_type: "message_created",
+        message: {
+          sender: { user_id: 555001 },
+          recipient: { chat_type: "chat", chat_id: 7770001 },
+          body: {
+            mid: "4200999",
+            text: carCaption,
+            attachments: [{ type: "image", payload: { url: "https://cdn.max.ru/car1.jpg" } }]
+          }
+        }
+      })
+    }), env);
+    assert.equal(adminCarRes.status, 200);
+    const carJson = await adminCarRes.json();
+    assert.equal(carJson.carSync.ok, true);
+    assert.equal(carJson.carSync.telegramCrossposted, true);
+    assert.equal(tgApiCalls.filter(c => c.url.includes("sendPhoto")).length, 1);
+
+    const saved = JSON.parse(await kv.get("car_approved:" + carJson.carSync.id));
+    assert.equal(saved.photos[0].file_id, "TG_CROSS_1");
+
+    // 4. Telegram webhook echoes message_id 901 back -> skipped (no duplicate car created, no bounce to MAX)
+    const maxCountBefore = maxMsgs.length;
+    await worker.fetch(new Request("https://worker.test/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "tg-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        update_id: 8801,
+        channel_post: {
+          message_id: 901,
+          date: 1790000000,
+          chat: { id: -100555, username: "avtoYkorea", type: "channel" },
+          caption: carCaption,
+          photo: [{ file_id: "TG_CROSS_1", file_unique_id: "UTG1", width: 1280, height: 960 }]
+        }
+      })
+    }), env);
+    assert.equal((await kv.list({ prefix: "car_approved:" })).keys.length, 1);
+    assert.equal(maxMsgs.length, maxCountBefore);
+
+    // 5. Posting the exact same car again in MAX is skipped as duplicate
+    const dupRes = await worker.fetch(new Request("https://worker.test/max/webhook", {
+      method: "POST",
+      headers: { "x-max-bot-api-secret": "max-sec", "content-type": "application/json" },
+      body: JSON.stringify({
+        update_type: "message_created",
+        message: {
+          sender: { user_id: 555001 },
+          recipient: { chat_type: "chat", chat_id: 7770001 },
+          body: {
+            mid: "4201000",
+            text: carCaption,
+            attachments: [{ type: "image", payload: { url: "https://cdn.max.ru/car1.jpg" } }]
+          }
+        }
+      })
+    }), env);
+    assert.equal((await dupRes.json()).carSync.skippedDuplicate, true);
+    assert.equal((await kv.list({ prefix: "car_approved:" })).keys.length, 1);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("crosspostCarToMax uploads image tokens via /uploads and enforces idempotency per car ID", async () => {
+  const kv = memoryKV();
+  const env = { REVIEWS: kv, MAX_BOT_TOKEN: "max-tok", MAX_PUBLIC_GROUP_ID: "7770001" };
+  const calls = [];
+  const fakeFetch = async (url, init) => {
+    calls.push({ url: String(url), method: init.method });
+    if (String(url).includes("/uploads")) return Response.json({ url: "https://upload.max.ru/u/abc", token: "tok1" });
+    if (String(url).startsWith("https://upload.max.ru/")) return Response.json({ token: "tok1" });
+    if (String(url).includes("/messages")) return Response.json({ success: true });
+    return new Response("404", { status: 404 });
+  };
+  const car = { id: "car_100_77", caption: "Kia Sportage 2024", photos: [{ file_id: "F1" }] };
+  const r1 = await crosspostCarToMax(env, car, {
+    fetchImpl: fakeFetch,
+    loadPhotoBytes: async () => ({ bytes: new Uint8Array([1, 2, 3]), mimeType: "image/jpeg", fileName: "1.jpg" })
+  });
+  assert.equal(r1.ok, true);
+  assert.equal(r1.attachmentCount, 1);
+  assert.equal(calls.length, 3);
+
+  const r2 = await crosspostCarToMax(env, car, { fetchImpl: fakeFetch });
+  assert.equal(r2.alreadySent, true);
+  assert.equal(calls.length, 3, "second call must be skipped by max_xpost lock");
 });

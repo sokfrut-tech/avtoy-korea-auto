@@ -51,7 +51,19 @@ const BRAND_ALIASES = [
   { canonical: "KG Mobility", rx: /\b(?:kg[_\s-]*mobility|ssangyong|tiboli|tivoli|torres|korando)\b/i },
   { canonical: "BMW", rx: /\b(?:bmw|бмв)\b/i },
   { canonical: "Audi", rx: /\b(?:audi|ауди)\b/i },
-  { canonical: "Changan", rx: /\b(?:changan|чанган)\b/i }
+  { canonical: "Changan", rx: /\b(?:changan|чанган)\b/i },
+  { canonical: "Genesis", rx: /\b(?:genesis|генезис|gv70|gv80|g70|g80|g90)\b/i },
+  { canonical: "LiXiang", rx: /\b(?:lixiang|li\s*auto|лисян|l6|l7|l8|l9)\b/i },
+  { canonical: "Voyah", rx: /\b(?:voyah|войя|free|dream)\b/i },
+  { canonical: "Tank", rx: /\b(?:tank|танк)\b/i },
+  { canonical: "Chery", rx: /\b(?:chery|чери|tiggo)\b/i },
+  { canonical: "Exeed", rx: /\b(?:exeed|эксид)\b/i },
+  { canonical: "Jetour", rx: /\b(?:jetour|джетур|dashing)\b/i },
+  { canonical: "Lexus", rx: /\b(?:lexus|лексус|rx\d*|lx\d*|nx\d*)\b/i },
+  { canonical: "Porsche", rx: /\b(?:porsche|порше|cayenne|macan|panamera)\b/i },
+  { canonical: "Land Rover", rx: /\b(?:land\s*rover|range\s*rover|ленд\s*ровер|рейндж\s*ровер|defender)\b/i },
+  { canonical: "Mazda", rx: /\b(?:mazda|мазда|cx-\d+)\b/i },
+  { canonical: "Nissan", rx: /\b(?:nissan|ниссан|x-trail|qashqai)\b/i }
 ];
 
 export function parseVehicleCardData(car) {
@@ -274,5 +286,94 @@ export function parseNewsCardData(item) {
     isUrgent,
     badge: isUrgent ? "⚡ Важная новость" : "📰 Новость"
   };
+}
+
+const DEDUP_STOP_WORDS = new Set([
+  "встречайте", "новый", "новая", "новое", "под", "заказ", "наличии",
+  "из", "кореи", "южной", "китая", "оаэ", "авто", "автомобиль", "автомобили"
+]);
+
+export function normalizePostDedupText(raw) {
+  const cleaned = cleanCarDisplayCaption(raw || "")
+    .replace(/^(?:\s*\[(?:MAX|TG|Telegram)\]\s*)+/i, "")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\bt\.me\/\S+/gi, " ")
+    .replace(/\bmax\.ru\/\S+/gi, " ")
+    .replace(/@[A-Za-z0-9_]{3,}/g, " ")
+    .replace(/#[A-Za-zА-Яа-яЁё0-9_]+/g, " ")
+    .replace(/(?:\+?\d[\s().-]*){7,}/g, " ");
+  const tokens = cleaned.toLowerCase().match(/[a-zа-яё0-9]+/gi);
+  return tokens ? tokens.join(" ") : "";
+}
+
+export function buildCarContentKeys(carOrCaption) {
+  const rawCaption = typeof carOrCaption === "string"
+    ? carOrCaption
+    : String(carOrCaption?.caption || "");
+  const keys = [];
+  const normText = normalizePostDedupText(rawCaption);
+  if (normText.length >= 24) keys.push("txt:" + normText);
+
+  const meta = parseVehicleCardData({ caption: rawCaption });
+  const yearNum = String(meta.year || "").match(/\b(20\d{2})\b/)?.[1] || "";
+  const mileageNum = meta.isNew ? "new" : String(meta.mileage || "").replace(/[^\d]/g, "");
+  const titleTokens = (String(meta.title || "").toLowerCase().match(/[a-zа-яё0-9]+/gi) || [])
+    .filter(tok => !DEDUP_STOP_WORDS.has(tok));
+  const modelTokens = titleTokens.slice(0, 3).join(" ");
+
+  if (meta.brand !== "Другие" && yearNum && modelTokens) {
+    const brandLower = meta.brand.toLowerCase();
+    if (mileageNum && meta.priceRub) {
+      keys.push("spec_full:" + [brandLower, modelTokens, yearNum, mileageNum, meta.priceRub].join("|"));
+    }
+    if (mileageNum && mileageNum !== "new" && mileageNum.length >= 3) {
+      keys.push("spec_ym:" + [brandLower, modelTokens, yearNum, mileageNum].join("|"));
+    }
+    if (meta.isNew && meta.priceRub) {
+      keys.push("spec_new:" + [brandLower, modelTokens, yearNum, meta.priceRub].join("|"));
+    }
+  }
+  return [...new Set(keys)];
+}
+
+export function isCarListingPost({ text, hasMedia = true } = {}) {
+  if (!hasMedia) return false;
+  const rawText = String(text || "").trim();
+  if (!rawText || rawText.toLowerCase() === "исправить") return false;
+  if (isMarketNewsRecord({ text: rawText })) return false;
+  if (/(?:спасибо|благодар|довольного\s+клиента|довольных\s+клиентов|прилетел\s+отзыв|очередной\s+отзыв)/i.test(rawText)) {
+    return false;
+  }
+  const firstLine = cleanCarDisplayCaption(rawText)
+    .split("\n")
+    .map(l => l.trim())
+    .find(Boolean) || "";
+  if (
+    /\?\s*$/.test(firstLine) ||
+    /^(?:здравствуйте|добрый\s+(?:день|вечер)|всем\s+привет|подскажите|сколько\s+стоит|хочу\s+(?:заказать|купить)|ищу\s+|кто\s+может)/i.test(firstLine)
+  ) {
+    return false;
+  }
+
+  const meta = parseVehicleCardData({ caption: rawText });
+  if (
+    meta.brand !== "Другие" &&
+    (Boolean(meta.year) ||
+      Boolean(meta.mileage) ||
+      Boolean(meta.priceRub) ||
+      Boolean(meta.engineChip) ||
+      Boolean(meta.powerChip) ||
+      /(?:под\s+ключ|пробег|год\s+выпуска|двигател|мощност|привод|комплектаци)/i.test(rawText))
+  ) {
+    return true;
+  }
+
+  const specHits = [
+    Boolean(meta.year),
+    Boolean(meta.mileage),
+    Boolean(meta.priceRub),
+    /(?:двигател|топливо|мощност|привод)/i.test(rawText)
+  ].filter(Boolean).length;
+  return specHits >= 2;
 }
 
